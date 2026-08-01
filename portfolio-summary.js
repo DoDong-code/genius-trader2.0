@@ -49,11 +49,11 @@
       summary.setAttribute('aria-label', '当前账户汇总');
       summary.innerHTML =
         '<div class="portfolio-summary-item">' +
-          '<span>账户资产</span>' +
+          '<span><span class="desktop-label">账户资产</span><span class="mobile-label">资产</span></span>' +
           '<strong data-portfolio-total></strong>' +
         '</div>' +
         '<div class="portfolio-summary-item portfolio-summary-today">' +
-          '<span>今日收益</span>' +
+          '<span><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></span>' +
           '<strong data-portfolio-today></strong>' +
         '</div>';
       if (tabs) tabs.after(summary);

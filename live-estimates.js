@@ -52,6 +52,12 @@
       : null;
   }
 
+  function formatMMDD(dateStr) {
+    if (!dateStr || typeof dateStr !== 'string') return '';
+    var match = dateStr.match(/(\d{2})[-/](\d{2})$/);
+    return match ? match[1] + '-' + match[2] : '';
+  }
+
   function setFundMeta(row, fund) {
     var meta = row && row.querySelector('.fund-info small');
     if (!meta || !fund) return;
@@ -64,7 +70,22 @@
     meta.dataset.fundMeta = text;
     meta.replaceChildren();
     if (badge) meta.appendChild(badge);
-    meta.appendChild(document.createTextNode(text));
+
+    var codeSpan = document.createElement('span');
+    codeSpan.className = 'fund-code-text';
+    codeSpan.textContent = fund.code;
+
+    var sepSpan = document.createElement('span');
+    sepSpan.className = 'fund-meta-sep';
+    sepSpan.textContent = ' \u00b7 ';
+
+    var sectorSpan = document.createElement('span');
+    sectorSpan.className = 'fund-sector-text';
+    sectorSpan.textContent = sector;
+
+    meta.appendChild(codeSpan);
+    meta.appendChild(sepSpan);
+    meta.appendChild(sectorSpan);
   }
 
   function updateTodayCell(row, change, profit) {
@@ -89,12 +110,20 @@
     var meta = row.querySelector('.fund-info small');
     if (!meta) return;
     setFundMeta(row, fund || currentFund(row.dataset.code));
-    if (meta.querySelector('.nav-updated-badge')) return;
-    var badge = document.createElement('span');
-    badge.className = 'nav-updated-badge';
-    badge.textContent = '已更新';
+    var mmddHyphen = formatMMDD(date);
+    var mmddNoHyphen = mmddHyphen.replace('-', '');
+    var desktopText = '已更新' + (mmddNoHyphen || mmddHyphen || '');
+    var mobileText = mmddHyphen || ('已更新' + (mmddNoHyphen || ''));
+    var badge = meta.querySelector('.nav-updated-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-updated-badge';
+    }
+    badge.innerHTML = '<span class="desktop-tag-text">' + desktopText + '</span><span class="mobile-tag-text">' + mobileText + '</span>';
     badge.title = date ? '净值更新至 ' + date : '净值已更新';
-    meta.insertBefore(badge, meta.firstChild);
+    if (meta.firstChild !== badge) {
+      meta.insertBefore(badge, meta.firstChild);
+    }
   }
 
   function clearNavUpdated(row) {
@@ -135,16 +164,23 @@
   }
 
   function officialNavChange(snapshot, navDate) {
+    if (!snapshot || !navDate) return null;
     var history = Array.isArray(snapshot && snapshot.history) ? snapshot.history.slice() : [];
     var records = history
       .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
       .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
     var currentIndex = records.findIndex(function (item) { return item.date === navDate; });
-    if (currentIndex <= 0) return null;
-    var current = Number(records[currentIndex].nav);
-    var previous = Number(records[currentIndex - 1].nav);
-    if (!Number.isFinite(current) || !Number.isFinite(previous) || previous === 0) return null;
-    return current / previous - 1;
+    if (currentIndex > 0) {
+      var current = Number(records[currentIndex].nav);
+      var previous = Number(records[currentIndex - 1].nav);
+      if (!Number.isNaN(current) && !Number.isNaN(previous) && previous > 0) {
+        return current / previous - 1;
+      }
+    }
+    if (snapshot.latest_nav && snapshot.latest_nav.date === navDate && Number.isFinite(Number(snapshot.latest_nav.changePercent))) {
+      return Number(snapshot.latest_nav.changePercent);
+    }
+    return null;
   }
 
   function runTask(task) {
@@ -176,13 +212,24 @@
       return Promise.allSettled([refreshFund(code), estimateFund(code, fund.amount)]).then(function (results) {
         if (!row.isConnected) return;
         var snapshot = results[0].status === 'fulfilled' ? results[0].value || {} : {};
+        var payload = results[1].status === 'fulfilled' ? results[1].value || {} : {};
+        var estimate = payload.estimate || payload;
+
         var navDate = snapshot.latest_nav && snapshot.latest_nav.date;
         if (!navDate && snapshot.fund && snapshot.fund.latest_nav) navDate = snapshot.fund.latest_nav.date;
-        // A same-day NAV date alone is not enough to call the fund "updated".
-        // It must also have a prior NAV record so today's official change can be
-        // calculated. Otherwise the list and the detail drawer can disagree.
-        var officialChange = navDate === shanghaiDate() ? officialNavChange(snapshot, navDate) : NaN;
-        var officialUpdated = Number.isFinite(officialChange);
+        if (!navDate && estimate && estimate.nav_date) navDate = estimate.nav_date;
+
+        if (navDate) {
+          window.latestFundDataDate = navDate;
+          if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
+        }
+
+        var officialChange = officialNavChange(snapshot, navDate);
+        if (!Number.isFinite(officialChange) && estimate && Number.isFinite(Number(estimate.estimate_change))) {
+          officialChange = Number(estimate.estimate_change);
+        }
+
+        var officialUpdated = Boolean(navDate && Number.isFinite(officialChange));
         if (officialUpdated) {
           fund.navUpdatedAt = navDate;
           markNavUpdated(row, navDate, fund);
@@ -193,6 +240,10 @@
 
         var payload = results[1].status === 'fulfilled' ? results[1].value || {} : {};
         var estimate = payload.estimate || payload;
+        if (estimate && estimate.nav_date && !window.latestFundDataDate) {
+          window.latestFundDataDate = estimate.nav_date;
+          if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
+        }
         var manualDate = fund.manualEstimateDate;
         var hasManualEstimate = manualDate === shanghaiDate() && Number.isFinite(Number(fund.manualToday));
         var manualUnavailable = manualDate === shanghaiDate() && fund.manualEstimateUnavailable === true;

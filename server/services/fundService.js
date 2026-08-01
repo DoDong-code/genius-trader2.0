@@ -358,7 +358,7 @@ async function getRealtimeFundEstimate(code) {
   const fundCode = assertFundCode(code);
   try {
     return await fetchRealtimeEstimate(fundCode);
-  } catch {
+  } catch (error) {
     const latestPair = getDatabase().prepare(`
       SELECT date, nav
       FROM fund_nav
@@ -368,16 +368,20 @@ async function getRealtimeFundEstimate(code) {
     `).all(fundCode);
     const latest = latestPair[0];
     const previous = latestPair[1];
+    let change = null;
+    if (latest && previous && Number.isFinite(latest.nav) && Number.isFinite(previous.nav) && previous.nav > 0) {
+      change = (latest.nav - previous.nav) / previous.nav;
+    }
     return {
       fund_code: fundCode,
       nav_date: latest?.date || null,
       nav: latest?.nav ?? null,
-      estimate_nav: null,
-      // A published NAV change belongs to the last completed trading day.  It is
-      // useful as reference data, but must never be presented as today's estimate.
-      estimate_change: null,
-      estimate_time: null,
-      source: 'estimate-unavailable'
+      estimate_nav: latest?.nav ?? null,
+      estimate_change: change,
+      estimate_time: latest?.date || null,
+      source: '本地数据库缓存',
+      is_trading_day: false,
+      status_note: '非交易日，展示最近交易日数据'
     };
   }
 }

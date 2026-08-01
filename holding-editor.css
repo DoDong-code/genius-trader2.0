@@ -6,25 +6,46 @@
   left: auto;
 }
 
-.detail-edit-holding {
-  position: absolute;
-  top: 72px;
-  right: 68px;
-  border: 0;
-  background: transparent;
-  color: #86868b;
-  padding: 8px 4px;
-  font: 600 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
-  cursor: pointer;
-  letter-spacing: .01em;
+.real-detail-drawer .drawer-scroll {
+  position: relative;
 }
 
-.detail-edit-holding:hover { color: #0071e3; }
+.detail-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 9px 0;
+}
+
+.detail-title-row h2 {
+  margin: 0 !important;
+  flex: 1;
+  min-width: 0;
+}
+
+.detail-edit-holding {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: #0071e3;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font: 600 13px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  cursor: pointer;
+  letter-spacing: .01em;
+  white-space: nowrap;
+}
+
+.detail-edit-holding:hover {
+  color: #0077ed;
+  background: rgba(0, 113, 227, .06);
+}
 
 .detail-edit-holding:focus-visible {
   outline: 3px solid rgba(0, 113, 227, .28);
-  outline-offset: 3px;
-  border-radius: 7px;
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 .holding-editor-overlay { z-index: 180; }
@@ -112,7 +133,6 @@
 .holding-editor [hidden] { display: none !important; }
 
 @media (max-width: 520px) {
-  .detail-edit-holding { top: 67px; right: 60px; }
   .holding-summary,
   .holding-edit-grid { grid-template-columns: 1fr; }
   .holding-action-switch { grid-template-columns: 1fr; }

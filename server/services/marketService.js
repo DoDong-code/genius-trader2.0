@@ -41,6 +41,40 @@ async function fetchText(url, options = {}) {
   throw error;
 }
 
+function shanghaiDateString(value = Date.now()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date(value));
+}
+
+function isTradingDay(dateStr = shanghaiDateString()) {
+  const d = new Date(dateStr + 'T00:00:00+08:00');
+  const dayOfWeek = d.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+  const holidays = [
+    '2026-01-01', '2026-01-02',
+    '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23', '2026-02-24',
+    '2026-04-06',
+    '2026-05-01', '2026-05-04', '2026-05-05',
+    '2026-06-19',
+    '2026-09-25',
+    '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+  ];
+  return !holidays.includes(dateStr);
+}
+
+function getLatestTradingDay(fromDateStr = shanghaiDateString()) {
+  let curr = new Date(fromDateStr + 'T00:00:00+08:00');
+  while (true) {
+    const ds = shanghaiDateString(curr);
+    if (isTradingDay(ds)) return ds;
+    curr.setDate(curr.getDate() - 1);
+  }
+}
+
 function parseJsonp(source) {
   const match = String(source || '').match(/^[^(]*\(([\s\S]*)\)\s*;?\s*$/);
   if (!match) return null;
@@ -64,22 +98,99 @@ function parseEstimate(source) {
     estimate_nav: Number.isFinite(estimateNav) ? estimateNav : null,
     estimate_change: Number.isFinite(estimateChange) ? estimateChange / 100 : null,
     estimate_time: payload.gztime || null,
-    source: 'fundgz'
+    source: '天天基金 (主接口)'
   };
 }
 
 async function fetchRealtimeEstimate(code) {
-  const source = await fetchText(`${EASTMONEY_FUND_ESTIMATE}/js/${code}.js`, {
-    referer: `${EASTMONEY_FUND}/${code}.html`,
-    attempts: 2,
-    timeout: 8000
-  });
-  const estimate = parseEstimate(source);
+  const todayStr = shanghaiDateString();
+  const tradingDay = isTradingDay(todayStr);
+  const latestTradingDay = getLatestTradingDay(todayStr);
+
+  let estimate = null;
+
+  // 1. Primary Source: 天天基金 pingzhongdata / fundgz
+  try {
+    const source = await fetchText(`${EASTMONEY_FUND}/pingzhongdata/${code}.js?v=${Date.now()}`, {
+      referer: `${EASTMONEY_FUND}/${code}.html`,
+      attempts: 2,
+      timeout: 4000
+    });
+    const nameMatch = source.match(/fS_name\s*=\s*\"([^\"]+)\"/);
+    const trendMatch = source.match(/Data_netWorthTrend\s*=\s*(\[[^;]+\]);/);
+    if (trendMatch) {
+      const arr = JSON.parse(trendMatch[1]);
+      const last = arr[arr.length - 1];
+      if (last) {
+        const date = shanghaiDateString(Number(last.x));
+        estimate = {
+          fund_code: String(code),
+          fund_name: nameMatch ? nameMatch[1] : null,
+          nav_date: date,
+          nav: Number(last.y),
+          estimate_nav: Number(last.y),
+          estimate_change: last.equityReturn != null ? Number(last.equityReturn) / 100 : null,
+          estimate_time: date,
+          source: '天天基金 (主接口)'
+        };
+      }
+    }
+  } catch (e) {
+    // Try legacy fundgz
+    try {
+      const gzSource = await fetchText(`${EASTMONEY_FUND_ESTIMATE}/js/${code}.js`, {
+        referer: `${EASTMONEY_FUND}/${code}.html`,
+        attempts: 1,
+        timeout: 3000
+      });
+      estimate = parseEstimate(gzSource);
+    } catch (gzErr) {}
+  }
+
+  // 2. Backup Secondary Source: 东方财富 API
+  if (!estimate || !estimate.nav_date) {
+    try {
+      const url = new URL('/f10/lsjz', EASTMONEY_FUND_API);
+      url.searchParams.set('fundCode', code);
+      url.searchParams.set('pageIndex', '1');
+      url.searchParams.set('pageSize', '2');
+      const text = await fetchText(url, {
+        accept: 'application/json,*/*',
+        referer: `${EASTMONEY_FUND}/f10/jjjz_${code}.html`,
+        attempts: 2,
+        timeout: 4000
+      });
+      const parsed = parseHistoryPayload(text);
+      if (parsed.history && parsed.history[0]) {
+        const top = parsed.history[0];
+        estimate = {
+          fund_code: String(code),
+          fund_name: null,
+          nav_date: top.date,
+          nav: top.nav,
+          estimate_nav: top.nav,
+          estimate_change: top.changePercent,
+          estimate_time: top.date,
+          source: '东方财富 (备用接口)'
+        };
+      }
+    } catch (secErr) {}
+  }
+
   if (!estimate) {
-    const error = new Error(`基金 ${code} 暂无实时估值`);
+    const error = new Error(`基金 ${code} 暂无可用的实时或历史行情`);
     error.statusCode = 404;
     throw error;
   }
+
+  estimate.is_trading_day = tradingDay;
+  estimate.latest_trading_day = latestTradingDay;
+  if (!tradingDay || estimate.nav_date !== todayStr) {
+    estimate.status_note = '非交易日，展示最近交易日数据';
+  } else {
+    estimate.status_note = '数据正常';
+  }
+
   return estimate;
 }
 
@@ -174,20 +285,22 @@ async function fetchTiantianHistory(code, options = {}) {
 
 async function fetchHistory(code, options = {}) {
   try {
-    const history = await fetchEastmoneyHistory(code, options);
-    if (!history.length) throw new Error('Eastmoney returned no NAV records');
-    return options.withMeta ? { history, source: 'eastmoney-lsjz', fallback: false } : history;
-  } catch (primaryError) {
     const history = await fetchTiantianHistory(code, options);
-    if (!history.length) {
-      const error = new Error(`No historical NAV records available for ${code}`);
+    if (!history.length) throw new Error('Tiantian returned no NAV records');
+    return options.withMeta ? { history, source: '天天基金 (主接口)', fallback: false } : history;
+  } catch (primaryError) {
+    try {
+      const history = await fetchEastmoneyHistory(code, options);
+      if (!history.length) throw new Error('Eastmoney returned no NAV records');
+      return options.withMeta
+        ? { history, source: '东方财富 (备用接口)', fallback: true, primaryError: primaryError.message }
+        : history;
+    } catch (secondaryError) {
+      const error = new Error(`未能在天天基金和东方财富获取到基金 ${code} 的历史净值`);
       error.statusCode = 502;
-      error.cause = primaryError;
+      error.cause = secondaryError;
       throw error;
     }
-    return options.withMeta
-      ? { history, source: 'tiantian-f10', fallback: true, primaryError: primaryError.message }
-      : history;
   }
 }
 

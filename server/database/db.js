@@ -106,6 +106,19 @@ function initialize(db) {
 
     CREATE INDEX IF NOT EXISTS idx_portfolio_account
       ON portfolio (account_id);
+
+    CREATE TABLE IF NOT EXISTS fund_calibration (
+      fund_code TEXT PRIMARY KEY,
+      optimal_holdings_weight REAL NOT NULL,
+      optimal_sector_weight REAL NOT NULL,
+      cash_adjustment REAL NOT NULL DEFAULT 0,
+      mae REAL,
+      rmse REAL,
+      direction_accuracy REAL,
+      sample_size INTEGER NOT NULL DEFAULT 0,
+      calibrated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (fund_code) REFERENCES fund(fund_code) ON DELETE CASCADE
+    );
   `);
 
   const stockColumns = db.prepare('PRAGMA table_info(stock_price)').all();

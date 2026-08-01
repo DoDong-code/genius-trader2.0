@@ -11,6 +11,7 @@ const {
   calculateFundEstimate,
   calculateAccountEstimate
 } = require('../services/estimateEngine');
+const { calibrateFund } = require('../services/calibrationEngine');
 const { fetchStockQuote } = require('../services/marketService');
 
 function sendJson(response, statusCode, payload) {
@@ -78,6 +79,15 @@ async function handleFundApi(request, response, url) {
       force: url.searchParams.get('force') === '1'
     });
     sendJson(response, 200, { success: true, ...estimate });
+    return true;
+  }
+
+  match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/calibration$/);
+  if (match) {
+    const calibration = calibrateFund(match[0], {
+      force: url.searchParams.get('recalibrate') === '1'
+    });
+    sendJson(response, 200, { success: true, calibration });
     return true;
   }
 

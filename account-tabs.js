@@ -20,6 +20,24 @@
     return (rate > 0 ? '+' : '') + rate.toFixed(2) + '%';
   }
 
+  function isTradingDay(date) {
+    var day = date.getDay();
+    if (day === 0 || day === 6) return false;
+    var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(date);
+    var holidays = [
+      '2026-01-01', '2026-01-02',
+      '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23', '2026-02-24',
+      '2026-04-06',
+      '2026-05-01', '2026-05-04', '2026-05-05',
+      '2026-06-19',
+      '2026-09-25',
+      '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+    ];
+    return holidays.indexOf(yyyymmdd) === -1;
+  }
+
   function setText(node, value) {
     if (node && node.textContent !== value) node.textContent = value;
   }
@@ -73,11 +91,21 @@
     setText(items[1].querySelector('.kpi-value'), '¥0.00');
     setText(items[1].querySelector('.kpi-sub'), '0.00%');
 
+    function formatMMDD(dateStr) {
+      if (!dateStr || typeof dateStr !== 'string') return '';
+      var match = dateStr.match(/(\d{2})[-/](\d{2})$/);
+      return match ? match[1] + match[2] : '';
+    }
+    var mmdd = formatMMDD(window.latestFundDataDate);
+    var updatedText = '已更新' + (mmdd || '');
+
+    var trading = isTradingDay(new Date());
+    setText(items[2].querySelector('.kpi-label'), trading ? '今日估算收益' : '最近交易日收益');
     setText(items[2].querySelector('.kpi-value'), money(data.todayProfit));
     setHtml(
       items[2].querySelector('.kpi-sub'),
       '<span class="estimate-state' + (data.navUpdated ? ' updated' : '') + '">' +
-        (data.navUpdated ? '已更新' : '估算') +
+        (data.navUpdated ? updatedText : (trading ? '估算' : '非交易日')) +
       '</span><span>' + percent(data.todayRate) + '</span>'
     );
 

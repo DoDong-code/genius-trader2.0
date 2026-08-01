@@ -91,10 +91,15 @@
 
   function resolveTodayData(fund, payload = {}) {
     const history = payload.history || [];
-    const navDate = payload.latest_nav?.date || payload.fund?.latest_nav?.date || null;
-    const official = navDate === shanghaiDate();
-    const officialChange = official ? officialNavChange(history, navDate) : null;
-    if (Number.isFinite(officialChange)) {
+    const navDate = payload.latest_nav?.date || payload.fund?.latest_nav?.date || payload.estimate?.nav_date || null;
+    let officialChange = navDate ? officialNavChange(history, navDate) : null;
+    if (!Number.isFinite(officialChange) && navDate && payload.latest_nav?.date === navDate && Number.isFinite(Number(payload.latest_nav?.changePercent))) {
+      officialChange = Number(payload.latest_nav.changePercent);
+    }
+    if (!Number.isFinite(officialChange) && navDate && payload.estimate?.nav_date === navDate && Number.isFinite(Number(payload.estimate?.estimate_change))) {
+      officialChange = Number(payload.estimate.estimate_change);
+    }
+    if (navDate && Number.isFinite(officialChange)) {
       return { official: true, navDate, change: officialChange, profit: fund.amount * officialChange };
     }
 
@@ -113,10 +118,10 @@
     }
 
     // The list may already have refreshed a same-day manual/official value.
-    const localIsCurrent = manualIsCurrent || fund.navUpdatedAt === shanghaiDate();
+    const localIsCurrent = manualIsCurrent || Boolean(fund.navUpdatedAt);
     const localChange = Number(fund.today);
     if (localIsCurrent && Number.isFinite(localChange)) {
-      return { official: fund.navUpdatedAt === shanghaiDate(), navDate: fund.navUpdatedAt || null, change: localChange, profit: fund.amount * localChange };
+      return { official: Boolean(fund.navUpdatedAt), navDate: fund.navUpdatedAt || null, change: localChange, profit: fund.amount * localChange };
     }
     return { official: false, navDate: null, change: null, profit: null };
   }
@@ -485,11 +490,13 @@
     backdrop.className = 'drawer-backdrop real-detail-drawer';
     backdrop.innerHTML = `
       <aside class="detail-drawer" role="dialog" aria-modal="true" aria-labelledby="real-detail-title">
-        <button type="button" class="detail-edit-holding" data-edit-holding>修改持仓</button>
         <button class="drawer-close" aria-label="关闭详情">×</button>
         <div class="drawer-scroll">
           <p class="eyebrow detail-api-type">${escapeHtml(fund.category || '基金')} · 基金详情</p>
-          <h2 id="real-detail-title">${escapeHtml(fund.name)}</h2>
+          <div class="detail-title-row">
+            <h2 id="real-detail-title">${escapeHtml(fund.name)}</h2>
+            <button type="button" class="detail-edit-holding" data-edit-holding>修改持仓</button>
+          </div>
           <p class="detail-code">${escapeHtml(fund.code)}</p>
 
           <div class="detail-values">

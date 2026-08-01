@@ -1,6 +1,7 @@
 const { getDatabase } = require('../database/db');
 const { assertFundCode, getFund, getRealtimeFundEstimate } = require('./fundService');
 const { fetchStockQuote } = require('./marketService');
+const { calibrateFund } = require('./calibrationEngine');
 const config = require('../config/estimateConfig');
 
 function round(value, digits = 6) {
@@ -149,16 +150,21 @@ async function calculateFundEstimate(code, options = {}) {
     }
   }
 
+  const calibration = calibrateFund(fundCode, { force: options.force });
+  const holdingsWeight = calibration.holdings_weight ?? config.holdingsWeight;
+  const sectorWeight = calibration.sector_weight ?? config.sectorWeight;
+  const cashAdjustment = calibration.cash_adjustment ?? config.cashAdjustment;
+
   let estimateChange;
   let fallback = null;
   if (Number.isFinite(holdingsChange) && Number.isFinite(sectorQuote?.change_percent)) {
-    estimateChange = holdingsChange * config.holdingsWeight
-      + sectorQuote.change_percent * config.sectorWeight
-      - config.cashAdjustment;
+    estimateChange = holdingsChange * holdingsWeight
+      + sectorQuote.change_percent * sectorWeight
+      - cashAdjustment;
   } else if (Number.isFinite(holdingsChange)) {
-    estimateChange = holdingsChange - config.cashAdjustment;
+    estimateChange = holdingsChange - cashAdjustment;
   } else if (Number.isFinite(sectorQuote?.change_percent)) {
-    estimateChange = sectorQuote.change_percent - config.cashAdjustment;
+    estimateChange = sectorQuote.change_percent - cashAdjustment;
     fallback = 'sector-only';
   } else {
     const publicEstimate = await getRealtimeFundEstimate(fundCode);
@@ -190,13 +196,21 @@ async function calculateFundEstimate(code, options = {}) {
     holdings_change: Number.isFinite(holdingsChange) ? round(holdingsChange) : null,
     sector_change: Number.isFinite(sectorQuote?.change_percent)
       ? round(sectorQuote.change_percent) : null,
-    cash_adjustment: config.cashAdjustment,
+    cash_adjustment: cashAdjustment,
     confidence,
     quote_coverage: holdings.length ? round(pricedHoldings.length / holdings.length, 4) : 0,
     holdings_weight_coverage: round(publishedWeight, 4),
     holdings_report_date: holdings[0]?.report_date || null,
     benchmark: benchmark ? { ...benchmark, sector: sectorKey } : null,
-    weights: { holdings: config.holdingsWeight, sector: config.sectorWeight },
+    weights: { holdings: holdingsWeight, sector: sectorWeight },
+    calibration: {
+      calibrated: calibration.calibrated,
+      mae: calibration.mae,
+      rmse: calibration.rmse,
+      direction_accuracy: calibration.direction_accuracy,
+      sample_size: calibration.sample_size,
+      calibrated_at: calibration.calibrated_at
+    },
     fallback,
     calculated_at: new Date().toISOString(),
     cached: false

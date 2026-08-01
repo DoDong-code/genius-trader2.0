@@ -190,16 +190,21 @@
     if (!section.querySelector('.holding-head')) {
       const head = document.createElement('div');
       head.className = 'holding-head';
-      head.innerHTML = '<span>基金</span><span><button type="button" class="holding-sort-button" data-sort-key="holdingProfit" aria-sort="none">持有收益</button></span><span><button type="button" class="holding-sort-button" data-sort-key="todayProfit" aria-sort="none">今日收益</button></span><span><button type="button" class="holding-sort-button" data-sort-key="amount" aria-sort="none">持有金额</button></span>';
+      head.innerHTML = '<span>基金</span><span><button type="button" class="holding-sort-button" data-sort-key="holdingProfit" aria-sort="none"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></button></span><span><button type="button" class="holding-sort-button" data-sort-key="todayProfit" aria-sort="none"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></button></span><span><button type="button" class="holding-sort-button" data-sort-key="amount" aria-sort="none"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></button></span>';
       section.querySelector('.fund-list').before(head);
     }
 
     const header = section.querySelector('.holding-head');
-    const labels = ['持有收益', '今日收益', '持有金额'];
-    header?.querySelectorAll('span:not(:first-child)').forEach((cell, index) => {
+    const labels = [
+      { desktop: '持有收益', mobile: '持有' },
+      { desktop: '今日收益', mobile: '今日' },
+      { desktop: '持有金额', mobile: '金额' }
+    ];
+    Array.from(header?.children || []).filter(c => c.tagName === 'SPAN').slice(1).forEach((cell, index) => {
       if (cell.querySelector('[data-sort-key]')) return;
+      if (!labels[index]) return;
       const key = index === 0 ? 'holdingProfit' : index === 1 ? 'todayProfit' : 'amount';
-      cell.innerHTML = `<button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="none">${labels[index]}</button>`;
+      cell.innerHTML = `<button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="none"><span class="desktop-label">${labels[index].desktop}</span><span class="mobile-label">${labels[index].mobile}</span></button>`;
     });
 
     const account = window.portfolioState.accounts[window.portfolioState.getActive()];
@@ -268,7 +273,10 @@
       root.querySelectorAll('[data-sort-key]').forEach(button => {
         const active = button.dataset.sortKey === sortKey && sortDirection !== 'default';
         const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
-        button.textContent = `${button.dataset.sortKey === 'holdingProfit' ? '持有收益' : button.dataset.sortKey === 'todayProfit' ? '今日收益' : '持有金额'}${arrow}`;
+        const key = button.dataset.sortKey;
+        const dText = key === 'holdingProfit' ? '持有收益' : key === 'todayProfit' ? '今日收益' : '持有金额';
+        const mText = key === 'holdingProfit' ? '持有' : key === 'todayProfit' ? '今日' : '金额';
+        button.innerHTML = `<span class="desktop-label">${dText}${arrow}</span><span class="mobile-label">${mText}${arrow}</span>`;
         button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
       });
     };

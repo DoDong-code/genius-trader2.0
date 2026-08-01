@@ -1,4 +1,4 @@
-.account-list{border-top:1px solid rgba(0,0,0,.1)}.account-card{width:100%;display:grid;grid-template-columns:1fr 190px 20px;align-items:center;gap:20px;text-align:left;padding:23px 10px;border:0;border-bottom:1px solid rgba(0,0,0,.08);background:transparent;color:#1d1d1f;cursor:pointer;transition:background-color 160ms ease,transform 160ms ease}.account-card:hover{background:rgba(255,255,255,.8)}.account-card:active{transform:scale(.995)}.account-card b{display:block;font-size:16px}.account-card small{display:block;color:#86868b;margin-top:7px;font-size:12px}.account-card strong{display:block;font-size:19px;font-variant-numeric:tabular-nums}.account-card span:not(.row-chevron){display:block;font-size:12px;margin-top:6px}.holding-head{display:grid;grid-template-columns:minmax(0,1fr) 150px 150px 110px 20px;gap:18px;color:#86868b;font-size:12px;padding:12px 10px;border-bottom:1px solid rgba(0,0,0,.1)}.category-tabs{display:flex;gap:6px;margin:4px 0 14px}.category-tab{border:0;background:transparent;color:#86868b;padding:8px 14px;border-radius:9px;font:inherit;font-size:13px;cursor:pointer}.category-tab:hover{background:#f0f0f2;color:#1d1d1f}.category-tab.active{background:#e8e8ed;color:#1d1d1f;font-weight:600}.fund-row{grid-template-columns:minmax(0,1fr) 150px 150px 110px 20px}.fund-est,.fund-today,.fund-amount{font-variant-numeric:tabular-nums}.fund-est strong,.fund-today strong{display:block;font-size:15px;font-weight:600}.fund-est span,.fund-today span{display:block;color:#86868b;font-size:12px;margin-top:5px}.fund-amount{font-size:15px;font-weight:600}.empty-state{padding:45px 10px;color:#86868b;text-align:center;font-size:13px}.analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:52px}.analysis-block{border-top:1px solid rgba(0,0,0,.1);padding-top:20px}.analysis-block h2{font-size:24px;margin:8px 0 24px}.allocation{margin:19px 0;color:#6e6e73;font-size:13px}.allocation div{display:flex;justify-content:space-between;margin-bottom:8px}.allocation b{color:#1d1d1f;font-weight:500}.allocation i{display:block;height:5px;border-radius:8px;background:#0071e3}.analysis-page .observation{margin-top:48px}@media(max-width:760px){.account-card{grid-template-columns:1fr auto 18px;gap:10px}.account-card strong{font-size:16px}.holding-head{display:none}.fund-row{grid-template-columns:minmax(0,1fr) auto 18px;gap:9px}.fund-est,.fund-today{display:block}.fund-amount{grid-column:1;grid-row:2;font-size:14px}.fund-today{grid-column:2;grid-row:1}.fund-est{grid-column:2;grid-row:2}.row-chevron{grid-column:3;grid-row:1 / span 2}.analysis-columns{grid-template-columns:1fr;gap:34px}.analysis-page .observation{margin-top:34px}}
+.account-list{border-top:1px solid rgba(0,0,0,.1)}.account-card{width:100%;display:grid;grid-template-columns:1fr 190px 20px;align-items:center;gap:20px;text-align:left;padding:23px 10px;border:0;border-bottom:1px solid rgba(0,0,0,.08);background:transparent;color:#1d1d1f;cursor:pointer;transition:background-color 160ms ease,transform 160ms ease}.account-card:hover{background:rgba(255,255,255,.8)}.account-card:active{transform:scale(.995)}.account-card b{display:block;font-size:16px}.account-card small{display:block;color:#86868b;margin-top:7px;font-size:12px}.account-card strong{display:block;font-size:19px;font-variant-numeric:tabular-nums}.account-card span:not(.row-chevron){display:block;font-size:12px;margin-top:6px}.holding-head,.holding-table-header{display:grid !important;grid-template-columns:minmax(360px,1fr) 170px 170px 150px !important;column-gap:30px !important;align-items:center !important;width:100% !important;color:#86868b !important;font-size:12px !important;padding:12px 0 !important;border-bottom:1px solid rgba(0,0,0,.1) !important;box-sizing:border-box !important;}.category-tabs{display:flex;gap:6px;margin:4px 0 14px}.category-tab{border:0;background:transparent;color:#86868b;padding:8px 14px;border-radius:999px;font:inherit;font-size:13px;cursor:pointer}.category-tab:hover{background:#f0f0f2;color:#1d1d1f}.category-tab.active{background:#e8e8ed;color:#1d1d1f;font-weight:600}.fund-row,.holding-row{display:grid !important;grid-template-columns:minmax(360px,1fr) 170px 170px 150px !important;column-gap:30px !important;align-items:center !important;width:100% !important;padding:16px 0 !important;border-bottom:1px solid rgba(20,20,24,0.08) !important;box-sizing:border-box !important;}.fund-est,.fund-today,.fund-amount{font-variant-numeric:tabular-nums !important;display:flex !important;flex-direction:column !important;align-items:flex-end !important;justify-content:center !important;text-align:right !important;gap:3px !important;min-width:0 !important;width:100% !important;}.fund-est strong,.fund-today strong,.fund-amount strong{display:block !important;font-size:15px !important;font-weight:600 !important;white-space:nowrap !important;text-align:right !important;}.fund-est span,.fund-today span{display:block !important;color:#86868b !important;font-size:12px !important;white-space:nowrap !important;text-align:right !important;}.fund-amount{color:#1d1d1f !important;font-size:15px !important;font-weight:600 !important;}.fund-amount span{display:none !important;}.empty-state{padding:45px 10px;color:#86868b;text-align:center;font-size:13px}.analysis-columns{display:grid;grid-template-columns:1fr 1fr;gap:52px}.analysis-block{border-top:1px solid rgba(0,0,0,.1);padding-top:20px}.analysis-block h2{font-size:24px;margin:8px 0 24px}.allocation{margin:19px 0;color:#6e6e73;font-size:13px}.allocation div{display:flex;justify-content:space-between;margin-bottom:8px}.allocation b{color:#1d1d1f;font-weight:500}.allocation i{display:block;height:5px;border-radius:8px;background:#0071e3}.analysis-page .observation{margin-top:48px}
 .account-edit-row{cursor:default;grid-template-columns:30px minmax(0,1fr) 190px}.account-check{display:grid;place-items:center;min-width:30px;min-height:44px}.account-check input{width:18px;height:18px;accent-color:#111}.account-edit-main{display:grid;gap:5px;min-width:0}.account-name-input{width:100%;border:0;background:transparent;color:#1d1d1f;font:inherit;font-weight:650;font-size:17px;padding:5px 0;border-bottom:1px solid rgba(0,0,0,.14)}.account-name-input:focus-visible{outline:2px solid #1677ff;outline-offset:4px}.secondary-button,.danger-button{min-height:44px;padding:0 16px;border-radius:999px;border:1px solid rgba(0,0,0,.14);background:#fff;color:#1d1d1f;font:inherit;font-weight:600;cursor:pointer}.secondary-button:hover{background:#f5f5f7}.danger-button{color:#c62828;border-color:#efc7c7}.danger-button:disabled{opacity:.42;cursor:not-allowed}
 .brand{background:#1d1d1f;color:#fff;padding:9px 15px;border-radius:10px;font-weight:800;letter-spacing:-.02em;text-decoration:none;cursor:pointer}.brand:hover{background:#000}.brand:focus-visible{outline:3px solid rgba(0,113,227,.35);outline-offset:3px}
 .kpis{background:#000;border:0;border-radius:28px;color:#fff;padding:38px 42px 30px;margin-bottom:44px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;box-shadow:0 18px 40px rgba(0,0,0,.08)}
@@ -22,10 +22,10 @@
 @media(max-width:760px){.kpis{padding:28px 20px 22px;border-radius:22px;grid-template-columns:1fr 1fr;gap:20px}.kpis .kpi{padding:0;border-left:0}.kpis .kpi:first-child{padding-bottom:22px;margin-bottom:0}.kpis .kpi-value{font-size:32px}}
 .account-edit-row{min-height:96px}.account-check input{appearance:none;width:22px;height:22px;border:1px solid #d2d2d7;border-radius:50%;background:#fff;position:relative}.account-check input:checked{background:#ff3b30;border-color:#ff3b30}.account-check input:checked:after{content:'×';color:#fff;position:absolute;inset:0;display:grid;place-items:center;font-size:16px;font-weight:700}.account-delete-bar{display:flex;justify-content:flex-end;padding:16px 0 0;border-top:1px solid rgba(0,0,0,.08);margin-top:4px}.account-delete-bar .danger-button{min-width:170px}
 .fund-row>div:not(.fund-info){display:flex;flex-direction:column;align-items:flex-start;gap:6px}.fund-row>div:not(.fund-info) strong{display:block;font-size:15px}.fund-row>div:not(.fund-info) span{display:block;font-size:12px;white-space:nowrap}.market-up{color:#ff3b30!important}.market-down{color:#34a853!important}.market-flat{color:#1d1d1f!important}.fund-modal{text-align:left;max-height:min(720px,calc(100vh - 48px));overflow-y:auto}.fund-modal h2,.fund-modal>p{text-align:center}.fund-modal label{display:block;margin:14px 0;color:#6e6e73;font-size:13px}.fund-modal input{display:block;width:100%;margin-top:7px;padding:12px 13px;border:1px solid rgba(0,0,0,.14);border-radius:11px;background:#f5f5f7;color:#1d1d1f;font:inherit;outline:none}.fund-modal input:focus{border-color:#0071e3;box-shadow:0 0 0 3px rgba(0,113,227,.12)}.fund-lookup-status{display:block;min-height:16px;margin:-7px 0 2px;color:#86868b;font-size:11px}.confirm-actions .fund-submit{background:#0071e3;color:#fff}
-.account-segmented{display:inline-flex;gap:4px;max-width:100%;margin:0 0 28px;padding:7px;border-radius:999px;background:#e8e8ed;overflow-x:auto;scrollbar-width:none}.account-segmented::-webkit-scrollbar{display:none}.account-segment{flex:none;min-height:44px;padding:0 21px;border:0;border-radius:999px;background:transparent;color:#3a3a3c;font:inherit;font-weight:500;cursor:pointer;white-space:nowrap}.account-segment:hover{background:rgba(255,255,255,.58)}.account-segment.active{background:#1d1d1f;color:#fff;font-weight:650;box-shadow:0 2px 8px rgba(0,0,0,.12)}@media(max-width:760px){.account-segmented{width:100%;margin-bottom:20px}.account-segment{padding:0 17px}}
+.account-segmented{display:inline-flex;gap:4px;max-width:100%;margin:0 0 28px;padding:7px;border-radius:999px;background:#e8e8ed;overflow-x:auto;scrollbar-width:none}.account-segmented::-webkit-scrollbar{display:none}.account-segment{flex:none;min-height:44px;padding:0 21px;border:0;border-radius:999px;background:transparent;color:#3a3a3c;font:inherit;font-weight:500;cursor:pointer;white-space:nowrap}.account-segment:hover{background:rgba(255,255,255,.58)}.account-segment.active{background:#1d1d1f;color:#fff;font-weight:650;box-shadow:0 2px 8px rgba(0,0,0,.12)}@media(max-width:760px){.account-segmented{width:auto;max-width:100%;margin-bottom:14px;padding:3px}.account-segment{min-height:30px;padding:0 11px;font-size:12px}}
 .account-add-bottom{display:flex;justify-content:center;padding:28px 0 4px}.account-add-bottom-button{flex:0 0 48px;width:48px;height:48px}
 .account-card:not(.account-edit-row){grid-template-columns:minmax(0,1fr) 190px;padding-right:0}.account-card>div:last-child{text-align:right}.kpis .kpi:not(:first-child) .kpi-value,.kpis .kpi:not(:first-child) .kpi-sub{color:rgba(29,29,31,.8)!important}
-.holding-head,.fund-row{grid-template-columns:minmax(0,1fr) 150px 150px 110px;padding-right:0}.holding-head>span:not(:first-child){display:flex;align-items:center;justify-content:flex-end;text-align:right}.fund-row>div:not(.fund-info){align-items:flex-end;text-align:right}.fund-amount span{color:#86868b;font-size:12px;font-weight:400}
+.holding-head,.holding-table-header,.fund-row,.holding-row{grid-template-columns:minmax(360px,1fr) 170px 170px 150px;padding-right:0}.holding-head>span:not(:first-child),.holding-table-header>span:not(:first-child){display:flex;align-items:center;justify-content:flex-end;text-align:right}.fund-row>div:not(.fund-info),.holding-row>div:not(.fund-info){align-items:flex-end;text-align:right}.fund-amount span{color:#86868b;font-size:12px;font-weight:400}
 .holding-sort-button{display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;width:100%;padding:7px 0;border:0;border-radius:7px;background:transparent;color:inherit;font:inherit;font-size:inherit;cursor:pointer;text-align:right}.holding-sort-button i{font-size:13px;font-style:normal;line-height:1;color:#6e6e73}.holding-sort-button:hover{color:#1d1d1f;background:rgba(0,0,0,.035)}.holding-sort-button:focus-visible{outline:3px solid rgba(0,113,227,.28);outline-offset:2px}
 .kpis .kpi:first-child .kpi-value{font-size:clamp(50px,6.5vw,81px)}.kpis .kpi:not(:first-child) .kpi-value{font-size:clamp(17px,1.7vw,20px)}@media(max-width:760px){.kpis .kpi:first-child .kpi-value{font-size:42px}.kpis .kpi:not(:first-child) .kpi-value{font-size:16px}}
 .kpis .kpi:first-child .kpi-value{position:relative;top:20px}@media(max-width:760px){.kpis .kpi:first-child .kpi-value{top:10px}}
@@ -34,11 +34,532 @@
 body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.drawer-scroll{overscroll-behavior:contain;touch-action:pan-y}
 .sync-status{align-items:flex-start;text-align:right}.sync-status i{flex:none;margin:0}.status-copy{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.status-time{color:#1d1d1f;font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.01em}.status-update-row{display:flex;align-items:center;gap:1em}.status-update{color:#86868b;font-size:11px;font-weight:400;white-space:nowrap}
 .name-modal input{display:block;width:100%;margin:4px 0 22px;padding:13px 14px;border:1px solid rgba(0,0,0,.14);border-radius:12px;background:#f5f5f7;color:#1d1d1f;font:inherit;outline:none;text-align:left}.name-modal input:focus{border-color:#0071e3;box-shadow:0 0 0 3px rgba(0,113,227,.12)}.confirm-actions .name-submit{background:#0071e3;color:#fff}
-.portfolio-mode .intro{display:none}.portfolio-toolbar{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:18px 24px;margin:0 0 18px}.portfolio-account-tabs{margin:0}.portfolio-data-status{display:flex;align-items:center;justify-content:flex-end;gap:16px;min-height:58px;text-align:right}.portfolio-data-status .status-copy{min-width:118px}.data-refresh-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:0 12px;border:1px solid rgba(0,0,0,.12);border-radius:999px;background:#fff;color:#1d1d1f;font:inherit;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.03);transition:background-color 160ms ease,transform 160ms ease}.data-refresh-button:hover{background:#f5f5f7}.data-refresh-button:active{transform:scale(.97)}.data-refresh-button:disabled{cursor:wait;opacity:.62}.data-refresh-button.is-refreshing{color:#6e6e73}@media(max-width:760px){.portfolio-toolbar{display:block;margin-bottom:18px}.portfolio-data-status{justify-content:flex-start;margin-top:10px}.portfolio-data-status .status-copy{align-items:flex-start;text-align:left}.portfolio-data-status .status-update-row{justify-content:flex-start}.portfolio-account-tabs{width:100%}}
+.portfolio-mode .intro{display:none}.portfolio-toolbar{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:18px 24px;margin:0 0 18px}.portfolio-account-tabs{margin:0}.portfolio-data-status{display:flex;align-items:center;justify-content:flex-end;gap:16px;min-height:58px;text-align:right}.portfolio-data-status .status-copy{min-width:118px}.data-refresh-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;padding:0 12px;border:1px solid rgba(0,0,0,.12);border-radius:999px;background:#fff;color:#1d1d1f;font:inherit;font-size:12px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.03);transition:background-color 160ms ease,transform 160ms ease}.data-refresh-button:hover{background:#f5f5f7}.data-refresh-button:active{transform:scale(.97)}.data-refresh-button:disabled{cursor:wait;opacity:.62}.data-refresh-button.is-refreshing{color:#6e6e73}@media(max-width:760px){.portfolio-toolbar{display:block;margin-bottom:18px}.portfolio-data-status{justify-content:flex-start;margin-top:10px}.portfolio-data-status .status-copy{align-items:flex-start;text-align:left}.portfolio-data-status .status-update-row{justify-content:flex-start}.portfolio-account-tabs{width:auto;max-width:100%}}
 .portfolio-compact-summary{display:grid;order:3;flex:0 0 100%;width:100%;max-width:none;grid-template-columns:1fr 1fr;align-items:center;min-height:104px;margin:0 0 30px;padding:20px 26px;border-radius:20px;background:#fff;box-shadow:0 8px 24px rgba(0,0,0,.075)}.portfolio-summary-item{display:flex;min-width:0;flex-direction:column;align-items:flex-start}.portfolio-summary-item>span{margin-bottom:7px;color:#86868b;font-size:12px}.portfolio-summary-item strong{color:#1d1d1f;font-size:clamp(25px,3vw,34px);font-weight:720;line-height:1.08;letter-spacing:-.035em;font-variant-numeric:tabular-nums}.portfolio-summary-today{align-items:flex-end;text-align:right}.portfolio-summary-today small{margin-top:6px;color:#86868b;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums}@media(max-width:760px){.portfolio-compact-summary{min-height:96px;margin-bottom:24px;padding:18px 20px;border-radius:18px}.portfolio-summary-item strong{font-size:22px}}
 .detail-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.detail-section-head h3{margin-bottom:0}.detail-api-state{color:#86868b;font-size:11px;white-space:nowrap}.detail-history-content{min-height:220px}.detail-chart{color:#0071e3;background:linear-gradient(to bottom,rgba(0,113,227,.07),transparent)}.detail-chart-meta{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;margin-top:10px;color:#86868b;font-size:11px;font-variant-numeric:tabular-nums}.detail-chart-meta span:last-child{text-align:right}.detail-chart-meta b{font-size:12px;font-weight:600}.detail-empty{display:grid;place-items:center;min-height:82px;border-top:1px solid rgba(0,0,0,.08);color:#86868b;font-size:13px;text-align:center}.detail-loading{height:180px;border-radius:12px;background:linear-gradient(100deg,#f0f0f2 20%,#fafafa 40%,#f0f0f2 60%);background-size:220% 100%;animation:detail-shimmer 1.2s ease-in-out infinite}.detail-error{color:#ff3b30}@keyframes detail-shimmer{to{background-position:-220% 0}}@media(prefers-reduced-motion:reduce){.detail-loading{animation:none}}
 .detail-range-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px;margin-top:18px;padding:4px;border-radius:13px;background:#f2f2f7}.detail-range-button{min-height:40px;padding:0 6px;border:0;border-radius:10px;background:transparent;color:#6e6e73;font:inherit;font-size:12px;font-weight:500;cursor:pointer;transition:background-color 160ms ease,color 160ms ease,transform 160ms ease}.detail-range-button:hover{color:#1d1d1f}.detail-range-button:active{transform:scale(.97)}.detail-range-button.active{background:#fff;color:#0071e3;font-weight:650;box-shadow:0 1px 5px rgba(0,0,0,.08)}.detail-range-button:focus-visible,.detail-record-tab:focus-visible{outline:3px solid rgba(0,113,227,.25);outline-offset:2px}.detail-record-section{padding-top:2px}.detail-record-tabs{display:flex;gap:28px;border-bottom:1px solid rgba(0,0,0,.08)}.detail-record-tab{position:relative;min-height:48px;padding:0 2px;border:0;background:transparent;color:#86868b;font:inherit;font-size:15px;font-weight:550;cursor:pointer}.detail-record-tab.active{color:#1d1d1f;font-weight:680}.detail-record-tab.active:after{content:'';position:absolute;right:0;bottom:-1px;left:0;height:2px;border-radius:2px;background:#0071e3}.detail-record-content{min-height:240px;padding-top:8px}.history-table-head{color:#86868b;font-size:11px;font-weight:400}.history-performance .history-table-head,.history-performance-row{display:grid;grid-template-columns:1fr auto;align-items:center;min-height:48px;border-bottom:1px solid rgba(0,0,0,.065)}.history-performance-row b{font-size:14px;font-weight:600}.history-performance-row strong{font-size:14px;font-weight:650;font-variant-numeric:tabular-nums}.history-nav{overflow-x:auto}.history-nav-row{display:grid;grid-template-columns:1.15fr .85fr .85fr 1fr;align-items:center;min-width:440px;min-height:44px;border-bottom:1px solid rgba(0,0,0,.06);font-size:12px;font-variant-numeric:tabular-nums}.history-nav-row>*:not(:first-child){text-align:right}.history-nav-row b{font-weight:600}.history-nav-row strong{font-weight:650}.detail-loading-short{height:150px}.content-enter{animation:detail-content-in 180ms ease-out both}@keyframes detail-content-in{from{opacity:.35;transform:translateY(3px)}to{opacity:1;transform:none}}@media(prefers-reduced-motion:reduce){.detail-range-button,.content-enter{transition:none;animation:none}}@media(max-width:600px){.detail-range-tabs{gap:2px}.detail-range-button{font-size:11px}.detail-record-tabs{gap:24px}.history-nav-row{min-width:400px}}
-.fund-info small{display:flex;align-items:baseline;gap:7px;min-height:16px}.nav-updated-badge{display:inline-flex!important;align-items:baseline;flex:none;margin:0!important;color:#0071e3!important;font-size:10px!important;font-weight:600;line-height:1.25;letter-spacing:.01em;white-space:nowrap}.fund-info small:not(:has(.nav-updated-badge)){gap:0}
+.fund-info small{display:inline-flex;align-items:center;gap:6px;min-height:16px;color:#86868b;font-size:12px;line-height:1.3}.nav-updated-badge{display:inline-flex!important;align-items:center;flex:none;margin:0!important;padding:1px 5px!important;border-radius:4px!important;background:rgba(0,0,0,.05)!important;color:#0071e3!important;font-size:10px!important;font-weight:600;line-height:1.2;letter-spacing:.01em;white-space:nowrap}
 .positive{color:#ff3b30!important}.negative{color:#34a853!important}
 .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}.kpis .estimate-state{display:inline;margin-right:.55em;color:#86868b}.kpis .estimate-state.updated{color:#0071e3;font-weight:600}@media(max-width:760px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .data-menu{position:fixed;z-index:40;width:176px;padding:6px;border:1px solid rgba(0,0,0,.1);border-radius:16px;background:rgba(255,255,255,.96);box-shadow:0 12px 32px rgba(0,0,0,.14);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);animation:data-menu-in 150ms ease-out both}.data-menu button{display:flex;align-items:center;gap:11px;width:100%;min-height:40px;padding:0 11px;border:0;border-radius:10px;background:transparent;color:#1d1d1f;font:inherit;font-size:13px;text-align:left;cursor:pointer}.data-menu button:hover{background:#f2f2f7}.data-menu button span{width:16px;color:#6e6e73;font-size:17px;text-align:center}.data-menu-separator{display:block;height:1px;margin:5px 6px;background:rgba(0,0,0,.08)}.settings-export{background:#0071e3!important;color:#fff!important}@keyframes data-menu-in{from{opacity:0;transform:translateY(-4px) scale(.98)}to{opacity:1;transform:none}}
+
+.desktop-label { display: inline; }
+.mobile-label { display: none; }
+.desktop-tag-text { display: inline; }
+.mobile-tag-text { display: none; }
+
+/* Mobile Responsive Overrides (< 768px) */
+@media (max-width: 768px) {
+  .desktop-label { display: none !important; }
+  .mobile-label { display: inline !important; }
+  .desktop-tag-text { display: none !important; }
+  .mobile-tag-text { display: inline !important; }
+
+  /* 1. Global reset & container */
+  html, body {
+    width: 100% !important;
+    max-width: 100vw !important;
+    height: auto !important;
+    min-height: 100dvh !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box !important;
+  }
+
+  .app-shell, #app, main, section, div, button, a {
+    min-width: 0;
+  }
+
+  /* 二、移动端页面边距 */
+  .content {
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 12px 12px 32px !important;
+    margin: 0 auto !important;
+    box-sizing: border-box !important;
+  }
+
+  .list-section {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  /* 2. Topbar Navigation */
+  .topbar {
+    height: 52px !important;
+    padding: 0 12px !important;
+    gap: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  .brand {
+    font-size: 13.5px !important;
+    font-weight: 650 !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    margin-right: 0 !important;
+    padding: 4px 6px !important;
+    gap: 6px !important;
+  }
+
+  .brand-mark {
+    width: 25px !important;
+    height: 25px !important;
+    font-size: 10px !important;
+  }
+
+  .nav-tabs {
+    display: flex !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+  }
+
+  .nav-tab {
+    font-size: 12.5px !important;
+    padding: 6px 9px !important;
+    width: auto !important;
+    border-radius: 8px !important;
+    white-space: nowrap !important;
+  }
+
+  .nav-tab::first-letter {
+    font-size: 12.5px !important;
+  }
+
+  .more-button {
+    font-size: 16px !important;
+    padding: 4px !important;
+    margin-left: 0 !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* 3. 十、顶部其他区域 (切换条、时间、刷新按钮) */
+  .portfolio-toolbar {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 12px !important;
+    margin-bottom: 14px !important;
+    width: 100% !important;
+  }
+
+  .portfolio-account-tabs {
+    width: auto !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
+  }
+
+  .account-segmented {
+    width: auto !important;
+    max-width: 100% !important;
+    display: inline-flex !important;
+    align-self: flex-start !important;
+    margin-bottom: 0 !important;
+    padding: 3px !important;
+    min-height: 36px !important;
+  }
+
+  .account-segment {
+    min-height: 30px !important;
+    padding: 0 10px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+  }
+
+  .account-avatar {
+    width: 38px !important;
+    height: 38px !important;
+  }
+
+  .account-switcher-text,
+  .account-name {
+    font-size: 14px !important;
+  }
+
+  .portfolio-data-status {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    grid-template-areas:
+      "time refresh"
+      "date date" !important;
+    row-gap: 4px !important;
+    column-gap: 8px !important;
+    align-items: center !important;
+    width: 100% !important;
+    position: static !important;
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding: 0 !important;
+  }
+
+  .portfolio-data-status .status-copy {
+    display: contents !important;
+  }
+
+  .portfolio-data-status .status-time {
+    grid-area: time !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    color: #1d1d1f !important;
+    line-height: 1.2 !important;
+    white-space: nowrap !important;
+  }
+
+  .portfolio-data-status .data-refresh-button {
+    grid-area: refresh !important;
+    justify-self: end !important;
+    position: static !important;
+    flex-shrink: 0 !important;
+    min-height: 32px !important;
+    height: 32px !important;
+    padding: 0 12px !important;
+    font-size: 11px !important;
+    border-radius: 999px !important;
+    white-space: nowrap !important;
+    margin: 0 !important;
+  }
+
+  .portfolio-data-status .status-update-row {
+    grid-area: date !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    margin-top: 0 !important;
+    justify-content: flex-start !important;
+  }
+
+  .portfolio-data-status .status-update {
+    display: block !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    font-size: 10px !important;
+    color: #86868b !important;
+  }
+
+  /* 4. 九、移动端资产卡 (账户资产金额禁止换行) */
+  .portfolio-compact-summary {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr) !important;
+    align-items: center !important;
+    min-height: 108px !important;
+    padding: 22px 18px !important;
+    border-radius: 16px !important;
+    margin-bottom: 20px !important;
+    width: 100% !important;
+    gap: 8px !important;
+    box-sizing: border-box !important;
+  }
+
+  .portfolio-summary-item {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+
+  .portfolio-summary-item > span {
+    font-size: 11px !important;
+    margin-bottom: 4px !important;
+    color: #86868b !important;
+    white-space: nowrap !important;
+  }
+
+  .portfolio-summary-item strong {
+    font-size: clamp(21px, 6vw, 28px) !important;
+    font-weight: 700 !important;
+    line-height: 1.15 !important;
+    letter-spacing: -0.02em !important;
+    font-variant-numeric: tabular-nums !important;
+    white-space: nowrap !important;
+    word-break: normal !important;
+    overflow-wrap: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    max-width: 100% !important;
+  }
+
+  .portfolio-summary-today {
+    align-items: flex-end !important;
+    text-align: right !important;
+  }
+
+  .portfolio-summary-today strong {
+    font-size: clamp(22px, 6.2vw, 29px) !important;
+  }
+
+  .portfolio-summary-today small {
+    margin-top: 4px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+  }
+
+  /* 5. 八、持仓标题区域 */
+  .section-head {
+    display: flex !important;
+    align-items: flex-end !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    gap: 10px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .section-head > div {
+    min-width: 0 !important;
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .section-head .eyebrow,
+  .holdings-count {
+    font-size: 12px !important;
+    margin: 0 0 2px 0 !important;
+    line-height: 1.2 !important;
+  }
+
+  .section-head h2,
+  .holdings-title {
+    font-size: 22px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    line-height: 1.15 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  .section-head .primary,
+  .add-fund-button,
+  [data-action="add-fund"] {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+    padding: 0 14px !important;
+    font-size: 13px !important;
+    height: 36px !important;
+    min-height: 36px !important;
+    border-radius: 999px !important;
+    align-self: flex-end !important;
+    margin-bottom: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* 6. 六、四列表头 (一、移动端 4 Column Grid) */
+  .holding-head,
+  .holding-table-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
+    column-gap: 3px !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding: 6px 0 !important;
+    margin-bottom: 8px !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+    font-size: 10px !important;
+    color: #86868b !important;
+    box-sizing: border-box !important;
+  }
+
+  .holding-head > span,
+  .holding-table-header > span {
+    min-width: 0 !important;
+    font-size: 10px !important;
+  }
+
+  .holding-head > span:not(:first-child),
+  .holding-table-header > span:not(:first-child) {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    text-align: right !important;
+  }
+
+  .holdings-list,
+  .fund-list {
+    border-top: 1px solid rgba(0, 0, 0, 0.08) !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    padding-inline: 0 !important;
+  }
+
+  /* 7. 七、基金行高度 & 布局 */
+  .fund-row,
+  .holding-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
+    grid-template-rows: auto !important;
+    column-gap: 3px !important;
+    padding-block: 10px !important;
+    padding-top: 10px !important;
+    padding-bottom: 10px !important;
+    min-height: 64px !important;
+    align-items: center !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+    position: static !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* 8. 三、基金名称 */
+  .fund-info {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: flex-start !important;
+    text-align: left !important;
+  }
+
+  .fund-info b {
+    font-size: 14px !important;
+    line-height: 1.25 !important;
+    font-weight: 650 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: block !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    text-align: left !important;
+  }
+
+  /* 9. 五、基金辅助信息 */
+  .fund-info small,
+  .fund-meta {
+    font-size: 10px !important;
+    margin-top: 4px !important;
+    gap: 3px !important;
+    color: #86868b !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    text-align: left !important;
+  }
+
+  .nav-updated-badge,
+  .update-tag {
+    font-size: 9px !important;
+    padding: 1px 4px !important;
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  .fund-code-text {
+    flex-shrink: 0 !important;
+    white-space: nowrap !important;
+  }
+
+  /* 移动端隐藏分类 */
+  .fund-category,
+  .fund-sector-text,
+  .fund-meta-sep {
+    display: none !important;
+  }
+
+  /* 10. 四、数字字号 (Columns 2, 3, 4) */
+  .fund-est,
+  .fund-today,
+  .fund-amount {
+    grid-row: 1 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-end !important;
+    justify-content: center !important;
+    text-align: right !important;
+    gap: 2px !important;
+    position: static !important;
+    margin: 0 !important;
+  }
+
+  .fund-est { grid-column: 2 !important; }
+  .fund-today { grid-column: 3 !important; }
+  .fund-amount { grid-column: 4 !important; }
+
+  .fund-est strong,
+  .fund-today strong,
+  .fund-amount strong {
+    font-size: 13px !important;
+    font-weight: 650 !important;
+    line-height: 1.2 !important;
+    display: block !important;
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+    text-align: right !important;
+    margin: 0 !important;
+  }
+
+  .fund-est span,
+  .fund-today span,
+  .fund-amount span {
+    font-size: 11px !important;
+    color: #86868b !important;
+    line-height: 1.2 !important;
+    display: block !important;
+    white-space: nowrap !important;
+    font-variant-numeric: tabular-nums !important;
+    text-align: right !important;
+    margin: 0 !important;
+  }
+
+  .row-chevron {
+    display: none !important;
+  }
+}
+
+/* 11. Adjustments for screens <= 390px */
+@media (max-width: 390px) {
+  .content {
+    padding-left: 10px !important;
+    padding-right: 10px !important;
+  }
+
+  .holding-head,
+  .holding-table-header,
+  .fund-row,
+  .holding-row {
+    grid-template-columns: minmax(0, 1.75fr) 54px 54px 56px !important;
+    column-gap: 2px !important;
+  }
+
+  .fund-info b {
+    font-size: 13px !important;
+  }
+
+  .fund-est strong,
+  .fund-today strong,
+  .fund-amount strong {
+    font-size: 12px !important;
+  }
+
+  .fund-est span,
+  .fund-today span,
+  .fund-amount span {
+    font-size: 10px !important;
+  }
+
+  .fund-category,
+  .fund-sector-text,
+  .fund-meta-sep {
+    display: none !important;
+  }
+}
