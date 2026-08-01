@@ -1,0 +1,3 @@
+const http=require('http'),fs=require('fs'),path=require('path');
+const root=__dirname;const types={'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'text/javascript; charset=utf-8'};
+http.createServer((req,res)=>{const url=new URL(req.url,'http://localhost');const file=path.join(root,url.pathname==='/'?'index.html':url.pathname);if(!file.startsWith(root)){res.writeHead(403);return res.end()}fs.readFile(file,(e,d)=>{if(e){res.writeHead(404);return res.end('Not found')}res.writeHead(200,{'Content-Type':types[path.extname(file)]||'text/plain','Cache-Control':'no-store, no-cache, must-revalidate'});res.end(d)})}).listen(3001,'127.0.0.1',()=>console.log('Portfolio running at http://localhost:3001'));

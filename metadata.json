@@ -1,0 +1,6 @@
+{
+  "name": "Genius Trader",
+  "description": "Apple-style fund portfolio tracker with live estimates and fund data service.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

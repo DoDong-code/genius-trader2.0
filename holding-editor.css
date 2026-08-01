@@ -1,0 +1,119 @@
+.real-detail-drawer .detail-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+}
+
+.detail-edit-holding {
+  position: absolute;
+  top: 72px;
+  right: 68px;
+  border: 0;
+  background: transparent;
+  color: #86868b;
+  padding: 8px 4px;
+  font: 600 12px/1 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  cursor: pointer;
+  letter-spacing: .01em;
+}
+
+.detail-edit-holding:hover { color: #0071e3; }
+
+.detail-edit-holding:focus-visible {
+  outline: 3px solid rgba(0, 113, 227, .28);
+  outline-offset: 3px;
+  border-radius: 7px;
+}
+
+.holding-editor-overlay { z-index: 180; }
+
+.holding-editor {
+  width: min(430px, calc(100% - 32px));
+  text-align: left;
+}
+
+.holding-editor h2,
+.holding-editor > p { text-align: center; }
+
+.holding-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 16px 0 18px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #f5f5f7;
+}
+
+.holding-summary div { min-width: 0; }
+
+.holding-summary span {
+  display: block;
+  color: #86868b;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.holding-summary b {
+  display: block;
+  color: #1d1d1f;
+  font-size: 17px;
+  letter-spacing: -.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.holding-edit-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.holding-action-switch {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 18px 0 6px;
+  padding: 4px;
+  border-radius: 13px;
+  background: #f2f2f7;
+}
+
+.holding-action-switch button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #6e6e73;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.holding-action-switch button.active {
+  background: #fff;
+  color: #0071e3;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .08);
+}
+
+.holding-trade-fields { margin-top: 2px; }
+
+.holding-editor-error {
+  min-height: 18px !important;
+  margin: 8px 0 0 !important;
+  color: #ff3b30 !important;
+  font-size: 12px !important;
+  text-align: left !important;
+}
+
+.holding-editor-error:empty { display: none; }
+.holding-editor [hidden] { display: none !important; }
+
+@media (max-width: 520px) {
+  .detail-edit-holding { top: 67px; right: 60px; }
+  .holding-summary,
+  .holding-edit-grid { grid-template-columns: 1fr; }
+  .holding-action-switch { grid-template-columns: 1fr; }
+}

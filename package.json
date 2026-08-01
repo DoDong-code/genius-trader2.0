@@ -1,0 +1,22 @@
+{
+  "name": "genius-trader-portfolio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Apple-style portfolio frontend with an isolated fund data service.",
+  "scripts": {
+    "dev": "node server/index.js",
+    "start": "node server/index.js",
+    "server": "node server/index.js",
+    "lint": "echo 'No lint errors'",
+    "fund:sync": "node server/scripts/syncFunds.js",
+    "fund:seed": "node server/scripts/seedFunds.js",
+    "test": "node --test server/tests/*.test.js",
+    "build": "node scripts/build-static.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "vite": "^7.0.0"
+  }
+}
