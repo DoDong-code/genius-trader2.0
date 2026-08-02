@@ -410,7 +410,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     box-shadow: 0 0 0 3px rgba(52, 199, 89, 0.15) !important;
     flex: none !important;
     margin: 0 !important;
-    transform: translateY(-2px) !important;
+    transform: translateY(-6px) !important;
   }
 
   .portfolio-data-status .status-update {
@@ -608,6 +608,13 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     margin-top: 0px !important;
     margin-right: 0px !important;
     margin-bottom: -2px !important;
+  }
+
+  div:nth-of-type(1) > main:nth-of-type(1) > div#view-root:nth-of-type(1) > div:nth-of-type(1) > section:nth-of-type(1) {
+    margin-bottom: 6px !important;
+    margin-right: 0px !important;
+    padding-bottom: 22px !important;
+    margin-top: 6px !important;
   }
 
   div:nth-of-type(1) > main:nth-of-type(1) > div#view-root:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > span:nth-of-type(1) > span:nth-of-type(1) > small:nth-of-type(1) {
