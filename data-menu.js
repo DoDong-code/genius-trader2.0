@@ -49,18 +49,54 @@
       if (event.target.closest('[data-confirm]')) { restore(payload); closeDialog(overlay); }
     });
   }
-  function settings() {
-    var overlay = dialog('数据设置', '数据仅保存在此浏览器中。建议在修改账户前先导出一份备份。', '<button type="button" data-cancel>关闭</button><button type="button" class="settings-export" data-export>导出数据</button>');
+  function restoreDefaults() {
+    var defaultPayload = {
+      accounts: {
+        '主账户': {
+          name: '主账户',
+          funds: [
+            {
+              name: '国泰半导体设备ETF联接C',
+              code: '019633',
+              category: '基金',
+              amount: 10000,
+              today: -0.015,
+              hold: 0.052,
+              history: [0.02, 0.06, 0.04, 0.12, 0.1, 0.15, 0.2, 0.18, 0.23, 0.31, 0.28, 0.34],
+              holdings: [['兆易创新', '8.31%'], ['北方华创', '7.86%'], ['中微公司', '6.42%']],
+              transactions: [['2026-07-13', '买入', '¥10,000']]
+            },
+            {
+              name: '华夏黄金ETF联接C',
+              code: '008702',
+              category: '基金',
+              amount: 15000,
+              today: 0.008,
+              hold: 0.124,
+              history: [0.04, 0.06, 0.03, 0.08, 0.12, 0.1, 0.15, 0.18, 0.22, 0.2, 0.24, 0.29],
+              holdings: [['黄金现货', '92.40%'], ['现金及其他', '7.60%']],
+              transactions: [['2026-07-05', '买入', '¥15,000']]
+            }
+          ]
+        }
+      },
+      active: '主账户'
+    };
+
+    var overlay = dialog('恢复默认状态', '确定要清空所有数据并恢复到默认状态吗？此操作将清除您所有的自定义账户和持仓数据，且无法恢复。', '<button type="button" data-cancel>取消</button><button type="button" class="confirm-delete" data-confirm>确认恢复</button>');
     overlay.addEventListener('click', function (event) {
       if (event.target === overlay || event.target.closest('[data-cancel]')) closeDialog(overlay);
-      if (event.target.closest('[data-export]')) downloadData();
+      if (event.target.closest('[data-confirm]')) {
+        restore(defaultPayload);
+        closeDialog(overlay);
+      }
     });
   }
   function openMenu() {
     closeMenu();
     var menu = document.createElement('div');
     menu.className = 'data-menu';
-    menu.innerHTML = '<button type="button" data-data-menu="export"><span>⇩</span>导出数据</button><button type="button" data-data-menu="import"><span>⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="settings"><span>⚙</span>数据设置</button>';
+    menu.innerHTML = '<button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>';
     document.body.appendChild(menu);
     var rect = moreButton.getBoundingClientRect();
     menu.style.top = (rect.bottom + 10) + 'px'; menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
@@ -72,7 +108,7 @@
       var type = action.dataset.dataMenu; closeMenu();
       if (type === 'export') downloadData();
       if (type === 'import') fileInput.click();
-      if (type === 'settings') settings();
+      if (type === 'restore') restoreDefaults();
       return;
     }
     if (!event.target.closest('.data-menu') && !event.target.closest('.more-button')) closeMenu();
