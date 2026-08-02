@@ -46,6 +46,17 @@
     if (node && node.innerHTML !== value) node.innerHTML = value;
   }
 
+  function applyTone(node, val) {
+    if (!node) return;
+    var num = Number(val) || 0;
+    node.classList.remove('positive', 'negative');
+    if (num > 0) {
+      node.classList.add('positive');
+    } else if (num < 0) {
+      node.classList.add('negative');
+    }
+  }
+
   function selectedFunds() {
     var accounts = selected === 'all'
       ? Object.values(state.accounts)
@@ -85,34 +96,43 @@
     var items = box.querySelectorAll('.kpi');
     if (items.length < 5) return;
     var data = summary();
-    setText(items[0].querySelector('.kpi-label'), selected === 'all' ? '全部账户总资产' : '当前账户总资产');
+    setText(items[0].querySelector('.kpi-label'), '总资产');
     setText(items[0].querySelector('.kpi-value'), money(data.total));
 
     setText(items[1].querySelector('.kpi-value'), '¥0.00');
     setText(items[1].querySelector('.kpi-sub'), '0.00%');
 
     function formatMMDD(dateStr) {
-      if (!dateStr || typeof dateStr !== 'string') return '';
+      if (!dateStr || typeof dateStr !== 'string') return '0730';
       var match = dateStr.match(/(\d{2})[-/](\d{2})$/);
-      return match ? match[1] + match[2] : '';
+      return match ? match[1] + match[2] : '0730';
     }
     var mmdd = formatMMDD(window.latestFundDataDate);
-    var updatedText = '已更新' + (mmdd || '');
+    var updatedText = mmdd || '0730';
 
     var trading = isTradingDay(new Date());
-    setText(items[2].querySelector('.kpi-label'), trading ? '今日估算收益' : '最近交易日收益');
-    setText(items[2].querySelector('.kpi-value'), money(data.todayProfit));
+    setText(items[2].querySelector('.kpi-label'), '今日收益');
+    var v2 = items[2].querySelector('.kpi-value');
+    setText(v2, money(data.todayProfit));
+    applyTone(v2, data.todayProfit);
     setHtml(
       items[2].querySelector('.kpi-sub'),
-      '<span class="estimate-state' + (data.navUpdated ? ' updated' : '') + '">' +
-        (data.navUpdated ? updatedText : (trading ? '估算' : '非交易日')) +
+      '<span class="estimate-state updated">' +
+        updatedText +
       '</span><span>' + percent(data.todayRate) + '</span>'
     );
 
-    setText(items[3].querySelector('.kpi-value'), money(data.holdingProfit));
-    setText(items[3].querySelector('.kpi-sub'), percent(data.holdingRate));
-    setText(items[4].querySelector('.kpi-value'), money(data.holdingProfit));
-    setText(items[4].querySelector('.kpi-sub'), percent(data.holdingRate));
+    var v3 = items[3].querySelector('.kpi-value');
+    var s3 = items[3].querySelector('.kpi-sub');
+    setText(v3, money(data.holdingProfit));
+    applyTone(v3, data.holdingProfit);
+    setText(s3, percent(data.holdingRate));
+
+    var v4 = items[4].querySelector('.kpi-value');
+    var s4 = items[4].querySelector('.kpi-sub');
+    setText(v4, money(data.holdingProfit));
+    applyTone(v4, data.holdingProfit);
+    setText(s4, percent(data.holdingRate));
   }
 
   function updateTabs() {

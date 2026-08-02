@@ -66,9 +66,9 @@
       time.textContent = formatter.format(now);
       var minutes = Math.max(0, Math.floor((now.getTime() - updatedAt) / 60000));
       if (!trading) {
-        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 非交易日，展示最近交易日数据</span><span class="mobile-label">' + dataDate + ' · 展示最近交易日数据</span>';
+        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 非交易日，展示最近交易日数据</span><span class="mobile-label">' + dataDate + '</span>';
       } else {
-        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 数据更新 · ' + (minutes < 1 ? '刚刚' : minutes + ' 分钟前') + '</span><span class="mobile-label">' + dataDate + ' · ' + (minutes < 1 ? '刚刚' : minutes + '分钟前') + '</span>';
+        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 数据更新 · ' + (minutes < 1 ? '刚刚' : minutes + ' 分钟前') + '</span><span class="mobile-label">' + dataDate + '</span>';
       }
     });
   }

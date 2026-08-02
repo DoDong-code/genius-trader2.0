@@ -479,6 +479,8 @@
   }
 
   function renderDrawer(fund) {
+    document.querySelectorAll('.drawer-backdrop').forEach(el => el.remove());
+
     const holdingRate = Number.isFinite(fund.holdingRate) ? fund.holdingRate : Number(fund.hold) || 0;
     const holdingProfit = Number.isFinite(fund.holdingProfit)
       ? fund.holdingProfit
