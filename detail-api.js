@@ -99,7 +99,7 @@
     if (!Number.isFinite(officialChange) && navDate && payload.estimate?.nav_date === navDate && Number.isFinite(Number(payload.estimate?.estimate_change))) {
       officialChange = Number(payload.estimate.estimate_change);
     }
-    if (navDate && Number.isFinite(officialChange)) {
+    if (navDate && navDate === shanghaiDate() && Number.isFinite(officialChange)) {
       return { official: true, navDate, change: officialChange, profit: fund.amount * officialChange };
     }
 
@@ -118,10 +118,10 @@
     }
 
     // The list may already have refreshed a same-day manual/official value.
-    const localIsCurrent = manualIsCurrent || Boolean(fund.navUpdatedAt);
+    const localIsCurrent = manualIsCurrent || Boolean(fund.navUpdatedAt && fund.navUpdatedAt === shanghaiDate());
     const localChange = Number(fund.today);
     if (localIsCurrent && Number.isFinite(localChange)) {
-      return { official: Boolean(fund.navUpdatedAt), navDate: fund.navUpdatedAt || null, change: localChange, profit: fund.amount * localChange };
+      return { official: Boolean(fund.navUpdatedAt && fund.navUpdatedAt === shanghaiDate()), navDate: fund.navUpdatedAt || null, change: localChange, profit: fund.amount * localChange };
     }
     return { official: false, navDate: null, change: null, profit: null };
   }

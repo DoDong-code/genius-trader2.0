@@ -51,7 +51,8 @@ function shanghaiDateString(value = Date.now()) {
 }
 
 function isTradingDay(dateStr = shanghaiDateString()) {
-  const d = new Date(dateStr + 'T00:00:00+08:00');
+  const parts = dateStr.split('-');
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   const dayOfWeek = d.getDay();
   if (dayOfWeek === 0 || dayOfWeek === 6) return false;
   const holidays = [
@@ -67,9 +68,13 @@ function isTradingDay(dateStr = shanghaiDateString()) {
 }
 
 function getLatestTradingDay(fromDateStr = shanghaiDateString()) {
-  let curr = new Date(fromDateStr + 'T00:00:00+08:00');
+  const parts = fromDateStr.split('-');
+  let curr = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   while (true) {
-    const ds = shanghaiDateString(curr);
+    const yyyy = curr.getFullYear();
+    const mm = String(curr.getMonth() + 1).padStart(2, '0');
+    const dd = String(curr.getDate()).padStart(2, '0');
+    const ds = `${yyyy}-${mm}-${dd}`;
     if (isTradingDay(ds)) return ds;
     curr.setDate(curr.getDate() - 1);
   }

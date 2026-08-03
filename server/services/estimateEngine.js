@@ -73,17 +73,91 @@ async function quoteFor(stockCode, options = {}) {
   return quote;
 }
 
-function cachedEstimate(fundCode) {
+function isQdiiFund(fund) {
+  const type = fund.fund_type || '';
+  const name = fund.fund_name || '';
+  return type.includes('QDII') || type.includes('海外') || name.includes('QDII');
+}
+
+function getNextTradingDay(dateStr) {
+  const parts = dateStr.split('-');
+  let curr = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  while (true) {
+    curr.setDate(curr.getDate() + 1);
+    const yyyy = curr.getFullYear();
+    const mm = String(curr.getMonth() + 1).padStart(2, '0');
+    const dd = String(curr.getDate()).padStart(2, '0');
+    const ds = `${yyyy}-${mm}-${dd}`;
+    
+    let isTrade = true;
+    const dayOfWeek = curr.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+      isTrade = false;
+    } else {
+      const holidays = [
+        '2026-01-01', '2026-01-02',
+        '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23', '2026-02-24',
+        '2026-04-06',
+        '2026-05-01', '2026-05-04', '2026-05-05',
+        '2026-06-19',
+        '2026-09-25',
+        '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+      ];
+      if (holidays.includes(ds)) {
+        isTrade = false;
+      }
+    }
+    if (isTrade) return ds;
+  }
+}
+
+function isUsMarketSessionStartedToday() {
+  const nyDate = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = nyDate.getDay();
+  if (day === 0 || day === 6) return false;
+  
+  const hour = nyDate.getHours();
+  const minute = nyDate.getMinutes();
+  const minutes = hour * 60 + minute;
+  return minutes >= (9 * 60 + 30);
+}
+
+async function fetchHistoricalChange(stockCode, date) {
+  const { stockSecIds } = require('./marketService');
+  const secids = stockSecIds(stockCode);
+  for (const secid of secids) {
+    try {
+      const url = `http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&end=20500101&lmt=15`;
+      const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (!response.ok) continue;
+      const json = await response.json();
+      const klines = json?.data?.klines;
+      if (klines && klines.length > 0) {
+        for (const line of klines) {
+          const parts = line.split(',');
+          if (parts[0] === date) {
+            const pct = Number(parts[8]);
+            if (Number.isFinite(pct)) {
+              return pct / 100;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      // ignore
+    }
+  }
+  return null;
+}
+
+function cachedEstimate(fundCode, targetDate = shanghaiDate()) {
   const row = getDatabase().prepare(`
     SELECT calculation_json, expires_at
     FROM fund_estimate
     WHERE fund_code = ? AND trade_date = ?
-  `).get(fundCode, shanghaiDate());
+  `).get(fundCode, targetDate);
   if (!row) return null;
   const expired = Date.parse(row.expires_at) <= Date.now();
-  // After the 15:00 close, the last calculation for the current trade date is
-  // the appropriate provisional close estimate until the official fund NAV is
-  // published. Before close, keep the short cache TTL for live updates.
   if (expired && !isShanghaiPostClose()) return null;
   try {
     const cached = JSON.parse(row.calculation_json);
@@ -104,8 +178,24 @@ function confidenceFor({ holdingsCount, quotedCount, publishedWeight, sectorAvai
 
 async function calculateFundEstimate(code, options = {}) {
   const fundCode = assertFundCode(code);
+  const fund = getFund(fundCode);
+  if (!fund) {
+    const error = new Error(`基金 ${fundCode} 尚未导入`);
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const isQdii = isQdiiFund(fund);
+  let targetDate = shanghaiDate();
+  if (isQdii && fund.latest_nav && fund.latest_nav.date) {
+    targetDate = getNextTradingDay(fund.latest_nav.date);
+    if (targetDate > shanghaiDate()) {
+      targetDate = shanghaiDate();
+    }
+  }
+
   if (!options.force) {
-    const cached = cachedEstimate(fundCode);
+    const cached = cachedEstimate(fundCode, targetDate);
     if (cached) {
       cached.estimateChange = cached.estimate_change_percent;
       if (Number.isFinite(Number(options.amount))) {
@@ -116,22 +206,34 @@ async function calculateFundEstimate(code, options = {}) {
       return cached;
     }
   }
-  const fund = getFund(fundCode);
-  if (!fund) {
-    const error = new Error(`基金 ${fundCode} 尚未导入`);
-    error.statusCode = 404;
-    throw error;
-  }
 
   const holdings = latestHoldings(fundCode);
-  const quoteResults = await Promise.all(holdings.map(async holding => {
-    try {
-      const quote = await quoteFor(holding.stock_code, options);
-      return quote ? { ...holding, change_percent: quote.change_percent } : null;
-    } catch {
-      return null;
-    }
-  }));
+  let quoteResults;
+
+  if (targetDate === shanghaiDate()) {
+    quoteResults = await Promise.all(holdings.map(async holding => {
+      try {
+        const isUs = /^[A-Za-z]/.test(holding.stock_code);
+        if (isUs && !isUsMarketSessionStartedToday()) {
+          return { ...holding, change_percent: 0 };
+        }
+        const quote = await quoteFor(holding.stock_code, options);
+        return quote ? { ...holding, change_percent: quote.change_percent } : null;
+      } catch {
+        return null;
+      }
+    }));
+  } else {
+    quoteResults = await Promise.all(holdings.map(async holding => {
+      try {
+        const change = await fetchHistoricalChange(holding.stock_code, targetDate);
+        return change !== null ? { ...holding, change_percent: change } : null;
+      } catch {
+        return null;
+      }
+    }));
+  }
+
   const pricedHoldings = quoteResults.filter(Boolean);
   const publishedWeight = holdings.reduce((sum, item) => sum + Number(item.weight || 0), 0);
   const pricedWeight = pricedHoldings.reduce((sum, item) => sum + Number(item.weight || 0), 0);
@@ -141,12 +243,22 @@ async function calculateFundEstimate(code, options = {}) {
 
   const sectorKey = sectorForFund(fund);
   const benchmark = sectorKey ? config.sectorBenchmarks[sectorKey] : null;
-  let sectorQuote = null;
+  let sectorChange = null;
+
   if (benchmark) {
-    try {
-      sectorQuote = await quoteFor(benchmark.stockCode, options);
-    } catch {
-      sectorQuote = null;
+    if (targetDate === shanghaiDate()) {
+      try {
+        const sectorQuote = await quoteFor(benchmark.stockCode, options);
+        sectorChange = sectorQuote?.change_percent ?? null;
+      } catch {
+        sectorChange = null;
+      }
+    } else {
+      try {
+        sectorChange = await fetchHistoricalChange(benchmark.stockCode, targetDate);
+      } catch {
+        sectorChange = null;
+      }
     }
   }
 
@@ -157,14 +269,14 @@ async function calculateFundEstimate(code, options = {}) {
 
   let estimateChange;
   let fallback = null;
-  if (Number.isFinite(holdingsChange) && Number.isFinite(sectorQuote?.change_percent)) {
+  if (Number.isFinite(holdingsChange) && Number.isFinite(sectorChange)) {
     estimateChange = holdingsChange * holdingsWeight
-      + sectorQuote.change_percent * sectorWeight
+      + sectorChange * sectorWeight
       - cashAdjustment;
   } else if (Number.isFinite(holdingsChange)) {
     estimateChange = holdingsChange - cashAdjustment;
-  } else if (Number.isFinite(sectorQuote?.change_percent)) {
-    estimateChange = sectorQuote.change_percent - cashAdjustment;
+  } else if (Number.isFinite(sectorChange)) {
+    estimateChange = sectorChange - cashAdjustment;
     fallback = 'sector-only';
   } else {
     const publicEstimate = await getRealtimeFundEstimate(fundCode);
@@ -173,8 +285,6 @@ async function calculateFundEstimate(code, options = {}) {
       estimateChange = publicChange;
       fallback = 'public-estimate';
     } else {
-      // Do not substitute the previous trading day's NAV move when live inputs
-      // are unavailable.  Consumers can show a clear “待估值” state instead.
       estimateChange = null;
       fallback = 'unavailable';
     }
@@ -184,18 +294,18 @@ async function calculateFundEstimate(code, options = {}) {
     holdingsCount: holdings.length,
     quotedCount: pricedHoldings.length,
     publishedWeight,
-    sectorAvailable: Number.isFinite(sectorQuote?.change_percent),
+    sectorAvailable: Number.isFinite(sectorChange),
     fallback
   });
+
   const result = {
     fund_code: fundCode,
     name: fund.fund_name,
-    trade_date: shanghaiDate(),
+    trade_date: targetDate,
     estimate_change: Number.isFinite(estimateChange) ? round(estimateChange) : null,
     estimate_change_percent: Number.isFinite(estimateChange) ? round(estimateChange * 100, 2) : null,
     holdings_change: Number.isFinite(holdingsChange) ? round(holdingsChange) : null,
-    sector_change: Number.isFinite(sectorQuote?.change_percent)
-      ? round(sectorQuote.change_percent) : null,
+    sector_change: Number.isFinite(sectorChange) ? round(sectorChange) : null,
     cash_adjustment: cashAdjustment,
     confidence,
     quote_coverage: holdings.length ? round(pricedHoldings.length / holdings.length, 4) : 0,
@@ -215,6 +325,7 @@ async function calculateFundEstimate(code, options = {}) {
     calculated_at: new Date().toISOString(),
     cached: false
   };
+
   result.estimateChange = result.estimate_change_percent;
   if (Number.isFinite(Number(options.amount))) {
     result.amount = round(Number(options.amount), 2);
@@ -224,8 +335,6 @@ async function calculateFundEstimate(code, options = {}) {
     result.estimateProfit = result.estimate_profit;
   }
 
-  // There is no real-time input to calculate from.  Return the explicit empty
-  // state to the UI without saving an artificial zero/previous-NAV estimate.
   if (!Number.isFinite(estimateChange)) return result;
 
   const expiresAt = new Date(Date.now() + config.estimateTtlMinutes * 60_000).toISOString();

@@ -58,6 +58,26 @@
     return match ? match[1] + '-' + match[2] : '';
   }
 
+  function isTradingDay(date) {
+    var weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai', weekday: 'short'
+    }).format(date);
+    if (weekday === 'Sat' || weekday === 'Sun') return false;
+    var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(date);
+    var holidays = [
+      '2026-01-01', '2026-01-02',
+      '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23', '2026-02-24',
+      '2026-04-06',
+      '2026-05-01', '2026-05-04', '2026-05-05',
+      '2026-06-19',
+      '2026-09-25',
+      '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+    ];
+    return holidays.indexOf(yyyymmdd) === -1;
+  }
+
   function setFundMeta(row, fund) {
     var meta = row && row.querySelector('.fund-info small');
     if (!meta || !fund) return;
@@ -66,7 +86,7 @@
     // This function is called by a DOM observer.  Do not rewrite an already
     // correct value, otherwise replaceChildren triggers the observer again.
     if (meta.dataset.fundMeta === text) return;
-    var badge = meta.querySelector('.nav-updated-badge');
+    var badge = meta.querySelector('.nav-updated-badge, .nav-estimate-badge');
     meta.dataset.fundMeta = text;
     meta.replaceChildren();
     if (badge) meta.appendChild(badge);
@@ -110,6 +130,11 @@
     var meta = row.querySelector('.fund-info small');
     if (!meta) return;
     setFundMeta(row, fund || currentFund(row.dataset.code));
+    
+    // Remove estimate badge if present
+    var estBadge = meta.querySelector('.nav-estimate-badge');
+    if (estBadge) estBadge.remove();
+
     var mmddHyphen = formatMMDD(date);
     var mmddNoHyphen = mmddHyphen.replace('-', '');
     var desktopText = '已更新' + (mmddNoHyphen || mmddHyphen || '');
@@ -126,8 +151,29 @@
     }
   }
 
+  function markEstimateBadge(row, fund) {
+    var meta = row.querySelector('.fund-info small');
+    if (!meta) return;
+    setFundMeta(row, fund || currentFund(row.dataset.code));
+    
+    // Remove updated badge if present
+    var upBadge = meta.querySelector('.nav-updated-badge');
+    if (upBadge) upBadge.remove();
+
+    var badge = meta.querySelector('.nav-estimate-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-estimate-badge';
+    }
+    badge.innerHTML = '<span class="desktop-tag-text">估算</span><span class="mobile-tag-text">估算</span>';
+    badge.title = '今日估算数据';
+    if (meta.firstChild !== badge) {
+      meta.insertBefore(badge, meta.firstChild);
+    }
+  }
+
   function clearNavUpdated(row) {
-    var badge = row.querySelector('.nav-updated-badge');
+    var badge = row.querySelector('.nav-updated-badge, .nav-estimate-badge');
     if (badge) badge.remove();
   }
 
@@ -219,34 +265,45 @@
         if (!navDate && snapshot.fund && snapshot.fund.latest_nav) navDate = snapshot.fund.latest_nav.date;
         if (!navDate && estimate && estimate.nav_date) navDate = estimate.nav_date;
 
-        if (navDate) {
-          window.latestFundDataDate = navDate;
-          if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
-        }
-
         var officialChange = officialNavChange(snapshot, navDate);
         if (!Number.isFinite(officialChange) && estimate && Number.isFinite(Number(estimate.estimate_change))) {
           officialChange = Number(estimate.estimate_change);
         }
 
-        var officialUpdated = Boolean(navDate && Number.isFinite(officialChange));
-        if (officialUpdated) {
-          fund.navUpdatedAt = navDate;
-          markNavUpdated(row, navDate, fund);
+        var shanghaiToday = shanghaiDate();
+        var officialUpdated = Boolean(navDate && navDate === shanghaiToday && Number.isFinite(officialChange));
+        var isTrading = isTradingDay(new Date());
+
+        if (isTrading) {
+          if (officialUpdated) {
+            fund.navUpdatedAt = navDate;
+            markNavUpdated(row, navDate, fund);
+          } else {
+            markEstimateBadge(row, fund);
+          }
         } else {
-          delete fund.navUpdatedAt;
-          clearNavUpdated(row);
+          if (navDate) {
+            fund.navUpdatedAt = navDate;
+            markNavUpdated(row, navDate, fund);
+          } else {
+            delete fund.navUpdatedAt;
+            clearNavUpdated(row);
+          }
         }
 
-        var payload = results[1].status === 'fulfilled' ? results[1].value || {} : {};
-        var estimate = payload.estimate || payload;
-        if (estimate && estimate.nav_date && !window.latestFundDataDate) {
-          window.latestFundDataDate = estimate.nav_date;
+        var estimateDate = estimate && (estimate.trade_date || estimate.nav_date);
+        var dataDateToSet = navDate;
+        if (estimateDate && estimateDate === shanghaiToday && !officialUpdated) {
+          dataDateToSet = shanghaiToday;
+        }
+        if (dataDateToSet) {
+          window.latestFundDataDate = dataDateToSet;
           if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
         }
+
         var manualDate = fund.manualEstimateDate;
-        var hasManualEstimate = manualDate === shanghaiDate() && Number.isFinite(Number(fund.manualToday));
-        var manualUnavailable = manualDate === shanghaiDate() && fund.manualEstimateUnavailable === true;
+        var hasManualEstimate = manualDate === shanghaiToday && Number.isFinite(Number(fund.manualToday));
+        var manualUnavailable = manualDate === shanghaiToday && fund.manualEstimateUnavailable === true;
         var change = officialUpdated ? officialChange : (hasManualEstimate ? Number(fund.manualToday) : Number(estimate.estimate_change));
         // When the official NAV has not yet arrived, use the public intraday
         // estimate returned with the refreshed fund snapshot as a safe fallback.

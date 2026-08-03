@@ -24,8 +24,10 @@
   }
 
   function isTradingDay(date) {
-    var day = date.getDay();
-    if (day === 0 || day === 6) return false;
+    var weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai', weekday: 'short'
+    }).format(date);
+    if (weekday === 'Sat' || weekday === 'Sun') return false;
     var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
     }).format(date);
