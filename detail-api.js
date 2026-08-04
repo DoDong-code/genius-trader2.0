@@ -240,7 +240,186 @@
     });
   }
 
-  function setupHistoryExplorer(backdrop, history) {
+  function attachChartInteractiveEvents(container, history, pointsArray, width, height, padding, minimum, maximum, range) {
+    const svg = container.querySelector('svg');
+    if (!svg) return;
+
+    // Create line, dot, and tooltip dynamically
+    const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    line.setAttribute('y1', '0');
+    line.setAttribute('y2', String(height));
+    line.setAttribute('stroke', '#0071e3');
+    line.setAttribute('stroke-width', '1');
+    line.setAttribute('stroke-dasharray', '3,3');
+    line.style.display = 'none';
+    svg.appendChild(line);
+
+    const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    dot.setAttribute('r', '4.5');
+    dot.setAttribute('fill', '#0071e3');
+    dot.setAttribute('stroke', '#ffffff');
+    dot.setAttribute('stroke-width', '1.5');
+    dot.style.display = 'none';
+    svg.appendChild(dot);
+
+    const tooltip = document.createElement('div');
+    tooltip.className = 'chart-interactive-tooltip';
+    tooltip.style.cssText = `
+      display: none;
+      position: absolute;
+      pointer-events: none;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(0, 0, 0, 0.1);
+      border-radius: 8px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #1d1d1f;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      z-index: 10;
+      white-space: nowrap;
+      transform: translate(-50%, -100%);
+      font-family: inherit;
+      font-variant-numeric: tabular-nums;
+      top: 0;
+      left: 0;
+    `;
+    container.style.position = 'relative';
+    container.appendChild(tooltip);
+
+    const firstNav = Number(history[0]?.nav) || 1;
+
+    const onMove = (clientX) => {
+      const rect = svg.getBoundingClientRect();
+      const xInSvg = clientX - rect.left;
+      const pct = Math.max(0, Math.min(1, xInSvg / rect.width));
+      
+      const index = Math.round(pct * (history.length - 1));
+      const point = history[index];
+      if (!point) return;
+
+      const navVal = Number(point.nav);
+      const accNavVal = Number(point.acc_nav ?? point.nav);
+      const chgFromStart = ((navVal - firstNav) / firstNav) * 100;
+
+      // Map back to SVG coordinates
+      const svgX = padding + (index / (history.length - 1)) * (width - padding * 2);
+      const svgY = padding + ((maximum - navVal) / range) * (height - padding * 2);
+
+      line.setAttribute('x1', String(svgX));
+      line.setAttribute('x2', String(svgX));
+      line.style.display = '';
+
+      dot.setAttribute('cx', String(svgX));
+      dot.setAttribute('cy', String(svgY));
+      dot.style.display = '';
+
+      // Calculate container coordinate for tooltip
+      const tooltipX = (svgX / width) * rect.width;
+      const tooltipY = (svgY / height) * rect.height - 8;
+
+      tooltip.style.left = `${tooltipX}px`;
+      tooltip.style.top = `${tooltipY}px`;
+      tooltip.style.display = '';
+      tooltip.innerHTML = `
+        <div style="font-weight: 600; color: #86868b; margin-bottom: 2px;">${point.date}</div>
+        <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px;">
+          <span style="color: #86868b;">单位净值:</span>
+          <b style="font-weight: 600; color: #1d1d1f;">${navVal.toFixed(4)}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 2px;">
+          <span style="color: #86868b;">累计净值:</span>
+          <b style="color: #6e6e73; font-weight: 500;">${accNavVal.toFixed(4)}</b>
+        </div>
+        <div style="display: flex; justify-content: space-between; gap: 12px;">
+          <span style="color: #86868b;">较期初:</span>
+          <b style="font-weight: 650; ${chgFromStart >= 0 ? 'color: #ff3b30 !important;' : 'color: #34a853 !important;'}">${chgFromStart >= 0 ? '+' : ''}${chgFromStart.toFixed(2)}%</b>
+        </div>
+      `;
+    };
+
+    const onLeave = () => {
+      line.style.display = 'none';
+      dot.style.display = 'none';
+      tooltip.style.display = 'none';
+    };
+
+    container.addEventListener('mousemove', (e) => onMove(e.clientX));
+    container.addEventListener('mouseleave', onLeave);
+    container.addEventListener('touchmove', (e) => {
+      if (e.touches[0]) {
+        onMove(e.touches[0].clientX);
+      }
+    }, { passive: true });
+    container.addEventListener('touchend', onLeave);
+  }
+
+  function intradayChartMarkup(fundCode) {
+    const timestamp = Date.now();
+    const imageUrl = `https://j4.dfcfw.com/charts/pic6/${fundCode}.png?v=${timestamp}`;
+    
+    return `
+      <div class="detail-intraday-container" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 12px 0;">
+        <div style="position: relative; width: 100%; max-width: 520px; aspect-ratio: 520/180; border-radius: 12px; overflow: hidden; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.02);">
+          <img src="${imageUrl}" alt="今日分时估值走势" style="width: 100%; height: 100%; object-fit: fill; display: block;" onerror="this.onerror=null; this.parentElement.innerHTML='<div style=\\'display:grid;place-items:center;height:100%;color:#86868b;font-size:12px;\\'>实时估值走势图暂不可用</div>';" />
+        </div>
+        <div class="detail-chart-meta" style="width: 100%; margin-top: 10px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; color: #86868b; font-size: 11px;">
+          <span>交易日 09:30</span>
+          <b style="color: #0071e3; font-weight: 500;">实时估值走势 (每分钟更新)</b>
+          <span style="text-align: right;">15:00</span>
+        </div>
+      </div>
+    `;
+  }
+
+  async function loadStockRealtimeDetails(holdings, backdrop) {
+    if (!Array.isArray(holdings) || !holdings.length) return;
+    const items = [...backdrop.querySelectorAll('.holding-list > div')];
+    
+    await Promise.allSettled(holdings.map(async (item, index) => {
+      const stockCode = item.stock_code ?? item[0];
+      if (!stockCode) return;
+      try {
+        const response = await fetch(`${apiBase}/api/stock/${stockCode}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data && data.success && data.quote) {
+          const changePercent = Number(data.quote.change_percent);
+          if (Number.isFinite(changePercent)) {
+            const node = items[index];
+            if (!node) return;
+            const pctText = (changePercent * 100).toFixed(2);
+            const isPos = changePercent > 0;
+            const isNeg = changePercent < 0;
+            const sign = isPos ? '+' : '';
+            
+            const badgeSpan = document.createElement('span');
+            badgeSpan.className = `holding-stock-change ${isPos ? 'positive' : isNeg ? 'negative' : ''}`;
+            badgeSpan.style.cssText = `
+              display: inline-block;
+              font-size: 11px;
+              font-weight: 650;
+              margin-left: 8px;
+              padding: 1px 5px;
+              border-radius: 4px;
+              background: ${isPos ? 'rgba(255, 59, 48, 0.08)' : isNeg ? 'rgba(52, 168, 83, 0.08)' : 'rgba(0,0,0,0.05)'};
+              color: ${isPos ? '#ff3b30 !important' : isNeg ? '#34a853 !important' : '#86868b'};
+              font-variant-numeric: tabular-nums;
+            `;
+            badgeSpan.textContent = `${sign}${pctText}%`;
+            
+            const labelNode = node.querySelector('span');
+            if (labelNode) {
+              labelNode.appendChild(badgeSpan);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to load quote for stock', stockCode, err);
+      }
+    }));
+  }
+
+  function setupHistoryExplorer(backdrop, history, fund) {
     const chartContent = backdrop.querySelector('.detail-history-content');
     const chartTitle = backdrop.querySelector('.detail-history-title');
     const rangeButtons = [...backdrop.querySelectorAll('.detail-range-button')];
@@ -249,11 +428,31 @@
 
     const renderRange = button => {
       activateButton(rangeButtons, button);
+      if (button.dataset.range === 'today') {
+        chartTitle.textContent = `今日实时估值`;
+        chartContent.classList.remove('content-enter');
+        chartContent.innerHTML = intradayChartMarkup(fund.code);
+        requestAnimationFrame(() => chartContent.classList.add('content-enter'));
+        return;
+      }
       const range = historyRanges.find(item => item.key === button.dataset.range) || historyRanges[3];
       chartTitle.textContent = `${range.label}走势`;
       chartContent.classList.remove('content-enter');
-      chartContent.innerHTML = chartMarkup(historyForRange(history, range.key), range.label);
-      requestAnimationFrame(() => chartContent.classList.add('content-enter'));
+      
+      const periodHistory = historyForRange(history, range.key);
+      chartContent.innerHTML = chartMarkup(periodHistory, range.label);
+      if (periodHistory.length >= 2) {
+        requestAnimationFrame(() => {
+          chartContent.classList.add('content-enter');
+          const values = periodHistory.map(item => Number(item.nav)).filter(Number.isFinite);
+          const minimum = Math.min(...values);
+          const maximum = Math.max(...values);
+          const diff = maximum - minimum || 1;
+          attachChartInteractiveEvents(chartContent, periodHistory, values, 520, 180, 10, minimum, maximum, diff);
+        });
+      } else {
+        requestAnimationFrame(() => chartContent.classList.add('content-enter'));
+      }
     };
 
     const renderRecord = button => {
@@ -435,7 +634,7 @@
       let nextProfit = Number(profitInput.value);
 
       if (!Number.isFinite(nextAmount) || nextAmount < 0 || !Number.isFinite(nextProfit)) {
-        error.textContent = '请填写有效的持有金额和持有收益。';
+        error.textContent = '请填写有效的持有金额 and 持有收益。';
         return;
       }
 
@@ -443,7 +642,7 @@
         const tradeAmount = Number(tradeAmountInput.value);
         const feeRate = Number(feeInput.value);
         if (!Number.isFinite(tradeAmount) || tradeAmount <= 0 || !Number.isFinite(feeRate) || feeRate < 0) {
-          error.textContent = '请填写有效的交易金额和费率。';
+          error.textContent = '请填写有效的交易金额 and 费率。';
           return;
         }
         const fee = tradeAmount * feeRate / 100;
@@ -515,6 +714,7 @@
             </div>
             <div class="detail-history-content"><div class="detail-loading" aria-label="加载历史净值"></div></div>
             <div class="detail-range-tabs" role="tablist" aria-label="净值周期">
+              <button class="detail-range-button" type="button" role="tab" aria-selected="false" data-range="today">今日估值</button>
               ${historyRanges.map(range => `
                 <button class="detail-range-button${range.key === '1y' ? ' active' : ''}"
                   type="button" role="tab" aria-selected="${range.key === '1y'}"
@@ -592,7 +792,7 @@
       const payload = await requestFund(fund.code);
       if (!backdrop.isConnected) return;
       const history = payload.history || [];
-      setupHistoryExplorer(backdrop, history);
+      setupHistoryExplorer(backdrop, history, fund);
       state.textContent = payload.data_status?.history === 'normal'
         ? '✓ 数据正常'
         : '⚠ 等待数据源';
@@ -607,6 +807,9 @@
       backdrop.querySelector('.detail-holdings-content').innerHTML = holdingsMarkup({
         holdings: payload.holdings
       });
+
+      // Load stock realtime price details asynchronously
+      loadStockRealtimeDetails(payload.holdings, backdrop);
 
       const today = resolveTodayData(fund, payload);
       const metricCells = backdrop.querySelectorAll('.detail-values > div');
