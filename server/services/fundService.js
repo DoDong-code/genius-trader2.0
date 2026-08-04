@@ -354,10 +354,20 @@ async function importFund(code, options = {}) {
   };
 }
 
+function dampBondChange(change) {
+  if (change === null || change === undefined || !Number.isFinite(change)) return change;
+  const abs = Math.abs(change);
+  if (abs <= 0.001) return change;
+  const sign = Math.sign(change);
+  const damped = 0.001 + (abs - 0.001) * 0.1;
+  return sign * Math.min(damped, 0.003);
+}
+
 async function getRealtimeFundEstimate(code) {
   const fundCode = assertFundCode(code);
+  let result;
   try {
-    return await fetchRealtimeEstimate(fundCode);
+    result = await fetchRealtimeEstimate(fundCode);
   } catch (error) {
     const latestPair = getDatabase().prepare(`
       SELECT date, nav
@@ -372,7 +382,7 @@ async function getRealtimeFundEstimate(code) {
     if (latest && previous && Number.isFinite(latest.nav) && Number.isFinite(previous.nav) && previous.nav > 0) {
       change = (latest.nav - previous.nav) / previous.nav;
     }
-    return {
+    result = {
       fund_code: fundCode,
       nav_date: latest?.date || null,
       nav: latest?.nav ?? null,
@@ -384,6 +394,15 @@ async function getRealtimeFundEstimate(code) {
       status_note: '非交易日，展示最近交易日数据'
     };
   }
+
+  // Apply bond damping
+  const fund = getFund(fundCode);
+  if (fund && (fund.fund_type?.includes('债券') || fund.fund_type?.includes('纯债') || fund.fund_name?.includes('债券') || fund.fund_name?.includes('纯债'))) {
+    if (Number.isFinite(result.estimate_change)) {
+      result.estimate_change = dampBondChange(result.estimate_change);
+    }
+  }
+  return result;
 }
 
 function getFund(code) {

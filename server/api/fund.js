@@ -99,7 +99,7 @@ async function handleFundApi(request, response, url) {
       return true;
     }
     if (url.searchParams.get('refresh') === '1') {
-      await importFund(match[0]).catch(error => {
+      await importFund(match[0], { force: true }).catch(error => {
         console.warn(`[fund-refresh] ${match[0]}: ${error.message}`);
       });
       fund = getFund(match[0]) || fund;

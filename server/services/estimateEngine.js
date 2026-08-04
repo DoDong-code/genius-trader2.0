@@ -79,6 +79,21 @@ function isQdiiFund(fund) {
   return type.includes('QDII') || type.includes('海外') || name.includes('QDII');
 }
 
+function isBondFund(fund) {
+  const type = fund.fund_type || '';
+  const name = fund.fund_name || '';
+  return type.includes('债券') || type.includes('纯债') || name.includes('债券') || name.includes('纯债');
+}
+
+function dampBondChange(change) {
+  if (change === null || change === undefined || !Number.isFinite(change)) return change;
+  const abs = Math.abs(change);
+  if (abs <= 0.001) return change;
+  const sign = Math.sign(change);
+  const damped = 0.001 + (abs - 0.001) * 0.1;
+  return sign * Math.min(damped, 0.003);
+}
+
 function getNextTradingDay(dateStr) {
   const parts = dateStr.split('-');
   let curr = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -122,13 +137,33 @@ function isUsMarketSessionStartedToday() {
   return minutes >= (9 * 60 + 30);
 }
 
-async function fetchHistoricalChange(stockCode, date) {
+function getYahooSymbol(stockCode) {
+  const code = String(stockCode || '').trim().toUpperCase();
+  if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(code)) {
+    return code;
+  }
+  if (/^\d{5}$/.test(code)) {
+    return code + '.HK';
+  }
+  if (/^\d{6}$/.test(code)) {
+    if (/^(5|6|9)/.test(code)) {
+      return code + '.SS';
+    }
+    if (/^(005930|000660)$/.test(code)) {
+      return code + '.KS';
+    }
+    return code + '.SZ';
+  }
+  return code;
+}
+
+async function fetchHistoricalChange(stockCode, date, options = {}) {
   const { stockSecIds } = require('./marketService');
   const secids = stockSecIds(stockCode);
   for (const secid of secids) {
     try {
       const url = `http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&end=20500101&lmt=15`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
       if (!response.ok) continue;
       const json = await response.json();
       const klines = json?.data?.klines;
@@ -147,6 +182,58 @@ async function fetchHistoricalChange(stockCode, date) {
       // ignore
     }
   }
+
+  // Fallback 1: Yahoo Finance
+  try {
+    const symbol = getYahooSymbol(stockCode);
+    const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    if (response.ok) {
+      const json = await response.json();
+      const result = json?.chart?.result?.[0];
+      const timestamps = result?.timestamp;
+      const closes = result?.indicators?.quote?.[0]?.close;
+      if (timestamps && closes && timestamps.length > 0) {
+        let targetIndex = -1;
+        for (let i = 0; i < timestamps.length; i++) {
+          const d = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+          if (d === date) {
+            targetIndex = i;
+            break;
+          }
+        }
+        if (targetIndex >= 0) {
+          const targetClose = closes[targetIndex];
+          if (targetClose !== null && targetClose !== undefined) {
+            let prevClose = null;
+            for (let j = targetIndex - 1; j >= 0; j--) {
+              if (closes[j] !== null && closes[j] !== undefined) {
+                prevClose = closes[j];
+                break;
+              }
+            }
+            if (prevClose !== null && prevClose > 0) {
+              return (targetClose - prevClose) / prevClose;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    // ignore
+  }
+
+  // Fallback 2: Real-time quote for the stock
+  try {
+    const quote = await quoteFor(stockCode, options);
+    if (quote && Number.isFinite(quote.change_percent)) {
+      return quote.change_percent;
+    }
+  } catch (err) {
+    // ignore
+  }
+
   return null;
 }
 
@@ -226,7 +313,7 @@ async function calculateFundEstimate(code, options = {}) {
   } else {
     quoteResults = await Promise.all(holdings.map(async holding => {
       try {
-        const change = await fetchHistoricalChange(holding.stock_code, targetDate);
+        const change = await fetchHistoricalChange(holding.stock_code, targetDate, options);
         return change !== null ? { ...holding, change_percent: change } : null;
       } catch {
         return null;
@@ -237,11 +324,13 @@ async function calculateFundEstimate(code, options = {}) {
   const pricedHoldings = quoteResults.filter(Boolean);
   const publishedWeight = holdings.reduce((sum, item) => sum + Number(item.weight || 0), 0);
   const pricedWeight = pricedHoldings.reduce((sum, item) => sum + Number(item.weight || 0), 0);
+  
+  const isBond = isBondFund(fund);
   const holdingsChange = pricedWeight > 0 && publishedWeight >= 0.05
-    ? pricedHoldings.reduce((sum, item) => sum + item.change_percent * item.weight, 0) / pricedWeight
+    ? pricedHoldings.reduce((sum, item) => sum + item.change_percent * item.weight, 0)
     : null;
 
-  const sectorKey = sectorForFund(fund);
+  const sectorKey = isBond ? null : sectorForFund(fund);
   const benchmark = sectorKey ? config.sectorBenchmarks[sectorKey] : null;
   let sectorChange = null;
 
@@ -288,6 +377,10 @@ async function calculateFundEstimate(code, options = {}) {
       estimateChange = null;
       fallback = 'unavailable';
     }
+  }
+
+  if (isBondFund(fund) && Number.isFinite(estimateChange)) {
+    estimateChange = dampBondChange(estimateChange);
   }
 
   const confidence = confidenceFor({

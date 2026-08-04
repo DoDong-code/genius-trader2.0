@@ -6,13 +6,29 @@ function round(value, digits = 2) {
   return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
 }
 
+function dampBondChange(change) {
+  if (change === null || change === undefined || !Number.isFinite(change)) return change;
+  const abs = Math.abs(change);
+  if (abs <= 0.001) return change;
+  const sign = Math.sign(change);
+  const damped = 0.001 + (abs - 0.001) * 0.1;
+  return sign * Math.min(damped, 0.003);
+}
+
 function estimateFund(fundCode, amount) {
   const history = getLatestPair(fundCode);
   const latest = history[0] || null;
   const previous = history[1] || null;
-  const todayChange = latest && previous && previous.nav
+  let todayChange = latest && previous && previous.nav
     ? latest.nav / previous.nav - 1
     : 0;
+
+  const db = getDatabase();
+  const fund = db.prepare('SELECT fund_type, fund_name FROM fund WHERE fund_code = ?').get(fundCode);
+  if (fund && (fund.fund_type?.includes('债券') || fund.fund_type?.includes('纯债') || fund.fund_name?.includes('债券') || fund.fund_name?.includes('纯债'))) {
+    todayChange = dampBondChange(todayChange);
+  }
+
   return {
     fund_code: fundCode,
     amount: round(amount),

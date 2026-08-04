@@ -183,6 +183,235 @@
     });
   }
 
+  // --- Column Customization State & Functions ---
+  let sortKey = null;
+  let sortDirection = 'default';
+  const defaultOrder = ['fund', 'holdingProfit', 'todayProfit', 'amount'];
+  const columnLabels = {
+    fund: { desktop: '基金', mobile: '基金' },
+    holdingProfit: { desktop: '持有收益', mobile: '持有' },
+    todayProfit: { desktop: '今日收益', mobile: '今日' },
+    amount: { desktop: '持有金额', mobile: '金额' }
+  };
+
+  function getColumnOrder() {
+    try {
+      const saved = localStorage.getItem('genius-trader-column-order');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length === 4) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+    return [...defaultOrder];
+  }
+
+  function saveColumnOrder(order) {
+    try {
+      localStorage.setItem('genius-trader-column-order', JSON.stringify(order));
+    } catch (e) {}
+  }
+
+  function applyColumnOrder(order) {
+    const rootEl = document.documentElement;
+    order.forEach((key, index) => {
+      rootEl.style.setProperty(`--col-${index}`, `var(--col-width-${key})`);
+      rootEl.style.setProperty(`--col-order-${key}`, index);
+    });
+  }
+
+  // Initialize column order
+  let currentColumnOrder = getColumnOrder();
+  applyColumnOrder(currentColumnOrder);
+
+  // setup drag & drop for actual headers
+  function setupDragAndDrop(header) {
+    if (!header || header.dataset.dragBound) return;
+    header.dataset.dragBound = 'true';
+
+    let draggedKey = null;
+
+    header.addEventListener('dragstart', e => {
+      const span = e.target.closest('[data-col-key]');
+      if (!span) return;
+      draggedKey = span.dataset.colKey;
+      span.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedKey);
+    });
+
+    header.addEventListener('dragover', e => {
+      e.preventDefault();
+      const span = e.target.closest('[data-col-key]');
+      if (span && span.dataset.colKey !== draggedKey) {
+        span.classList.add('drag-over');
+      }
+    });
+
+    header.addEventListener('dragenter', e => {
+      const span = e.target.closest('[data-col-key]');
+      if (span && span.dataset.colKey !== draggedKey) {
+        span.classList.add('drag-over');
+      }
+    });
+
+    header.addEventListener('dragleave', e => {
+      const span = e.target.closest('[data-col-key]');
+      if (span) {
+        span.classList.remove('drag-over');
+      }
+    });
+
+    header.addEventListener('drop', e => {
+      e.preventDefault();
+      const span = e.target.closest('[data-col-key]');
+      if (!span) return;
+      const targetKey = span.dataset.colKey;
+      span.classList.remove('drag-over');
+
+      if (draggedKey && targetKey && draggedKey !== targetKey) {
+        const order = [...currentColumnOrder];
+        const draggedIndex = order.indexOf(draggedKey);
+        const targetIndex = order.indexOf(targetKey);
+        
+        if (draggedIndex !== -1 && targetIndex !== -1) {
+          order.splice(draggedIndex, 1);
+          order.splice(targetIndex, 0, draggedKey);
+          
+          currentColumnOrder = order;
+          saveColumnOrder(order);
+          applyColumnOrder(order);
+
+          // Force update visual positions
+          enhance();
+        }
+      }
+    });
+
+    header.addEventListener('dragend', e => {
+      header.querySelectorAll('.dragging').forEach(el => el.classList.remove('dragging'));
+      header.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      draggedKey = null;
+    });
+  }
+
+  // settings dialog for columns customizer
+  function customizeModal() {
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay fund-modal-overlay';
+    overlay.innerHTML = `
+      <form class="confirm-dialog fund-modal" style="max-width: 440px;">
+        <h2>自定义表头顺序</h2>
+        <p style="margin-bottom: 16px; color: #86868b; font-size: 13px; line-height: 1.5;">点击箭头或拖动选项，自定义持仓列表的左右顺序。</p>
+        <div class="column-list">
+          <!-- Dynamically populated -->
+        </div>
+        <div class="confirm-actions" style="margin-top: 20px;">
+          <button type="button" class="primary column-done-btn" style="width: 100%; border-radius: 8px;">完成</button>
+        </div>
+      </form>`;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const columnListContainer = overlay.querySelector('.column-list');
+
+    function renderList() {
+      columnListContainer.innerHTML = currentColumnOrder.map((key, index) => {
+        const lbl = columnLabels[key];
+        const isFirst = index === 0;
+        const isLast = index === currentColumnOrder.length - 1;
+        return `
+          <div class="column-item" data-key="${key}" draggable="true">
+            <span class="column-item-name">${lbl.desktop}</span>
+            <div class="column-item-actions">
+              <button type="button" class="column-move-btn" data-dir="left" ${isFirst ? 'disabled' : ''} title="向左移动">←</button>
+              <button type="button" class="column-move-btn" data-dir="right" ${isLast ? 'disabled' : ''} title="向右移动">→</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    renderList();
+
+    const close = () => {
+      overlay.classList.remove('visible');
+      setTimeout(() => overlay.remove(), 180);
+    };
+
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay || event.target.closest('.column-done-btn')) {
+        close();
+      }
+
+      const moveBtn = event.target.closest('.column-move-btn');
+      if (moveBtn) {
+        const item = moveBtn.closest('.column-item');
+        const key = item.dataset.key;
+        const dir = moveBtn.dataset.dir;
+        const index = currentColumnOrder.indexOf(key);
+
+        if (dir === 'left' && index > 0) {
+          const temp = currentColumnOrder[index - 1];
+          currentColumnOrder[index - 1] = currentColumnOrder[index];
+          currentColumnOrder[index] = temp;
+        } else if (dir === 'right' && index < currentColumnOrder.length - 1) {
+          const temp = currentColumnOrder[index + 1];
+          currentColumnOrder[index + 1] = currentColumnOrder[index];
+          currentColumnOrder[index] = temp;
+        }
+
+        saveColumnOrder(currentColumnOrder);
+        applyColumnOrder(currentColumnOrder);
+        renderList();
+        enhance();
+      }
+    });
+
+    let modalDraggedKey = null;
+
+    columnListContainer.addEventListener('dragstart', e => {
+      const item = e.target.closest('.column-item');
+      if (!item) return;
+      modalDraggedKey = item.dataset.key;
+      item.style.opacity = '0.5';
+    });
+
+    columnListContainer.addEventListener('dragover', e => {
+      e.preventDefault();
+    });
+
+    columnListContainer.addEventListener('drop', e => {
+      e.preventDefault();
+      const item = e.target.closest('.column-item');
+      if (!item) return;
+      const targetKey = item.dataset.key;
+
+      if (modalDraggedKey && targetKey && modalDraggedKey !== targetKey) {
+        const order = [...currentColumnOrder];
+        const draggedIndex = order.indexOf(modalDraggedKey);
+        const targetIndex = order.indexOf(targetKey);
+
+        if (draggedIndex !== -1 && targetIndex !== -1) {
+          order.splice(draggedIndex, 1);
+          order.splice(targetIndex, 0, modalDraggedKey);
+          currentColumnOrder = order;
+          saveColumnOrder(order);
+          applyColumnOrder(order);
+          renderList();
+          enhance();
+        }
+      }
+    });
+
+    columnListContainer.addEventListener('dragend', e => {
+      columnListContainer.querySelectorAll('.column-item').forEach(el => el.style.opacity = '');
+      modalDraggedKey = null;
+    });
+  }
+
   function enhance() {
     const section = root.querySelector('.list-section');
     if (!section || !section.querySelector('.fund-list')) return;
@@ -190,29 +419,47 @@
     if (!section.querySelector('.holding-head')) {
       const head = document.createElement('div');
       head.className = 'holding-head';
-      head.innerHTML = '<span>基金</span><span><button type="button" class="holding-sort-button" data-sort-key="holdingProfit" aria-sort="none"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></button></span><span><button type="button" class="holding-sort-button" data-sort-key="todayProfit" aria-sort="none"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></button></span><span><button type="button" class="holding-sort-button" data-sort-key="amount" aria-sort="none"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></button></span>';
       section.querySelector('.fund-list').before(head);
     }
 
     const header = section.querySelector('.holding-head');
-    const labels = [
-      { desktop: '持有收益', mobile: '持有' },
-      { desktop: '今日收益', mobile: '今日' },
-      { desktop: '持有金额', mobile: '金额' }
-    ];
-    Array.from(header?.children || []).filter(c => c.tagName === 'SPAN').slice(1).forEach((cell, index) => {
-      if (cell.querySelector('[data-sort-key]')) return;
-      if (!labels[index]) return;
-      const key = index === 0 ? 'holdingProfit' : index === 1 ? 'todayProfit' : 'amount';
-      cell.innerHTML = `<button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="none"><span class="desktop-label">${labels[index].desktop}</span><span class="mobile-label">${labels[index].mobile}</span></button>`;
-    });
+    if (header) {
+      let html = '';
+      currentColumnOrder.forEach(key => {
+        if (key === 'fund') {
+          html += `<span data-col-key="fund">基金</span>`;
+        } else {
+          const lbl = columnLabels[key];
+          const active = key === sortKey && sortDirection !== 'default';
+          const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
+          html += `<span data-col-key="${key}"><button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="${active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}"><span class="desktop-label">${lbl.desktop}${arrow}</span><span class="mobile-label">${lbl.mobile}${arrow}</span></button></span>`;
+        }
+      });
+      header.innerHTML = html;
+
+      Array.from(header.children).forEach(span => {
+        span.setAttribute('draggable', 'true');
+      });
+
+      setupDragAndDrop(header);
+    }
 
     const account = window.portfolioState.accounts[window.portfolioState.getActive()];
     section.querySelectorAll('.fund-row').forEach(row => {
+      const colFund = row.querySelector('.fund-info');
+      const colEst = row.querySelector('.fund-est');
+      const colToday = row.querySelector('.fund-today');
+      const colAmount = row.querySelector('.fund-amount');
+
+      if (colFund) colFund.dataset.colKey = 'fund';
+      if (colEst) colEst.dataset.colKey = 'holdingProfit';
+      if (colToday) colToday.dataset.colKey = 'todayProfit';
+      if (colAmount) colAmount.dataset.colKey = 'amount';
+
       const fund = account.funds.find(item => item.code === row.dataset.code);
       if (fund && Number.isFinite(fund.holdingProfit)) {
-        const strong = row.children[1]?.querySelector('strong');
-        const span = row.children[1]?.querySelector('span');
+        const strong = colEst?.querySelector('strong');
+        const span = colEst?.querySelector('span');
         const profit = `${fund.holdingProfit < 0 ? '−' : ''}¥${Math.abs(fund.holdingProfit).toLocaleString('zh-CN', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2
@@ -222,7 +469,7 @@
         if (span && span.textContent !== rateText) span.textContent = rateText;
       }
 
-      [row.children[1], row.children[2]].forEach(cell => {
+      [colEst, colToday].forEach(cell => {
         if (!cell || cell.dataset.estimateUnavailable === 'true') return;
         const strong = cell.querySelector('strong');
         const span = cell.querySelector('span');
@@ -248,6 +495,16 @@
         modal();
       });
     }
+
+    const customizeBtn = section.querySelector('[data-action="customize-columns"]');
+    if (customizeBtn && !customizeBtn.dataset.bound) {
+      customizeBtn.dataset.bound = '1';
+      customizeBtn.addEventListener('click', event => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        customizeModal();
+      });
+    }
   }
 
   // Keep the observer at the view boundary so row/cell updates do not make
@@ -256,8 +513,6 @@
 
   if (!root.dataset.fundSortBound) {
     root.dataset.fundSortBound = 'true';
-    let sortKey = null;
-    let sortDirection = 'default';
 
     const sortValue = (fund, key) => {
       if (key === 'amount') return Number(fund.amount) || 0;
@@ -270,15 +525,22 @@
     };
 
     const refreshSortLabels = () => {
-      root.querySelectorAll('[data-sort-key]').forEach(button => {
-        const active = button.dataset.sortKey === sortKey && sortDirection !== 'default';
-        const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
-        const key = button.dataset.sortKey;
-        const dText = key === 'holdingProfit' ? '持有收益' : key === 'todayProfit' ? '今日收益' : '持有金额';
-        const mText = key === 'holdingProfit' ? '持有' : key === 'todayProfit' ? '今日' : '金额';
-        button.innerHTML = `<span class="desktop-label">${dText}${arrow}</span><span class="mobile-label">${mText}${arrow}</span>`;
-        button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
-      });
+      const header = root.querySelector('.holding-head');
+      if (header) {
+        currentColumnOrder.forEach(key => {
+          if (key !== 'fund') {
+            const span = header.querySelector(`[data-col-key="${key}"]`);
+            const button = span?.querySelector('[data-sort-key]');
+            if (button) {
+              const lbl = columnLabels[key];
+              const active = key === sortKey && sortDirection !== 'default';
+              const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
+              button.innerHTML = `<span class="desktop-label">${lbl.desktop}${arrow}</span><span class="mobile-label">${lbl.mobile}${arrow}</span>`;
+              button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+            }
+          }
+        });
+      }
     };
 
     root.addEventListener('click', event => {

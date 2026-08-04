@@ -194,19 +194,19 @@
     });
   }
 
-  function refreshFund(code) {
-    var endpoint = API_BASE + '/api/fund/' + encodeURIComponent(code) + '?refresh=1';
+  function refreshFund(code, force) {
+    var endpoint = API_BASE + '/api/fund/' + encodeURIComponent(code) + '?refresh=1' + (force ? '&force=1' : '');
     return requestJson(endpoint).catch(function (error) {
       if (error.status !== 404) throw error;
-      return requestJson(API_BASE + '/api/fund/import/' + encodeURIComponent(code))
+      var importUrl = API_BASE + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
+      return requestJson(importUrl)
         .then(function () { return requestJson(endpoint); });
     });
   }
 
-  function estimateFund(code, amount) {
-    return requestJson(
-      API_BASE + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount)
-    );
+  function estimateFund(code, amount, force) {
+    var endpoint = API_BASE + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
+    return requestJson(endpoint);
   }
 
   function officialNavChange(snapshot, navDate) {
@@ -246,8 +246,8 @@
     drain();
   }
 
-  function hydrateRow(row) {
-    if (!row || row.dataset.estimateState === 'loading' || row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable') return;
+  function hydrateRow(row, force) {
+    if (!row || row.dataset.estimateState === 'loading' || (!force && (row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable'))) return;
     var code = row.dataset.code;
     var fund = currentFund(code);
     if (!code || !fund) return;
@@ -255,7 +255,7 @@
     row.dataset.estimateState = 'loading';
 
     enqueue(function () {
-      return Promise.allSettled([refreshFund(code), estimateFund(code, fund.amount)]).then(function (results) {
+      return Promise.allSettled([refreshFund(code, force), estimateFund(code, fund.amount, force)]).then(function (results) {
         if (!row.isConnected) return;
         var snapshot = results[0].status === 'fulfilled' ? results[0].value || {} : {};
         var payload = results[1].status === 'fulfilled' ? results[1].value || {} : {};
@@ -345,15 +345,17 @@
     });
   }
 
-  function scan() {
-    document.querySelectorAll('#view-root .fund-row[data-code]').forEach(hydrateRow);
+  function scan(force) {
+    document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
+      hydrateRow(row, force);
+    });
   }
 
   window.refreshFundEstimates = function () {
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
       delete row.dataset.estimateState;
     });
-    scan();
+    scan(true);
   };
 
   var scanQueued = false;
