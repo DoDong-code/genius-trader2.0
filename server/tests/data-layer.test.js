@@ -47,7 +47,7 @@ function seedDatabase() {
   db.prepare(`
     INSERT INTO fund_holdings (fund_code, stock_code, stock_name, weight, report_date)
     VALUES (?, ?, ?, ?, ?)
-  `).run('019633', '600000', '测试股票', 0.4, '2026-06-30');
+  `).run('019633', '600000', '测试股票', 1.0, '2026-06-30');
 
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'

@@ -1,5 +1,5 @@
 (function () {
-  const apiBase = window.FUND_API_BASE || '';
+  const getApiBase = () => window.FUND_API_BASE || '';
   const root = document.querySelector('#view-root');
   if (!root || !window.portfolioState) return;
 
@@ -379,7 +379,7 @@
       const stockCode = item.stock_code ?? item[0];
       if (!stockCode) return;
       try {
-        const response = await fetch(`${apiBase}/api/stock/${stockCode}`);
+        const response = await fetch(`${getApiBase()}/api/stock/${stockCode}`);
         if (!response.ok) return;
         const data = await response.json();
         if (data && data.success && data.quote) {
@@ -775,11 +775,11 @@
   }
 
   async function requestFund(code) {
-    let response = await fetch(`${apiBase}/api/fund/${code}?refresh=1`);
+    let response = await fetch(`${getApiBase()}/api/fund/${code}?refresh=1`);
     if (response.status === 404) {
-      const imported = await fetch(`${apiBase}/api/fund/import/${code}`);
+      const imported = await fetch(`${getApiBase()}/api/fund/import/${code}`);
       if (!imported.ok) throw new Error('基金导入失败');
-      response = await fetch(`${apiBase}/api/fund/${code}?refresh=1`);
+      response = await fetch(`${getApiBase()}/api/fund/${code}?refresh=1`);
     }
     if (!response.ok) throw new Error('基金数据读取失败');
     return response.json();

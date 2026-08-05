@@ -1,0 +1,190 @@
+/* pages/analysis/analysis.wxss */
+
+.analysis-header {
+  padding: 40rpx 0 24rpx;
+}
+
+.account-title {
+  font-size: 46rpx;
+  font-weight: 800;
+  color: #ffffff;
+  display: block;
+  margin-top: 6rpx;
+  letter-spacing: -1rpx;
+}
+
+/* Analysis standard card block */
+.analysis-block {
+  padding: 36rpx !important;
+  margin-bottom: 28rpx;
+}
+
+.block-title {
+  font-size: 30rpx;
+  font-weight: 750;
+  color: #ffffff;
+  display: block;
+}
+
+.block-subtitle {
+  font-size: 20rpx;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 6rpx;
+  margin-bottom: 36rpx;
+}
+
+/* Allocation bars list style */
+.allocation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 28rpx;
+}
+
+.allocation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+}
+
+.allocation-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.alloc-cat-name {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.alloc-cat-vals {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.alloc-cat-amount {
+  font-size: 24rpx;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.alloc-cat-pct {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--brand-blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-bar-bg {
+  background-color: rgba(255, 255, 255, 0.05);
+  height: 14rpx;
+  border-radius: 999rpx;
+  width: 100%;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  transition: width 0.3s ease-out;
+}
+
+/* Strategy manifest lists style */
+.strategy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.strategy-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.bullet-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background-color: var(--brand-blue);
+  margin-top: 14rpx;
+  flex-shrink: 0;
+}
+
+.bullet-text {
+  font-size: 26rpx;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.5;
+}
+
+/* Retired/Closed positions historical list */
+.retired-list {
+  display: flex;
+  flex-direction: column;
+  gap: 24rpx;
+}
+
+.retired-item {
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 24rpx;
+}
+
+.retired-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding-bottom: 18rpx;
+  border-bottom: 1px solid var(--border-color-faint);
+  margin-bottom: 16rpx;
+}
+
+.retired-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.retired-fund-name {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.retired-fund-code {
+  font-size: 18rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.retired-date {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+}
+
+.retired-reasons {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.reason-bullet {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.reason-check {
+  font-size: 20rpx;
+  color: var(--brand-green);
+  font-weight: bold;
+}
+
+.reason-text {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+}

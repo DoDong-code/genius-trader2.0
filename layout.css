@@ -868,7 +868,6 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   /* 8. 三、基金名称 */
   .fund-info,
   .holding-info {
-    grid-column: 1 !important;
     grid-row: 1 !important;
     min-width: 0 !important;
     width: 100% !important;
@@ -952,9 +951,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     margin: 0 !important;
   }
 
-  .fund-est { grid-column: 2 !important; }
-  .fund-today { grid-column: 3 !important; }
-  .fund-amount { grid-column: 4 !important; }
+
 
   .fund-est strong,
   .fund-today strong,

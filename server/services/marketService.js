@@ -372,8 +372,24 @@ function stockSecId(code) {
   return `0.${normalized}`;
 }
 
+const ALPHANUMERIC_MAPPING = {
+  'TENCENT': '00700',
+  'ALIBABA': '09988',
+  'MEITUAN': '03690',
+  'XIAOMI': '01810',
+  'NETEASE': '09999',
+  'BAIDU': '09888',
+  'JD_HK': '09618',
+  'LENOVO': '00992',
+  'SMIC_HK': '00981',
+  'BYD': '01211'
+};
+
 function stockSecIds(code) {
-  const normalized = String(code || '').trim().toUpperCase();
+  let normalized = String(code || '').trim().toUpperCase();
+  if (ALPHANUMERIC_MAPPING[normalized]) {
+    normalized = ALPHANUMERIC_MAPPING[normalized];
+  }
   if (/^\d{5}$/.test(normalized)) return [`116.${normalized}`];
   if (/^\d{6}$/.test(normalized)) {
     const domestic = /^(5|6|9)/.test(normalized) ? `1.${normalized}` : `0.${normalized}`;

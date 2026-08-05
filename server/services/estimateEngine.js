@@ -265,7 +265,17 @@ function confidenceFor({ holdingsCount, quotedCount, publishedWeight, sectorAvai
 
 async function calculateFundEstimate(code, options = {}) {
   const fundCode = assertFundCode(code);
-  const fund = getFund(fundCode);
+  let fund = getFund(fundCode);
+  if (!fund) {
+    try {
+      console.log(`[auto-import] Fund ${fundCode} not found in DB. Auto-importing...`);
+      const { importFund } = require('./fundService');
+      await importFund(fundCode);
+      fund = getFund(fundCode);
+    } catch (importErr) {
+      console.error(`[auto-import-failed] Fund ${fundCode}: ${importErr.message}`);
+    }
+  }
   if (!fund) {
     const error = new Error(`基金 ${fundCode} 尚未导入`);
     error.statusCode = 404;

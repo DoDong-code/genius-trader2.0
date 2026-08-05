@@ -1,6 +1,6 @@
 (function () {
   const root = document.querySelector('#view-root');
-  const apiBase = window.FUND_API_BASE || '';
+  const getApiBase = () => window.FUND_API_BASE || '';
 
   function getLocalCatalog() {
     const catalog = new Map();
@@ -19,7 +19,7 @@
 
   async function loadRemoteCatalog(catalog) {
     try {
-      const response = await fetch(`${apiBase}/api/funds`);
+      const response = await fetch(`${getApiBase()}/api/funds`);
       if (!response.ok) return;
       const payload = await response.json();
       (payload.funds || []).forEach(fund => {
@@ -50,11 +50,11 @@
     }
     status.textContent = '正在查询基金信息…';
     try {
-      let response = await fetch(`${apiBase}/api/fund/${code}`);
+      let response = await fetch(`${getApiBase()}/api/fund/${code}`);
       if (response.status === 404) {
-        const imported = await fetch(`${apiBase}/api/fund/import/${code}`);
+        const imported = await fetch(`${getApiBase()}/api/fund/import/${code}`);
         if (!imported.ok) throw new Error('import failed');
-        response = await fetch(`${apiBase}/api/fund/${code}`);
+        response = await fetch(`${getApiBase()}/api/fund/${code}`);
       }
       if (!response.ok) throw new Error('lookup failed');
       const payload = await response.json();

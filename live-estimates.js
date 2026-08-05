@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  var API_BASE = window.FUND_API_BASE || '';
+  var getApiBase = function() { return window.FUND_API_BASE || ''; };
   var active = 0;
   var MAX_CONCURRENT = 3;
   var queue = [];
@@ -195,17 +195,17 @@
   }
 
   function refreshFund(code, force) {
-    var endpoint = API_BASE + '/api/fund/' + encodeURIComponent(code) + '?refresh=1' + (force ? '&force=1' : '');
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '?refresh=1' + (force ? '&force=1' : '');
     return requestJson(endpoint).catch(function (error) {
       if (error.status !== 404) throw error;
-      var importUrl = API_BASE + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
+      var importUrl = getApiBase() + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
       return requestJson(importUrl)
         .then(function () { return requestJson(endpoint); });
     });
   }
 
   function estimateFund(code, amount, force) {
-    var endpoint = API_BASE + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
     return requestJson(endpoint);
   }
 

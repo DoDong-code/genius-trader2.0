@@ -95,6 +95,15 @@ async function handleFundApi(request, response, url) {
   if (match) {
     let fund = getFund(match[0]);
     if (!fund) {
+      try {
+        console.log(`[auto-import] API fund details: auto-importing ${match[0]}...`);
+        await importFund(match[0]);
+        fund = getFund(match[0]);
+      } catch (importErr) {
+        console.error(`[auto-import] Failed to auto-import fund ${match[0]} during details request:`, importErr.message);
+      }
+    }
+    if (!fund) {
       sendJson(response, 404, { success: false, error: '基金尚未导入' });
       return true;
     }
@@ -122,7 +131,7 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
-  match = routeMatch(url.pathname, /^\/api\/stock\/(\d{5,6})$/);
+  match = routeMatch(url.pathname, /^\/api\/stock\/([A-Za-z0-9.-]+)$/);
   if (match) {
     const quote = await fetchStockQuote(match[0]);
     if (!quote) {

@@ -1,0 +1,89 @@
+<!-- pages/analysis/analysis.wxml -->
+<view class="container">
+  
+  <!-- Active Account Title -->
+  <view class="analysis-header">
+    <text class="eyebrow">PORTFOLIO DIAGNOSTIC</text>
+    <text class="account-title">{{activeAccountName}} 配置诊断</text>
+  </view>
+
+  <!-- Allocation Ratios Card -->
+  <view class="analysis-block card">
+    <text class="block-title">资产配比分析</text>
+    <text class="block-subtitle">当前账户下的细分大类资产构成</text>
+    
+    <view class="allocation-list" wx:if="{{allocations.length > 0}}">
+      <block wx:for="{{allocations}}" wx:key="category">
+        <view class="allocation-item">
+          <view class="allocation-meta">
+            <text class="alloc-cat-name">{{item.category}}</text>
+            <view class="alloc-cat-vals">
+              <text class="alloc-cat-amount">{{item.amountStr}}</text>
+              <text class="alloc-cat-pct">{{item.pctStr}}</text>
+            </view>
+          </view>
+          
+          <!-- Visual Progress Bar Meter -->
+          <view class="progress-bar-bg">
+            <view class="progress-bar-fill" 
+                  style="width: {{item.pct}}%; background-color: {{item.color}};">
+            </view>
+          </view>
+        </view>
+      </block>
+    </view>
+    
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📊</view>
+      <text class="empty-text">当前账户无持仓，无法生成配置比例</text>
+    </view>
+  </view>
+
+  <!-- Strategic Manifesto Bullets -->
+  <view class="analysis-block card">
+    <text class="block-title">投资操作策略</text>
+    <text class="block-subtitle">指导当前账户投资纪律的核心方针</text>
+    
+    <view class="strategy-list" wx:if="{{strategy.length > 0}}">
+      <block wx:for="{{strategy}}" wx:key="*this">
+        <view class="strategy-bullet">
+          <view class="bullet-dot"></view>
+          <text class="bullet-text">{{item}}</text>
+        </view>
+      </block>
+    </view>
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">💡</view>
+      <text class="empty-text">未设立投资策略方针。可在设置中增加策略细则</text>
+    </view>
+  </view>
+
+  <!-- Retired Transactions Timeline -->
+  <view class="analysis-block card" wx:if="{{closedPositions.length > 0}}">
+    <text class="block-title">已清仓退出记录</text>
+    <text class="block-subtitle">历史调仓及减阻获利回撤理由归档</text>
+    
+    <view class="retired-list">
+      <block wx:for="{{closedPositions}}" wx:key="code">
+        <view class="retired-item">
+          <view class="retired-header">
+            <view class="retired-title-row">
+              <text class="retired-fund-name">{{item.name}}</text>
+              <text class="retired-fund-code">{{item.code}}</text>
+            </view>
+            <text class="retired-date">清仓时间: {{item.closedBefore || '近期'}}</text>
+          </view>
+          
+          <view class="retired-reasons">
+            <block wx:for="{{item.reason}}" wx:for-item="reasonBullet" wx:key="*this">
+              <view class="reason-bullet">
+                <text class="reason-check">✓</text>
+                <text class="reason-text">{{reasonBullet}}</text>
+              </view>
+            </block>
+          </view>
+        </view>
+      </block>
+    </view>
+  </view>
+</view>
