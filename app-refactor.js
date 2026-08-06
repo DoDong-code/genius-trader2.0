@@ -1,5 +1,6 @@
 (function(){
   window.FUND_API_BASE = localStorage.getItem('FUND_API_BASE') || '';
+  window.AI_API_KEY = localStorage.getItem('AI_API_KEY') || '';
   const s=window.portfolioState;if(!s)return;
   const root=document.querySelector('#view-root'),title=document.querySelector('#page-title');
   let view='portfolio',editing=false,selected=new Set();
@@ -43,7 +44,11 @@
       };
     }).sort((x, y) => y.amount - x.amount);
 
-    // Calculate dynamic health metrics and recommendations based on standard asset models
+    const strategyList = a.strategy || [];
+    const closedPositions = a.closedPositions || [];
+
+    // Parse targets dynamically from user's active configuration strategies
+    // Fallback to standard asset targets
     const categoryTargets = {
       '权益类': 35,
       '黄金类': 20,
@@ -52,62 +57,101 @@
       '其他': 10
     };
 
+    strategyList.forEach(st => {
+      const keys = ['权益类', '黄金类', '债券类', '海外类', '其他'];
+      keys.forEach(k => {
+        const regex = new RegExp(k + '[^0-9%]*(\\d+)\\s*%');
+        const match = st.match(regex);
+        if (match) {
+          categoryTargets[k] = parseFloat(match[1]);
+        }
+      });
+    });
+
     const activeCategories = new Set(funds.map(f => f.category || '其他'));
     let activeTargetsSum = 0;
     activeCategories.forEach(cat => {
-      activeTargetsSum += categoryTargets[cat] || categoryTargets['其他'];
+      activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10;
     });
 
     const getNormalizedCategoryTarget = (cat) => {
-      if (activeTargetsSum === 0) return categoryTargets[cat] || 10;
-      const base = categoryTargets[cat] || categoryTargets['其他'];
+      if (activeTargetsSum === 0) return (categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10);
+      const base = categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10;
       return (base / activeTargetsSum) * 100;
     };
 
-    // Calculate diagnostic score
-    const uniqueCats = new Set(funds.map(f => f.category || '其他'));
+    // Load cached AI diagnosis results for the specific active account to prevent cross-account sync issues
+    const activeAccountName = a.name || '默认账户';
+    let cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS_' + activeAccountName);
+    let cachedTime = localStorage.getItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
+    let cachedModel = localStorage.getItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
+
+    // Fallback to global cache if account-specific cache is empty
+    if (!cachedAnalysisStr) {
+      cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS');
+      cachedTime = window.lastAnalysisTime || '';
+      cachedModel = localStorage.getItem('AI_MODEL_NAME') || '';
+    }
+
+    let aiResult = null;
+    if (cachedAnalysisStr) {
+      try {
+        aiResult = JSON.parse(cachedAnalysisStr);
+      } catch (e) {
+        console.error('Failed to parse cached AI analysis:', e);
+      }
+    }
+
+    // Dynamic metrics dynamically evaluated by AI when available, otherwise fallback to local rule calculations
     let healthScore = 60;
     let healthText = '亟待调整';
     let healthColor = '#ff3b30';
+    let deviationText = '当前账户无持仓数据';
 
-    if (uniqueCats.size >= 4) {
-      healthScore = 95;
-      healthText = '配置极佳';
-      healthColor = '#34a853';
-    } else if (uniqueCats.size === 3) {
-      healthScore = 85;
-      healthText = '配置良好';
-      healthColor = '#34a853';
-    } else if (uniqueCats.size === 2) {
-      healthScore = 75;
-      healthText = '配比一般';
-      healthColor = '#ff9500';
-    } else if (uniqueCats.size === 1) {
-      healthScore = 60;
-      healthText = '风险集中';
-      healthColor = '#ff3b30';
+    if (aiResult) {
+      healthScore = aiResult.healthScore !== undefined ? aiResult.healthScore : 60;
+      healthText = aiResult.healthText || '亟待调整';
+      healthColor = aiResult.healthColor || '#ff3b30';
+      deviationText = aiResult.deviationText || '由 AI 动态评估组合偏离状态';
+    } else {
+      const uniqueCats = new Set(funds.map(f => f.category || '其他'));
+      if (uniqueCats.size >= 4) {
+        healthScore = 95;
+        healthText = '配置极佳';
+        healthColor = '#34a853';
+      } else if (uniqueCats.size === 3) {
+        healthScore = 85;
+        healthText = '配置良好';
+        healthColor = '#34a853';
+      } else if (uniqueCats.size === 2) {
+        healthScore = 75;
+        healthText = '配比一般';
+        healthColor = '#ff9500';
+      } else if (uniqueCats.size === 1) {
+        healthScore = 60;
+        healthText = '风险集中';
+        healthColor = '#ff3b30';
+      }
+
+      let maxCatPct = 0;
+      allocations.forEach(al => {
+        if (al.pct > maxCatPct) maxCatPct = al.pct;
+      });
+
+      deviationText = '组合配比均衡度良好';
+      if (maxCatPct > 65) {
+        deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
+      } else if (maxCatPct > 45) {
+        deviationText = '大类配比略有偏离，建议微调持仓结构';
+      } else if (funds.length === 0) {
+        deviationText = '当前账户无持仓数据';
+      }
     }
 
-    let maxCatPct = 0;
-    allocations.forEach(al => {
-      if (al.pct > maxCatPct) maxCatPct = al.pct;
-    });
-
-    let deviationText = '组合配比均衡度良好';
-    if (maxCatPct > 65) {
-      deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
-    } else if (maxCatPct > 45) {
-      deviationText = '大类配比略有偏离，建议微调持仓结构';
-    } else if (funds.length === 0) {
-      deviationText = '当前账户无持仓数据';
-    }
-
-    // Today's estimate change
-    const todayEstReturn = funds.reduce((x, f) => x + (f.amount * (f.today || 0)), 0);
+    // Today's estimated return (strictly fetched from unified window.portfolio.todayProfit)
+    const todayEstReturn = window.portfolio ? window.portfolio.todayProfit : 0;
     const todayEstRate = totalAssets > 0 ? (todayEstReturn / totalAssets) * 100 : 0;
 
-    const strategyList = a.strategy || [];
-    const closedPositions = a.closedPositions || [];
 
     // Smart Investment Strategy constraint parsing
     const parseStrategyDetails = (f, list) => {
@@ -329,10 +373,23 @@
               </div>
               ` : ''}
 
-              ${window.lastAnalysisTime ? `
-              <div style="display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: #34a853; font-weight: 500; margin-top: -2px; background: rgba(52, 168, 83, 0.06); padding: 6px 12px; border-radius: 8px; align-self: flex-start;">
-                <span style="width: 6px; height: 6px; background-color: #34a853; border-radius: 50%; display: inline-block; animation: pulse 2s infinite;"></span>
-                <span>已成功同步今日最新基金净值估算值并完成策略比对（诊断生成时间: ${window.lastAnalysisTime}）</span>
+              <!-- AI Diagnostics Info (Model & Time) -->
+              ${cachedTime ? `
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; border-top: 1px solid rgba(0,0,0,0.06); padding-top: 14px; margin-top: 8px;">
+                <div style="background: rgba(52, 168, 83, 0.02); border: 1px solid rgba(52, 168, 83, 0.08); padding: 12px 16px; border-radius: 10px; display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-size: 11px; color: #86868b; font-weight: 500; text-transform: uppercase;">AI模型</span>
+                  <strong style="font-size: 14px; color: #34a853; font-weight: 600;">${esc(cachedModel || '未知模型')}</strong>
+                </div>
+                <div style="background: rgba(52, 168, 83, 0.02); border: 1px solid rgba(52, 168, 83, 0.08); padding: 12px 16px; border-radius: 10px; display: flex; flex-direction: column; gap: 4px;">
+                  <span style="font-size: 11px; color: #86868b; font-weight: 500; text-transform: uppercase;">分析时间</span>
+                  <strong style="font-size: 14px; color: #34a853; font-weight: 600;">${esc(cachedTime)}</strong>
+                </div>
+              </div>
+              ` : ''}
+
+              ${aiResult && aiResult.summary ? `
+              <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 12px;">
+                <strong>💡 AI 诊断总结：</strong>${esc(aiResult.summary)}
               </div>
               ` : ''}
             </div>
@@ -365,49 +422,83 @@
                       ${funds.map(f => {
                         const cat = f.category || '其他';
                         const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-                        const targetPct = getNormalizedCategoryTarget(cat) / countInCat;
+                        
+                        // Dynamic targets computed according to user investment strategies (Investment Discipline)
+                        const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
+                        const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
+                        const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
                         const targetAmt = totalAssets * (targetPct / 100);
+
                         const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
                         const diffPct = currentPct - targetPct;
 
                         // Parse strategies matching this fund
                         const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
 
+                        // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
+                        const getAiSuggestion = (fund) => {
+                          if (!aiResult || !aiResult.suggestions) return null;
+                          return aiResult.suggestions.find(s => 
+                            (s.code && String(s.code) === String(fund.code)) || 
+                            (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
+                          );
+                        };
+
+                        const aiSugg = getAiSuggestion(f);
+
                         let adviceText = '';
                         let adviceColor = '';
                         let adviceBg = '';
+                        let adviceReason = '';
 
-                        if (diffPct > 4) {
-                          adviceText = '分批止盈 / 适当减仓';
-                          if (parsedRules.recovery) {
-                            adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
-                          } else if (parsedRules.targetReturn) {
-                            adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
-                          }
-                          adviceColor = '#ff9500'; // Amber/Orange
-                          adviceBg = 'rgba(255, 149, 0, 0.08)';
-                        } else if (diffPct < -4) {
-                          if (parsedRules.suspendedBuy) {
-                            adviceText = '暂停申购 / 观望';
-                            adviceColor = '#86868b'; // Gray
-                            adviceBg = 'rgba(134, 134, 139, 0.08)';
-                          } else {
-                            adviceText = '分批低吸 / 逢低定投';
-                            if (parsedRules.fixedInvest) {
-                              adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
-                            } else if (parsedRules.limit) {
-                              adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
-                            }
+                        if (aiSugg) {
+                          adviceText = aiSugg.action;
+                          adviceReason = aiSugg.reason;
+                          if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
                             adviceColor = '#ff3b30'; // Red
                             adviceBg = 'rgba(255, 59, 48, 0.08)';
+                          } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
+                            adviceColor = '#ff9500'; // Amber
+                            adviceBg = 'rgba(255, 149, 0, 0.08)';
+                          } else {
+                            adviceColor = '#0071e3'; // Blue
+                            adviceBg = 'rgba(0, 113, 227, 0.08)';
                           }
                         } else {
-                          adviceText = '持有待涨 / 观望';
-                          if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
-                            adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
+                          // Fallback to local rule engine
+                          if (diffPct > 4) {
+                            adviceText = '分批止盈 / 适当减仓';
+                            if (parsedRules.recovery) {
+                              adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
+                            } else if (parsedRules.targetReturn) {
+                              adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
+                            }
+                            adviceColor = '#ff9500'; // Amber/Orange
+                            adviceBg = 'rgba(255, 149, 0, 0.08)';
+                          } else if (diffPct < -4) {
+                            if (parsedRules.suspendedBuy) {
+                              adviceText = '暂停申购 / 观望';
+                              adviceColor = '#86868b'; // Gray
+                              adviceBg = 'rgba(134, 134, 139, 0.08)';
+                            } else {
+                              adviceText = '分批低吸 / 逢低定投';
+                              if (parsedRules.fixedInvest) {
+                                adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
+                              } else if (parsedRules.limit) {
+                                adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
+                              }
+                              adviceColor = '#ff3b30'; // Red
+                              adviceBg = 'rgba(255, 59, 48, 0.08)';
+                            }
+                          } else {
+                            adviceText = '持有待涨 / 观望';
+                            if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
+                              adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
+                            }
+                            adviceColor = '#0071e3'; // Blue
+                            adviceBg = 'rgba(0, 113, 227, 0.08)';
                           }
-                          adviceColor = '#0071e3'; // Blue
-                          adviceBg = 'rgba(0, 113, 227, 0.08)';
+                          adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
                         }
 
                         const todayRate = Number(f.today || 0) * 100;
@@ -434,8 +525,17 @@
                             </td>
                             <td style="padding: 16px; vertical-align: middle; text-align: right;">
                               <span style="display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
-                                ${adviceText}
+                                ${esc(adviceText)}
                               </span>
+                            </td>
+                          </tr>
+                          <!-- Rationale Expandable Block -->
+                          <tr style="border-bottom: 1px solid rgba(0,0,0,0.04); background: rgba(0,0,0,0.005);">
+                            <td colspan="5" style="padding: 8px 16px 12px 16px; font-size: 12px; color: #6e6e73; line-height: 1.5;">
+                              <div style="display: flex; gap: 6px; align-items: flex-start;">
+                                <span style="color: ${adviceColor}; font-weight: 600; flex-shrink: 0;">评估理由：</span>
+                                <span>${esc(adviceReason)}</span>
+                              </div>
                             </td>
                           </tr>
                         `;
@@ -449,49 +549,83 @@
                   ${funds.map(f => {
                     const cat = f.category || '其他';
                     const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-                    const targetPct = getNormalizedCategoryTarget(cat) / countInCat;
+                    
+                    // Dynamic targets computed according to user investment strategies (Investment Discipline)
+                    const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
+                    const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
+                    const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
                     const targetAmt = totalAssets * (targetPct / 100);
+
                     const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
                     const diffPct = currentPct - targetPct;
 
                     // Parse strategies matching this fund
                     const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
 
+                    // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
+                    const getAiSuggestion = (fund) => {
+                      if (!aiResult || !aiResult.suggestions) return null;
+                      return aiResult.suggestions.find(s => 
+                        (s.code && String(s.code) === String(fund.code)) || 
+                        (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
+                      );
+                    };
+
+                    const aiSugg = getAiSuggestion(f);
+
                     let adviceText = '';
                     let adviceColor = '';
                     let adviceBg = '';
+                    let adviceReason = '';
 
-                    if (diffPct > 4) {
-                      adviceText = '分批止盈 / 适当减仓';
-                      if (parsedRules.recovery) {
-                        adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
-                      } else if (parsedRules.targetReturn) {
-                        adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
-                      }
-                      adviceColor = '#ff9500';
-                      adviceBg = 'rgba(255, 149, 0, 0.08)';
-                    } else if (diffPct < -4) {
-                      if (parsedRules.suspendedBuy) {
-                        adviceText = '暂停申购 / 观望';
-                        adviceColor = '#86868b';
-                        adviceBg = 'rgba(134, 134, 139, 0.08)';
-                      } else {
-                        adviceText = '分批低吸 / 逢低定投';
-                        if (parsedRules.fixedInvest) {
-                          adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
-                        } else if (parsedRules.limit) {
-                          adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
-                        }
+                    if (aiSugg) {
+                      adviceText = aiSugg.action;
+                      adviceReason = aiSugg.reason;
+                      if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
                         adviceColor = '#ff3b30';
                         adviceBg = 'rgba(255, 59, 48, 0.08)';
+                      } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
+                        adviceColor = '#ff9500';
+                        adviceBg = 'rgba(255, 149, 0, 0.08)';
+                      } else {
+                        adviceColor = '#0071e3';
+                        adviceBg = 'rgba(0, 113, 227, 0.08)';
                       }
                     } else {
-                      adviceText = '持有待涨 / 观望';
-                      if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
-                        adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
+                      // Fallback to local rule engine
+                      if (diffPct > 4) {
+                        adviceText = '分批止盈 / 适当减仓';
+                        if (parsedRules.recovery) {
+                          adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
+                        } else if (parsedRules.targetReturn) {
+                          adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
+                        }
+                        adviceColor = '#ff9500';
+                        adviceBg = 'rgba(255, 149, 0, 0.08)';
+                      } else if (diffPct < -4) {
+                        if (parsedRules.suspendedBuy) {
+                          adviceText = '暂停申购 / 观望';
+                          adviceColor = '#86868b';
+                          adviceBg = 'rgba(134, 134, 139, 0.08)';
+                        } else {
+                          adviceText = '分批低吸 / 逢低定投';
+                          if (parsedRules.fixedInvest) {
+                            adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
+                          } else if (parsedRules.limit) {
+                            adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
+                          }
+                          adviceColor = '#ff3b30';
+                          adviceBg = 'rgba(255, 59, 48, 0.08)';
+                        }
+                      } else {
+                        adviceText = '持有待涨 / 观望';
+                        if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
+                          adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
+                        }
+                        adviceColor = '#0071e3';
+                        adviceBg = 'rgba(0, 113, 227, 0.08)';
                       }
-                      adviceColor = '#0071e3';
-                      adviceBg = 'rgba(0, 113, 227, 0.08)';
+                      adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
                     }
 
                     const todayRate = Number(f.today || 0) * 100;
@@ -505,7 +639,7 @@
                             <span style="font-size: 11px; color: #86868b; font-family: monospace;">${f.code} · ${esc(cat)}</span>
                           </div>
                           <span style="display: inline-block; padding: 5px 10px; border-radius: 14px; font-size: 11.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
-                            ${adviceText}
+                            ${esc(adviceText)}
                           </span>
                         </div>
 
@@ -526,6 +660,10 @@
                             <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(targetAmt)}</strong>
                             <span style="font-size: 11px; color: #6e6e73;">${targetPct.toFixed(1)}%</span>
                           </div>
+                        </div>
+
+                        <div style="background: rgba(0,0,0,0.015); padding: 8px 10px; border-radius: 6px; font-size: 11.5px; color: #6e6e73; line-height: 1.4; border-left: 3px solid ${adviceColor};">
+                          <strong>评估理由：</strong>${esc(adviceReason)}
                         </div>
                       </div>
                     `;
@@ -595,6 +733,11 @@
     title.textContent = '系统设置';
     const a = acct();
     const strategyList = a.strategy || [];
+
+    const savedProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
+    const savedBaseURL = localStorage.getItem('AI_BASE_URL') || '';
+    const savedModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
+    const savedAPIKey = window.AI_API_KEY || '';
 
     let strategyItemsHtml = '';
     if (strategyList.length > 0) {
@@ -693,7 +836,90 @@
               </div>
             </div>
 
-            <!-- Section 2: Investment Strategy -->
+            <!-- Section 2: AI Model API Configuration -->
+            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff; display: flex; flex-direction: column; gap: 16px;">
+              <p class="eyebrow" style="color: #0071e3; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0;">AI MODEL API CONFIGURATION</p>
+              <h2 style="font-size: 20px; font-weight: 650; margin: 0 0 4px 0;">AI模型接口配置</h2>
+              <p style="font-size: 13px; color: #86868b; margin: 0 0 8px 0; line-height: 1.5;">配置全局 AI 分析服务接口，修改后立即应用到持仓分析、智能建议、风险评估。</p>
+              
+              <!-- First Part: AI Provider selection -->
+              <div>
+                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">AI接口商 (AI Provider)</label>
+                <select id="ai-provider-select" style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; cursor: pointer; height: 38px;">
+                  <option value="OpenAI" ${savedProvider === 'OpenAI' ? 'selected' : ''}>OpenAI</option>
+                  <option value="DeepSeek" ${savedProvider === 'DeepSeek' ? 'selected' : ''}>DeepSeek</option>
+                  <option value="Google Gemini" ${savedProvider === 'Google Gemini' ? 'selected' : ''}>Google Gemini</option>
+                  <option value="Moonshot Kimi" ${savedProvider === 'Moonshot Kimi' ? 'selected' : ''}>Moonshot Kimi</option>
+                  <option value="Claude" ${savedProvider === 'Claude' ? 'selected' : ''}>Claude</option>
+                  <option value="自定义 OpenAI Compatible" ${savedProvider === '自定义 OpenAI Compatible' ? 'selected' : ''}>自定义 OpenAI Compatible</option>
+                </select>
+              </div>
+
+              <!-- Second Part: Interface Configuration fields -->
+              <div>
+                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Base URL</label>
+                <input type="text" id="ai-base-url-input" placeholder="留空默认使用官方基地址" 
+                       value="${esc(savedBaseURL)}"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Key</label>
+                <input type="password" id="ai-api-key-input" placeholder="sk-xxxxxxxx（若不填则默认使用服务器环境变量配置）" 
+                       value="${esc(savedAPIKey)}"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">Model名称 (Model Name)</label>
+                <input type="text" id="ai-model-name-input" placeholder="例如: gpt-5-mini" 
+                       value="${esc(savedModelName)}"
+                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+              </div>
+
+              <div style="display: flex; justify-content: flex-end;">
+                <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存并应用</button>
+              </div>
+
+              <!-- Third Part: Supported endpoints list -->
+              <div style="padding-top: 14px; border-top: 1px solid rgba(0,0,0,0.06);">
+                <span style="font-size: 12.5px; font-weight: 600; color: #1d1d1f; display: block; margin-bottom: 8px;">系统已接入的 AI 接口：</span>
+                <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-family: monospace;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); padding: 6px 10px; border-radius: 6px;">
+                    <span style="color: #34a853; font-weight: 600;">[POST] /api/ai/analyze</span>
+                    <span style="color: #86868b;">基金持仓智能分析</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); padding: 6px 10px; border-radius: 6px;">
+                    <span style="color: #34a853; font-weight: 600;">[POST] /api/ai/chat</span>
+                    <span style="color: #86868b;">通用 AI 对话</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); padding: 6px 10px; border-radius: 6px;">
+                    <span style="color: #34a853; font-weight: 600;">[GET] /api/ai/models</span>
+                    <span style="color: #86868b;">获取可用模型列表</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Fourth Part: Interface Connection Test Area -->
+              <div style="padding: 14px; border-radius: 12px; background: rgba(52, 168, 83, 0.03); border: 1px dashed rgba(52, 168, 83, 0.2); display: flex; flex-direction: column; gap: 10px;">
+                <span style="font-size: 13px; font-weight: 600; color: #34a853; display: flex; align-items: center; gap: 4px;">🧪 AI 接口连通性测试</span>
+                <p style="font-size: 12px; color: #6e6e73; margin: 0; line-height: 1.4;">点击下方一键测试，将发送测试请求并计算调用响应时长、验证接口连通度。</p>
+                
+                <div>
+                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 4px;">测试问题</label>
+                  <input type="text" id="test-ai-question" value="请分析当前基金市场风险"
+                         style="width: 100%; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 12px; background: #fff; outline: none; box-sizing: border-box; color: #1d1d1f; height: 32px;" />
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                  <button class="primary" id="test-ai-btn" style="flex: 1; padding: 8px 12px; border-radius: 6px; font-size: 12px; height: 32px; line-height: 1; white-space: nowrap; background: #34a853; border: 0; color: #fff; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center;">一键测试 AI 调用</button>
+                </div>
+                <div id="test-ai-result" style="display: none; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid rgba(0,0,0,0.06); font-size: 12px; line-height: 1.5; color: #1d1d1f; overflow-x: auto; width: 100%; box-sizing: border-box;">
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 3: Investment Strategy -->
             <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff;">
               <p class="eyebrow" style="color: #0071e3; font-size: 12px;">INVESTMENT STRATEGY</p>
               <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 6px; margin-top: 6px;">投资策略方针</h2>
@@ -809,22 +1035,80 @@
         `;
       }
 
-      setTimeout(() => {
-        const a = acct();
-        if (a && a.funds && a.funds.length > 0) {
-          a.funds.forEach(f => {
-            // fluctuation between -0.012 and +0.012
-            const fluctuation = (Math.random() * 0.024 - 0.012);
-            f.today = Number((f.today + fluctuation).toFixed(4));
-            if (f.today < -0.08) f.today = -0.08;
-            if (f.today > 0.08) f.today = 0.08;
-          });
-          window.savePortfolioState?.();
+      // 1. Update valuation estimates as usual
+      const a = acct();
+      if (a && a.funds && a.funds.length > 0) {
+        a.funds.forEach(f => {
+          const fluctuation = (Math.random() * 0.024 - 0.012);
+          f.today = Number((f.today + fluctuation).toFixed(4));
+          if (f.today < -0.08) f.today = -0.08;
+          if (f.today > 0.08) f.today = 0.08;
+        });
+        window.savePortfolioState?.();
+      }
+
+      // 2. Build the portfolio payload to send to the real AI engine
+      const portfolioData = {
+        account: a.name || '默认账户',
+        holdings: (a.funds || []).map(f => ({
+          name: f.name || '',
+          code: f.code || '',
+          amount: Number(f.amount) || 0,
+          profit: Number(f.cost ? (f.amount - f.cost) : 0).toFixed(2),
+          today_change: Number((f.today || 0) * f.amount || 0).toFixed(2)
+        }))
+      };
+
+      const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
+      const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
+      const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
+      const aiAPIKey = window.AI_API_KEY || '';
+
+      const requestBody = {
+        portfolio: portfolioData,
+        config: {
+          provider: aiProvider,
+          baseURL: aiBaseURL,
+          model: aiModelName,
+          apiKey: aiAPIKey
         }
-        
+      };
+
+      if (btnText) btnText.textContent = '正在调用 AI 引擎生成投资诊断报表...';
+
+      fetch('/api/ai/analyze', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      })
+      .then(async response => {
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData?.error || `HTTP ${response.status}`);
+        }
+        const resData = await response.json();
+        if (resData.success && resData.analysis) {
+          window.lastAIAnalysisResult = resData.analysis;
+          const activeAccountName = a.name || '默认账户';
+          const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          localStorage.setItem('LAST_AI_ANALYSIS', JSON.stringify(resData.analysis));
+          localStorage.setItem('LAST_AI_ANALYSIS_' + activeAccountName, JSON.stringify(resData.analysis));
+          localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
+          localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
+        } else {
+          throw new Error('AI 返回数据格式不正确');
+        }
+      })
+      .catch(err => {
+        console.error('AI Analysis failed:', err);
+        alert(`AI 诊断分析失败: ${err.message}。系统将继续使用内置规则计算引擎提供基础版调仓操作建议。`);
+      })
+      .finally(() => {
         window.lastAnalysisTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         render('analysis');
-      }, 600);
+      });
       return;
     }
 
@@ -987,6 +1271,107 @@
       return;
     }
 
+    const saveAiConfigBtn = e.target.closest('#save-ai-config-btn');
+    if (saveAiConfigBtn) {
+      const provider = document.querySelector('#ai-provider-select')?.value || 'OpenAI';
+      const baseURL = document.querySelector('#ai-base-url-input')?.value.trim() || '';
+      const apiKey = document.querySelector('#ai-api-key-input')?.value.trim() || '';
+      const modelName = document.querySelector('#ai-model-name-input')?.value.trim() || 'gpt-5-mini';
+      
+      localStorage.setItem('AI_PROVIDER', provider);
+      localStorage.setItem('AI_BASE_URL', baseURL);
+      localStorage.setItem('AI_MODEL_NAME', modelName);
+      
+      if (apiKey) {
+        window.AI_API_KEY = apiKey;
+        // Client-side local storage of third-party key is used for persisting user-entered configuration.
+        localStorage.setItem('AI_API_KEY', apiKey);
+      } else {
+        window.AI_API_KEY = '';
+        localStorage.removeItem('AI_API_KEY');
+      }
+      
+      alert('AI 接口配置保存并应用成功！');
+      setting();
+      return;
+    }
+
+    const testAiBtn = e.target.closest('#test-ai-btn');
+    if (testAiBtn) {
+      const provider = document.querySelector('#ai-provider-select')?.value || 'OpenAI';
+      const baseURL = document.querySelector('#ai-base-url-input')?.value.trim() || '';
+      const apiKey = document.querySelector('#ai-api-key-input')?.value.trim() || window.AI_API_KEY || '';
+      const modelName = document.querySelector('#ai-model-name-input')?.value.trim() || 'gpt-5-mini';
+      const question = document.querySelector('#test-ai-question')?.value.trim() || '请分析当前基金市场风险';
+      
+      const resultDiv = document.querySelector('#test-ai-result');
+      if (resultDiv) {
+        resultDiv.style.display = 'block';
+        resultDiv.innerHTML = '<span style="color: #6e6e73;">正在发起 AI 服务连接测试，此过程可能需要几秒，请稍候...</span>';
+      }
+      
+      const startTime = performance.now();
+      
+      fetch('/api/ai/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-AI-API-Key': apiKey
+        },
+        body: JSON.stringify({
+          message: question,
+          config: {
+            provider,
+            baseURL,
+            model: modelName
+          }
+        })
+      })
+      .then(async response => {
+        const duration = Math.round(performance.now() - startTime);
+        const data = await response.json().catch(() => ({}));
+        
+        if (response.ok && data.success) {
+          if (resultDiv) {
+            resultDiv.innerHTML = `
+              <div style="color: #34a853; font-weight: 600; margin-bottom: 6px;">✓ AI 接口调用成功 (耗时: ${duration}ms)</div>
+              <div style="font-size: 11px; color: #86868b; margin-bottom: 6px;">使用模型: <span style="font-family: monospace;">${esc(modelName)}</span></div>
+              <strong style="display:block; margin-bottom: 4px;">AI 原始回复：</strong>
+              <div style="background: #f5f5f7; padding: 10px; border-radius: 6px; font-size: 12px; font-family: system-ui, -apple-system; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; color: #1d1d1f; border: 1px solid rgba(0,0,0,0.04);">${esc(data.reply)}</div>
+            `;
+          }
+        } else {
+          const errMsg = data.error || '未知网络或网关错误';
+          if (resultDiv) {
+            resultDiv.innerHTML = `
+              <div style="color: #ff3b30; font-weight: 600; margin-bottom: 6px;">✗ AI 接口响应失败 (HTTP 状态码: ${response.status})</div>
+              <div style="font-size: 12px; color: #6e6e73; margin-bottom: 6px; line-height: 1.4;">
+                错误详情: <span style="color:#ff3b30; font-family: monospace; font-weight: 600;">${esc(errMsg)}</span>
+              </div>
+              <div style="font-size: 11.5px; color: #86868b; line-height: 1.4;">
+                排查建议：<br>
+                1. 确保在本地后台或环境变量中正确配置了对应的 API Key（如 <span style="font-family: monospace;">OPENAI_API_KEY</span> 等）或者在上方输入框中填写了临时的 API Key；<br>
+                2. 检查网络或代理是否能顺畅访问服务商基地址；<br>
+                3. 如果使用自定义 Compatible 端点，请确保服务端的 CORS 跨域请求已开启。
+              </div>
+            `;
+          }
+        }
+      })
+      .catch(err => {
+        if (resultDiv) {
+          resultDiv.innerHTML = `
+            <div style="color: #ff3b30; font-weight: 600; margin-bottom: 6px;">✗ 接口调用异常</div>
+            <div style="font-size: 12px; color: #6e6e73; line-height: 1.4;">
+              错误详情: <span style="color:#ff3b30; font-family: monospace;">${esc(err.message)}</span><br>
+              请检查您的网络连接或后端服务器是否正常运行。
+            </div>
+          `;
+        }
+      });
+      return;
+    }
+
     const copyJsonBtn = e.target.closest('#copy-json-btn');
     if (copyJsonBtn) {
       const backupObj = {
@@ -1055,7 +1440,32 @@
       render('portfolio');
     }
   });
-  root.addEventListener('change',e=>{const c=e.target.closest('[data-check]');if(c)c.checked?selected.add(c.dataset.check):selected.delete(c.dataset.check);const d=root.querySelector('[data-action="delete"]');if(d)d.disabled=!selected.size});
+  root.addEventListener('change',e=>{
+    const c=e.target.closest('[data-check]');
+    if(c)c.checked?selected.add(c.dataset.check):selected.delete(c.dataset.check);
+    const d=root.querySelector('[data-action="delete"]');
+    if(d)d.disabled=!selected.size;
+
+    if (e.target.id === 'ai-provider-select') {
+      const provider = e.target.value;
+      const baseUrlInput = document.querySelector('#ai-base-url-input');
+      const modelNameInput = document.querySelector('#ai-model-name-input');
+      
+      const defaults = {
+        'OpenAI': { url: 'https://api.openai.com/v1', model: 'gpt-5-mini' },
+        'DeepSeek': { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+        'Google Gemini': { url: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-pro' },
+        'Moonshot Kimi': { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+        'Claude': { url: 'https://api.anthropic.com', model: 'claude-3-5-sonnet-latest' },
+        '自定义 OpenAI Compatible': { url: '', model: '' }
+      };
+      
+      if (defaults[provider]) {
+        if (baseUrlInput) baseUrlInput.value = defaults[provider].url;
+        if (modelNameInput) modelNameInput.value = defaults[provider].model;
+      }
+    }
+  });
   document.querySelectorAll('.nav-tab').forEach(b=>b.addEventListener('click',()=>{editing=false;selected.clear();render(b.dataset.view)}));
   render('portfolio');
 })();

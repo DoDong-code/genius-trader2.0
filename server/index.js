@@ -1,3 +1,11 @@
+// Automatically compile TypeScript AI services on startup
+try {
+  const { execSync } = require('node:child_process');
+  execSync('npx esbuild src/services/ai/index.ts --bundle --platform=node --format=cjs --outfile=server/services/ai/index.js');
+} catch (e) {
+  console.error('[build-ai] Failed to build AI services on startup:', e.message);
+}
+
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');

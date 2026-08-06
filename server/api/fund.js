@@ -19,8 +19,8 @@ function sendJson(response, statusCode, payload) {
     'Content-Type': 'application/json; charset=utf-8',
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type'
+    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type,X-AI-API-Key'
   });
   response.end(JSON.stringify(payload));
 }
@@ -35,6 +35,77 @@ async function handleFundApi(request, response, url) {
     sendJson(response, 204, {});
     return true;
   }
+
+  // Handle AI Routes
+  if (url.pathname.startsWith('/api/ai/')) {
+    if (url.pathname === '/api/ai/models' && request.method === 'GET') {
+      sendJson(response, 200, {
+        success: true,
+        models: {
+          "OpenAI": ["gpt-5-mini", "gpt-4o", "gpt-4o-mini"],
+          "DeepSeek": ["deepseek-chat", "deepseek-coder"],
+          "Google Gemini": ["gemini-2.5-pro", "gemini-2.5-flash"],
+          "Moonshot Kimi": ["moonshot-v1-8k", "moonshot-v1-32k"],
+          "Claude": ["claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
+          "自定义 OpenAI Compatible": []
+        }
+      });
+      return true;
+    }
+
+    if (request.method === 'POST') {
+      const body = await new Promise((resolve, reject) => {
+        let chunkStr = '';
+        request.on('data', chunk => { chunkStr += chunk; });
+        request.on('end', () => {
+          try {
+            resolve(chunkStr ? JSON.parse(chunkStr) : {});
+          } catch (e) {
+            reject(new Error('Invalid JSON'));
+          }
+        });
+        request.on('error', err => reject(err));
+      });
+
+      // Extract custom API key from headers if available
+      const headerKey = request.headers['x-ai-api-key'];
+
+      if (url.pathname === '/api/ai/chat') {
+        const message = body.message;
+        const config = body.config || {};
+        if (headerKey && !config.apiKey) {
+          config.apiKey = headerKey;
+        }
+        
+        const ai = require('../services/ai/index');
+        try {
+          const reply = await ai.chat(message, config);
+          sendJson(response, 200, { success: true, reply });
+        } catch (err) {
+          sendJson(response, 500, { success: false, error: err.message });
+        }
+        return true;
+      }
+
+      if (url.pathname === '/api/ai/analyze') {
+        const portfolio = body.portfolio;
+        const config = body.config || {};
+        if (headerKey && !config.apiKey) {
+          config.apiKey = headerKey;
+        }
+
+        const ai = require('../services/ai/index');
+        try {
+          const analysis = await ai.analyzePortfolio(portfolio, config);
+          sendJson(response, 200, { success: true, analysis });
+        } catch (err) {
+          sendJson(response, 500, { success: false, error: err.message });
+        }
+        return true;
+      }
+    }
+  }
+
   if (request.method !== 'GET') return false;
 
   if (url.pathname === '/api/funds') {
