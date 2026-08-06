@@ -265,41 +265,7 @@
       `;
     }
 
-    let closedHtml = '';
-    if (closedPositions.length > 0) {
-      closedHtml = `
-        <section class="panel table-panel" style="margin-top: 28px; width: 100%; border-radius: 18px; box-sizing: border-box;">
-          <div class="panel-head" style="margin-bottom: 18px;">
-            <div>
-              <p class="eyebrow" style="color: #ff3b30; font-size: 12px;">RETIRED POSITIONS</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-top: 6px;">已清仓退出记录</h2>
-              <p style="font-size: 13px; color: #86868b; margin-top: 4px;">历史调仓及减阻获利回撤理由归档</p>
-            </div>
-          </div>
-          <div style="display: flex; flex-direction: column; gap: 18px;">
-            ${closedPositions.map(item => `
-              <div style="border-bottom: 1px solid rgba(0,0,0,0.06); padding-bottom: 16px; margin-bottom: 4px;">
-                <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                  <div>
-                    <strong style="font-size: 16px; color: #1d1d1f; margin-right: 8px;">${esc(item.name)}</strong>
-                    <span style="font-size: 12px; color: #86868b; font-family: monospace;">${esc(item.code)}</span>
-                  </div>
-                  <span style="font-size: 12px; color: #86868b;">清仓时间: ${esc(item.closedBefore || '近期')}</span>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 8px; background: #f5f5f7; padding: 12px 14px; border-radius: 10px;">
-                  ${(item.reason || []).map(r => `
-                    <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #6e6e73;">
-                      <span style="color: #34a853; font-weight: bold;">✓</span>
-                      <span>${esc(r)}</span>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-            `).join('')}
-          </div>
-        </section>
-      `;
-    }
+
 
     root.innerHTML = `
       <section class="analysis-page" style="max-width: 1200px !important; margin: 0 auto !important; padding: 24px 16px !important; box-sizing: border-box !important;">
@@ -334,8 +300,9 @@
           }
         </style>
 
-        <div class="analysis-layout-grid">
-          <!-- Left Column: AI diagnostics & operational actions -->
+        <!-- Two-column grid for top panels -->
+        <div class="analysis-layout-grid" style="margin-bottom: 28px;">
+          <!-- Left Column: AI diagnostics -->
           <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
             
             <!-- AI Diagnostic and One-Click Analysis Panel -->
@@ -392,160 +359,82 @@
                 <strong>💡 AI 诊断总结：</strong>${esc(aiResult.summary)}
               </div>
               ` : ''}
+
+              <!-- AI Q&A Window -->
+              <div style="border-top: 1px solid rgba(0,0,0,0.06); padding-top: 18px; margin-top: 8px; display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; align-items: center; justify-content: space-between;">
+                  <span style="font-size: 13.5px; font-weight: 600; color: #1d1d1f; display: flex; align-items: center; gap: 6px;">
+                    💬 智能 AI 交互问答与调仓重构
+                  </span>
+                </div>
+                <p style="font-size: 12.5px; color: #86868b; margin: 0; line-height: 1.5;">
+                  您可以针对当前投资组合进行提问。例如：“如果我想在下半年降低风险，应当怎么做？”、“增加1万黄金和减持一半新能源基金后，配比如何变化？”。AI 将根据提问实时重构诊断总结 and 具体基金建议。
+                </p>
+                <div style="display: flex; gap: 10px; align-items: center; width: 100%;">
+                  <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />
+                  <button id="ai-ask-submit-btn" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问并重构建议</button>
+                </div>
+                ${window.lastAIUserQuestion ? `
+                  <div style="background: rgba(0, 113, 227, 0.03); border: 1px dashed rgba(0, 113, 227, 0.25); padding: 10px 14px; border-radius: 8px; font-size: 12.5px; color: #0071e3; display: flex; justify-content: space-between; align-items: center;">
+                    <div style="line-height: 1.4;">
+                      <strong>当前提问：</strong>"${esc(window.lastAIUserQuestion)}"
+                    </div>
+                    <button id="clear-ai-question-btn" style="background: none; border: none; color: #ff3b30; cursor: pointer; font-size: 12px; font-weight: 500; text-decoration: underline; padding: 0; margin-left: 12px; white-space: nowrap;">恢复默认诊断</button>
+                  </div>
+                ` : ''}
+              </div>
             </div>
 
-            <!-- Today's Operations and Recommendations Panel -->
+          </div>
+
+          <!-- Right Column: Asset Allocation, Investment Strategy, and Retired Archive -->
+          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
+            
+            <!-- Allocation Analysis -->
             <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-              <p class="eyebrow" style="color: #86868b;">REAL-TIME TACTICAL ACTIONS</p>
-              <h2 style="font-size: 21px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">今日具体基金操作建议</h2>
-              <p style="font-size: 13.5px; color: #86868b; margin-bottom: 24px; margin-top: 0;">通过科学测算当前仓位占比与标准化目标偏离度，结合投资策略方针对其进行校正限制，输出最严谨的基金申赎策略建议：</p>
+              <p class="eyebrow" style="color: #86868b;">PORTFOLIO ALLOCATION</p>
+              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">资产配比分析</h2>
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">当前账户下的细分大类资产构成比例</p>
+              ${allocHtml}
+            </div>
 
-              ${funds.length === 0 ? `
-                <div style="padding: 40px 10px; text-align: center; color: #86868b;">
-                  <span style="font-size: 32px; display: block; margin-bottom: 12px;">📈</span>
-                  <span>当前暂无任何持仓基金。请在“持仓列表”中添加您的第一支基金，即可获得今日诊断及操作建议！</span>
-                </div>
-              ` : `
-                <!-- Desktop Table View -->
-                <div class="analysis-table-wrapper" style="width: 100%; overflow-x: auto;">
-                  <table class="analysis-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
-                    <thead>
-                      <tr style="border-bottom: 1.5px solid rgba(0,0,0,0.08); color: #86868b; font-weight: 500; font-size: 12px; letter-spacing: 0.03em;">
-                        <th style="padding: 12px 16px; font-weight: 600;">基金名称 & 代码</th>
-                        <th style="padding: 12px 16px; font-weight: 600;">目前仓位 (占比)</th>
-                        <th style="padding: 12px 16px; font-weight: 600;">今日估算涨幅</th>
-                        <th style="padding: 12px 16px; font-weight: 600;">目标仓位 (建议占比)</th>
-                        <th style="padding: 12px 16px; font-weight: 600; text-align: right;">操作建议</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      ${funds.map(f => {
-                        const cat = f.category || '其他';
-                        const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-                        
-                        // Dynamic targets computed according to user investment strategies (Investment Discipline)
-                        const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
-                        const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
-                        const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
-                        const targetAmt = totalAssets * (targetPct / 100);
+            <!-- Operating Strategy -->
+            <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
+              <p class="eyebrow" style="color: #86868b;">INVESTMENT DISCIPLINE</p>
+              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">投资操作策略</h2>
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">指导当前账户投资纪律的核心方针</p>
+              ${strategyHtml}
+            </div>
 
-                        const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
-                        const diffPct = currentPct - targetPct;
+          </div>
+        </div>
 
-                        // Parse strategies matching this fund
-                        const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
+        <!-- Today's Operations and Recommendations Panel (Full Width Sibling) -->
+        <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
+          <p class="eyebrow" style="color: #86868b;">REAL-TIME TACTICAL ACTIONS</p>
+          <h2 style="font-size: 21px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">今日具体基金操作建议</h2>
+          <p style="font-size: 13.5px; color: #86868b; margin-bottom: 24px; margin-top: 0;">通过科学测算当前仓位占比与标准化目标偏离度，结合投资策略方针对其进行校正限制，输出最严谨的基金申赎策略建议：</p>
 
-                        // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
-                        const getAiSuggestion = (fund) => {
-                          if (!aiResult || !aiResult.suggestions) return null;
-                          return aiResult.suggestions.find(s => 
-                            (s.code && String(s.code) === String(fund.code)) || 
-                            (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
-                          );
-                        };
-
-                        const aiSugg = getAiSuggestion(f);
-
-                        let adviceText = '';
-                        let adviceColor = '';
-                        let adviceBg = '';
-                        let adviceReason = '';
-
-                        if (aiSugg) {
-                          adviceText = aiSugg.action;
-                          adviceReason = aiSugg.reason;
-                          if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
-                            adviceColor = '#ff3b30'; // Red
-                            adviceBg = 'rgba(255, 59, 48, 0.08)';
-                          } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
-                            adviceColor = '#ff9500'; // Amber
-                            adviceBg = 'rgba(255, 149, 0, 0.08)';
-                          } else {
-                            adviceColor = '#0071e3'; // Blue
-                            adviceBg = 'rgba(0, 113, 227, 0.08)';
-                          }
-                        } else {
-                          // Fallback to local rule engine
-                          if (diffPct > 4) {
-                            adviceText = '分批止盈 / 适当减仓';
-                            if (parsedRules.recovery) {
-                              adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
-                            } else if (parsedRules.targetReturn) {
-                              adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
-                            }
-                            adviceColor = '#ff9500'; // Amber/Orange
-                            adviceBg = 'rgba(255, 149, 0, 0.08)';
-                          } else if (diffPct < -4) {
-                            if (parsedRules.suspendedBuy) {
-                              adviceText = '暂停申购 / 观望';
-                              adviceColor = '#86868b'; // Gray
-                              adviceBg = 'rgba(134, 134, 139, 0.08)';
-                            } else {
-                              adviceText = '分批低吸 / 逢低定投';
-                              if (parsedRules.fixedInvest) {
-                                adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
-                              } else if (parsedRules.limit) {
-                                adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
-                              }
-                              adviceColor = '#ff3b30'; // Red
-                              adviceBg = 'rgba(255, 59, 48, 0.08)';
-                            }
-                          } else {
-                            adviceText = '持有待涨 / 观望';
-                            if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
-                              adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
-                            }
-                            adviceColor = '#0071e3'; // Blue
-                            adviceBg = 'rgba(0, 113, 227, 0.08)';
-                          }
-                          adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
-                        }
-
-                        const todayRate = Number(f.today || 0) * 100;
-                        const isTodayPositive = todayRate >= 0;
-
-                        return `
-                          <tr style="border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.15s;">
-                            <td style="padding: 16px; vertical-align: middle;">
-                              <div style="font-weight: 600; color: #1d1d1f;">${esc(f.name)}</div>
-                              <div style="font-size: 11px; color: #86868b; font-family: monospace; margin-top: 2px;">${f.code} · ${esc(cat)}</div>
-                            </td>
-                            <td style="padding: 16px; vertical-align: middle;">
-                              <div style="font-weight: 600; color: #1d1d1f;">${money(f.amount)}</div>
-                              <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${currentPct.toFixed(2)}%</div>
-                            </td>
-                            <td style="padding: 16px; vertical-align: middle;">
-                              <span class="est-badge ${isTodayPositive ? 'positive' : 'negative'}" style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; background: ${isTodayPositive ? 'rgba(255, 59, 48, 0.06)' : 'rgba(52, 168, 83, 0.06)'};">
-                                ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
-                              </span>
-                            </td>
-                            <td style="padding: 16px; vertical-align: middle;">
-                              <div style="font-weight: 600; color: #1d1d1f;">${money(targetAmt)}</div>
-                              <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${targetPct.toFixed(2)}%</div>
-                            </td>
-                            <td style="padding: 16px; vertical-align: middle; text-align: right;">
-                              <span style="display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
-                                ${esc(adviceText)}
-                              </span>
-                            </td>
-                          </tr>
-                          <!-- Rationale Expandable Block -->
-                          <tr style="border-bottom: 1px solid rgba(0,0,0,0.04); background: rgba(0,0,0,0.005);">
-                            <td colspan="5" style="padding: 8px 16px 12px 16px; font-size: 12px; color: #6e6e73; line-height: 1.5;">
-                              <div style="display: flex; gap: 6px; align-items: flex-start;">
-                                <span style="color: ${adviceColor}; font-weight: 600; flex-shrink: 0;">评估理由：</span>
-                                <span>${esc(adviceReason)}</span>
-                              </div>
-                            </td>
-                          </tr>
-                        `;
-                      }).join('')}
-                    </tbody>
-                  </table>
-                </div>
-
-                <!-- Mobile Cards View (Hidden on desktop, visible on mobile) -->
-                <div class="analysis-cards" style="display: none; flex-direction: column; gap: 16px;">
+          ${funds.length === 0 ? `
+            <div style="padding: 40px 10px; text-align: center; color: #86868b;">
+              <span style="font-size: 32px; display: block; margin-bottom: 12px;">📈</span>
+              <span>当前暂无任何持仓基金。请在“持仓列表”中添加您的第一支基金，即可获得今日诊断及操作建议！</span>
+            </div>
+          ` : `
+            <!-- Desktop Table View -->
+            <div class="analysis-table-wrapper" style="width: 100%; overflow-x: auto;">
+              <table class="analysis-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
+                <thead>
+                  <tr style="border-bottom: 1.5px solid rgba(0,0,0,0.08); color: #86868b; font-weight: 500; font-size: 12px; letter-spacing: 0.03em;">
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 18%;">基金名称 & 代码</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 14%;">目前仓位 (占比)</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 12%;">今日估算涨幅</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 16%;">目标仓位 (建议占比)</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 15%;">操作建议</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 25%;">评估理由</th>
+                  </tr>
+                </thead>
+                <tbody>
                   ${funds.map(f => {
                     const cat = f.category || '其他';
                     const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
@@ -582,13 +471,13 @@
                       adviceText = aiSugg.action;
                       adviceReason = aiSugg.reason;
                       if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
-                        adviceColor = '#ff3b30';
+                        adviceColor = '#ff3b30'; // Red
                         adviceBg = 'rgba(255, 59, 48, 0.08)';
                       } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
-                        adviceColor = '#ff9500';
+                        adviceColor = '#ff9500'; // Amber
                         adviceBg = 'rgba(255, 149, 0, 0.08)';
                       } else {
-                        adviceColor = '#0071e3';
+                        adviceColor = '#0071e3'; // Blue
                         adviceBg = 'rgba(0, 113, 227, 0.08)';
                       }
                     } else {
@@ -600,12 +489,12 @@
                         } else if (parsedRules.targetReturn) {
                           adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
                         }
-                        adviceColor = '#ff9500';
+                        adviceColor = '#ff9500'; // Amber/Orange
                         adviceBg = 'rgba(255, 149, 0, 0.08)';
                       } else if (diffPct < -4) {
                         if (parsedRules.suspendedBuy) {
                           adviceText = '暂停申购 / 观望';
-                          adviceColor = '#86868b';
+                          adviceColor = '#86868b'; // Gray
                           adviceBg = 'rgba(134, 134, 139, 0.08)';
                         } else {
                           adviceText = '分批低吸 / 逢低定投';
@@ -614,7 +503,7 @@
                           } else if (parsedRules.limit) {
                             adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
                           }
-                          adviceColor = '#ff3b30';
+                          adviceColor = '#ff3b30'; // Red
                           adviceBg = 'rgba(255, 59, 48, 0.08)';
                         }
                       } else {
@@ -622,7 +511,7 @@
                         if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
                           adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
                         }
-                        adviceColor = '#0071e3';
+                        adviceColor = '#0071e3'; // Blue
                         adviceBg = 'rgba(0, 113, 227, 0.08)';
                       }
                       adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
@@ -632,98 +521,165 @@
                     const isTodayPositive = todayRate >= 0;
 
                     return `
-                      <div style="background: #f5f5f7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(0,0,0,0.03);">
-                        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-                          <div>
-                            <b style="font-size: 14.5px; color: #1d1d1f; display: block; line-height: 1.3;">${esc(f.name)}</b>
-                            <span style="font-size: 11px; color: #86868b; font-family: monospace;">${f.code} · ${esc(cat)}</span>
-                          </div>
-                          <span style="display: inline-block; padding: 5px 10px; border-radius: 14px; font-size: 11.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
+                      <tr style="border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.15s;">
+                        <td style="padding: 16px; vertical-align: middle;">
+                          <div style="font-weight: 600; color: #1d1d1f;">${esc(f.name)}</div>
+                          <div style="font-size: 11px; color: #86868b; font-family: monospace; margin-top: 2px;">${f.code} · ${esc(cat)}</div>
+                        </td>
+                        <td style="padding: 16px; vertical-align: middle;">
+                          <div style="font-weight: 600; color: #1d1d1f;">${money(f.amount)}</div>
+                          <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${currentPct.toFixed(2)}%</div>
+                        </td>
+                        <td style="padding: 16px; vertical-align: middle;">
+                          <span class="est-badge ${isTodayPositive ? 'positive' : 'negative'}" style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; background: ${isTodayPositive ? 'rgba(255, 59, 48, 0.06)' : 'rgba(52, 168, 83, 0.06)'};">
+                            ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
+                          </span>
+                        </td>
+                        <td style="padding: 16px; vertical-align: middle;">
+                          <div style="font-weight: 600; color: #1d1d1f;">${money(targetAmt)}</div>
+                          <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${targetPct.toFixed(2)}%</div>
+                        </td>
+                        <td style="padding: 16px; vertical-align: middle;">
+                          <span style="display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
                             ${esc(adviceText)}
                           </span>
-                        </div>
-
-                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 12px; text-align: left;">
-                          <div>
-                            <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目前持仓</span>
-                            <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(f.amount)}</strong>
-                            <span style="font-size: 11px; color: #6e6e73;">${currentPct.toFixed(1)}%</span>
-                          </div>
-                          <div>
-                            <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">今日估值</span>
-                            <span style="font-size: 12.5px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; display: block;">
-                              ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
-                            </span>
-                          </div>
-                          <div>
-                            <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目标仓位</span>
-                            <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(targetAmt)}</strong>
-                            <span style="font-size: 11px; color: #6e6e73;">${targetPct.toFixed(1)}%</span>
-                          </div>
-                        </div>
-
-                        <div style="background: rgba(0,0,0,0.015); padding: 8px 10px; border-radius: 6px; font-size: 11.5px; color: #6e6e73; line-height: 1.4; border-left: 3px solid ${adviceColor};">
-                          <strong>评估理由：</strong>${esc(adviceReason)}
-                        </div>
-                      </div>
+                        </td>
+                        <td style="padding: 16px; vertical-align: middle; color: #6e6e73; font-size: 13px; line-height: 1.4;">
+                          ${esc(adviceReason)}
+                        </td>
+                      </tr>
                     `;
                   }).join('')}
-                </div>
-              `}
+                </tbody>
+              </table>
             </div>
 
-          </div>
+            <!-- Mobile Cards View (Hidden on desktop, visible on mobile) -->
+            <div class="analysis-cards" style="display: none; flex-direction: column; gap: 16px;">
+              ${funds.map(f => {
+                const cat = f.category || '其他';
+                const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
+                
+                // Dynamic targets computed according to user investment strategies (Investment Discipline)
+                const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
+                const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
+                const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
+                const targetAmt = totalAssets * (targetPct / 100);
 
-          <!-- Right Column: Asset Allocation, Investment Strategy, and Retired Archive -->
-          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
-            
-            <!-- Allocation Analysis -->
-            <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-              <p class="eyebrow" style="color: #86868b;">PORTFOLIO ALLOCATION</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">资产配比分析</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">当前账户下的细分大类资产构成比例</p>
-              ${allocHtml}
-            </div>
+                const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
+                const diffPct = currentPct - targetPct;
 
-            <!-- Operating Strategy -->
-            <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-              <p class="eyebrow" style="color: #86868b;">INVESTMENT DISCIPLINE</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">投资操作策略</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">指导当前账户投资纪律的核心方针</p>
-              ${strategyHtml}
-            </div>
+                // Parse strategies matching this fund
+                const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
 
-            <!-- Retired positions archive -->
-            ${closedHtml ? `
-              <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-                <p class="eyebrow" style="color: #ff3b30; font-size: 12px;">RETIRED POSITIONS</p>
-                <h2 style="font-size: 20px; font-weight: 650; margin-top: 6px; margin-bottom: 8px;">已清仓退出记录</h2>
-                <p style="font-size: 13px; color: #86868b; margin-bottom: 20px; margin-top: 0;">历史调仓及减阻获利回撤理由归档</p>
-                <div style="display: flex; flex-direction: column; gap: 18px;">
-                  ${closedPositions.map(item => `
-                    <div style="border-bottom: 1px solid rgba(0,0,0,0.06); padding-bottom: 16px; margin-bottom: 4px;">
-                      <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px;">
-                        <div>
-                          <strong style="font-size: 15px; color: #1d1d1f; margin-right: 8px;">${esc(item.name)}</strong>
-                          <span style="font-size: 11px; color: #86868b; font-family: monospace;">${esc(item.code)}</span>
-                        </div>
-                        <span style="font-size: 11px; color: #86868b;">${esc(item.closedBefore || '近期')}</span>
+                // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
+                const getAiSuggestion = (fund) => {
+                  if (!aiResult || !aiResult.suggestions) return null;
+                  return aiResult.suggestions.find(s => 
+                    (s.code && String(s.code) === String(fund.code)) || 
+                    (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
+                  );
+                };
+
+                const aiSugg = getAiSuggestion(f);
+
+                let adviceText = '';
+                let adviceColor = '';
+                let adviceBg = '';
+                let adviceReason = '';
+
+                if (aiSugg) {
+                  adviceText = aiSugg.action;
+                  adviceReason = aiSugg.reason;
+                  if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
+                    adviceColor = '#ff3b30';
+                    adviceBg = 'rgba(255, 59, 48, 0.08)';
+                  } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
+                    adviceColor = '#ff9500';
+                    adviceBg = 'rgba(255, 149, 0, 0.08)';
+                  } else {
+                    adviceColor = '#0071e3';
+                    adviceBg = 'rgba(0, 113, 227, 0.08)';
+                  }
+                } else {
+                  // Fallback to local rule engine
+                  if (diffPct > 4) {
+                    adviceText = '分批止盈 / 适当减仓';
+                    if (parsedRules.recovery) {
+                      adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
+                    } else if (parsedRules.targetReturn) {
+                      adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
+                    }
+                    adviceColor = '#ff9500';
+                    adviceBg = 'rgba(255, 149, 0, 0.08)';
+                  } else if (diffPct < -4) {
+                    if (parsedRules.suspendedBuy) {
+                      adviceText = '暂停申购 / 观望';
+                      adviceColor = '#86868b';
+                      adviceBg = 'rgba(134, 134, 139, 0.08)';
+                    } else {
+                      adviceText = '分批低吸 / 逢低定投';
+                      if (parsedRules.fixedInvest) {
+                        adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
+                      } else if (parsedRules.limit) {
+                        adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
+                      }
+                      adviceColor = '#ff3b30';
+                      adviceBg = 'rgba(255, 59, 48, 0.08)';
+                    }
+                  } else {
+                    adviceText = '持有待涨 / 观望';
+                    if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
+                      adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
+                    }
+                    adviceColor = '#0071e3';
+                    adviceBg = 'rgba(0, 113, 227, 0.08)';
+                  }
+                  adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
+                }
+
+                const todayRate = Number(f.today || 0) * 100;
+                const isTodayPositive = todayRate >= 0;
+
+                return `
+                  <div style="background: #f5f5f7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(0,0,0,0.03);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+                      <div>
+                        <b style="font-size: 14.5px; color: #1d1d1f; display: block; line-height: 1.3;">${esc(f.name)}</b>
+                        <span style="font-size: 11px; color: #86868b; font-family: monospace;">${f.code} · ${esc(cat)}</span>
                       </div>
-                      <div style="display: flex; flex-direction: column; gap: 6px; background: #f5f5f7; padding: 10px 12px; border-radius: 8px;">
-                        ${(item.reason || []).map(r => `
-                          <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6e6e73;">
-                            <span style="color: #34a853; font-weight: bold;">✓</span>
-                            <span>${esc(r)}</span>
-                          </div>
-                        `).join('')}
+                      <span style="display: inline-block; padding: 5px 10px; border-radius: 14px; font-size: 11.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
+                        ${esc(adviceText)}
+                      </span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 12px; text-align: left;">
+                      <div>
+                        <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目前持仓</span>
+                        <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(f.amount)}</strong>
+                        <span style="font-size: 11px; color: #6e6e73;">${currentPct.toFixed(1)}%</span>
+                      </div>
+                      <div>
+                        <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">今日估值</span>
+                        <span style="font-size: 12.5px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; display: block;">
+                          ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
+                        </span>
+                      </div>
+                      <div>
+                        <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目标仓位</span>
+                        <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(targetAmt)}</strong>
+                        <span style="font-size: 11px; color: #6e6e73;">${targetPct.toFixed(1)}%</span>
                       </div>
                     </div>
-                  `).join('')}
-                </div>
-              </div>
-            ` : ''}
 
-          </div>
+                    <div style="background: rgba(0,0,0,0.015); padding: 8px 10px; border-radius: 6px; font-size: 11.5px; color: #6e6e73; line-height: 1.4; border-left: 3px solid ${adviceColor};">
+                      <strong>评估理由：</strong>${esc(adviceReason)}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
         </div>
       </section>
     `;
@@ -738,6 +694,8 @@
     const savedBaseURL = localStorage.getItem('AI_BASE_URL') || '';
     const savedModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
     const savedAPIKey = window.AI_API_KEY || '';
+
+    window.settingsCollapsedState = window.settingsCollapsedState || { datasource: false, aimodel: false, strategy: false, dangerzone: true };
 
     let strategyItemsHtml = '';
     if (strategyList.length > 0) {
@@ -757,33 +715,36 @@
 
     root.innerHTML = `
       <section class="settings-page" style="max-width: 1200px !important; margin: 0 auto !important; padding: 24px 16px !important; box-sizing: border-box !important;">
-        <!-- Injected Custom Styles for Responsiveness -->
+        <!-- Injected Custom Styles for Responsiveness and Accordion Animations -->
         <style>
-          .settings-layout-grid {
-            display: grid;
-            grid-template-columns: 1.2fr 1fr;
-            gap: 28px;
-            align-items: start;
-            width: 100%;
+          .settings-toggle-header:hover {
+            background: #f5f5f7 !important;
           }
-          @media (max-width: 1024px) {
-            .settings-layout-grid {
-              grid-template-columns: 1fr;
-              gap: 24px;
-            }
+          .settings-toggle-header:active {
+            background: #e8e8ed !important;
           }
         </style>
 
-        <div class="settings-layout-grid">
+        <div style="display: flex; flex-direction: column; gap: 20px; width: 100%;">
           
-          <!-- Left Column: API Data Source and Investment Strategy -->
-          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
-            
-            <!-- Section 1: Data Source API Configuration -->
-            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff;">
-              <p class="eyebrow" style="color: #0071e3; font-size: 12px;">DATA SOURCE API CONFIGURATION</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 6px; margin-top: 6px;">数据源接口配置</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0;">配置全局资产数据的抓取接口基地址，修改后立即应用到估值及详情查询。</p>
+          <!-- Section 1: Data Source API Configuration -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="datasource" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 18px; line-height: 1;">🌐</span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">数据源接口配置</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局资产数据的抓取接口基地址，支持本地与远程调试</p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">DATA SOURCE API</span>
+                <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.datasource ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
+              </div>
+            </div>
+
+            <div class="panel-body-datasource" style="display: ${window.settingsCollapsedState.datasource ? 'none' : 'block'}; padding: 24px;">
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">配置全局资产数据的抓取接口基地址，修改后立即应用到估值及详情查询。</p>
               
               <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px;">接口基地址 (API Base URL)</label>
@@ -835,54 +796,70 @@
                 </div>
               </div>
             </div>
+          </div>
 
-            <!-- Section 2: AI Model API Configuration -->
-            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff; display: flex; flex-direction: column; gap: 16px;">
-              <p class="eyebrow" style="color: #0071e3; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; margin: 0;">AI MODEL API CONFIGURATION</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin: 0 0 4px 0;">AI模型接口配置</h2>
-              <p style="font-size: 13px; color: #86868b; margin: 0 0 8px 0; line-height: 1.5;">配置全局 AI 分析服务接口，修改后立即应用到持仓分析、智能建议、风险评估。</p>
+          <!-- Section 2: AI Model API Configuration -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="aimodel" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 18px; line-height: 1;">🤖</span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">AI模型接口配置</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局 AI 分析服务，切换商户、基地址或模型名称</p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">AI MODEL API</span>
+                <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.aimodel ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
+              </div>
+            </div>
+
+            <div class="panel-body-aimodel" style="display: ${window.settingsCollapsedState.aimodel ? 'none' : 'block'}; padding: 24px;">
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">配置全局 AI 分析服务接口，修改后立即应用到持仓分析、智能建议、风险评估。</p>
               
-              <!-- First Part: AI Provider selection -->
-              <div>
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">AI接口商 (AI Provider)</label>
-                <select id="ai-provider-select" style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; cursor: pointer; height: 38px;">
-                  <option value="OpenAI" ${savedProvider === 'OpenAI' ? 'selected' : ''}>OpenAI</option>
-                  <option value="DeepSeek" ${savedProvider === 'DeepSeek' ? 'selected' : ''}>DeepSeek</option>
-                  <option value="Google Gemini" ${savedProvider === 'Google Gemini' ? 'selected' : ''}>Google Gemini</option>
-                  <option value="Moonshot Kimi" ${savedProvider === 'Moonshot Kimi' ? 'selected' : ''}>Moonshot Kimi</option>
-                  <option value="Claude" ${savedProvider === 'Claude' ? 'selected' : ''}>Claude</option>
-                  <option value="自定义 OpenAI Compatible" ${savedProvider === '自定义 OpenAI Compatible' ? 'selected' : ''}>自定义 OpenAI Compatible</option>
-                </select>
-              </div>
+              <div style="display: flex; flex-direction: column; gap: 16px;">
+                <!-- First Part: AI Provider selection -->
+                <div>
+                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">AI接口商 (AI Provider)</label>
+                  <select id="ai-provider-select" style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; cursor: pointer; height: 38px;">
+                    <option value="OpenAI" ${savedProvider === 'OpenAI' ? 'selected' : ''}>OpenAI</option>
+                    <option value="DeepSeek" ${savedProvider === 'DeepSeek' ? 'selected' : ''}>DeepSeek</option>
+                    <option value="Google Gemini" ${savedProvider === 'Google Gemini' ? 'selected' : ''}>Google Gemini</option>
+                    <option value="Moonshot Kimi" ${savedProvider === 'Moonshot Kimi' ? 'selected' : ''}>Moonshot Kimi</option>
+                    <option value="Claude" ${savedProvider === 'Claude' ? 'selected' : ''}>Claude</option>
+                    <option value="自定义 OpenAI Compatible" ${savedProvider === '自定义 OpenAI Compatible' ? 'selected' : ''}>自定义 OpenAI Compatible</option>
+                  </select>
+                </div>
 
-              <!-- Second Part: Interface Configuration fields -->
-              <div>
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Base URL</label>
-                <input type="text" id="ai-base-url-input" placeholder="留空默认使用官方基地址" 
-                       value="${esc(savedBaseURL)}"
-                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
-              </div>
+                <!-- Second Part: Interface Configuration fields -->
+                <div>
+                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Base URL</label>
+                  <input type="text" id="ai-base-url-input" placeholder="留空默认使用官方基地址" 
+                         value="${esc(savedBaseURL)}"
+                         style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+                </div>
 
-              <div>
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Key</label>
-                <input type="password" id="ai-api-key-input" placeholder="sk-xxxxxxxx（若不填则默认使用服务器环境变量配置）" 
-                       value="${esc(savedAPIKey)}"
-                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
-              </div>
+                <div>
+                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Key</label>
+                  <input type="password" id="ai-api-key-input" placeholder="sk-xxxxxxxx（若不填则默认使用服务器环境变量配置）" 
+                         value="${esc(savedAPIKey)}"
+                         style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+                </div>
 
-              <div>
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">Model名称 (Model Name)</label>
-                <input type="text" id="ai-model-name-input" placeholder="例如: gpt-5-mini" 
-                       value="${esc(savedModelName)}"
-                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
-              </div>
+                <div>
+                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">Model名称 (Model Name)</label>
+                  <input type="text" id="ai-model-name-input" placeholder="例如: gpt-5-mini" 
+                         value="${esc(savedModelName)}"
+                         style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
+                </div>
 
-              <div style="display: flex; justify-content: flex-end;">
-                <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存并应用</button>
+                <div style="display: flex; justify-content: flex-end;">
+                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存并应用</button>
+                </div>
               </div>
 
               <!-- Third Part: Supported endpoints list -->
-              <div style="padding-top: 14px; border-top: 1px solid rgba(0,0,0,0.06);">
+              <div style="padding-top: 14px; border-top: 1px solid rgba(0,0,0,0.06); margin-top: 16px;">
                 <span style="font-size: 12.5px; font-weight: 600; color: #1d1d1f; display: block; margin-bottom: 8px;">系统已接入的 AI 接口：</span>
                 <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-family: monospace;">
                   <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.02); padding: 6px 10px; border-radius: 6px;">
@@ -901,7 +878,7 @@
               </div>
 
               <!-- Fourth Part: Interface Connection Test Area -->
-              <div style="padding: 14px; border-radius: 12px; background: rgba(52, 168, 83, 0.03); border: 1px dashed rgba(52, 168, 83, 0.2); display: flex; flex-direction: column; gap: 10px;">
+              <div style="padding: 14px; border-radius: 12px; background: rgba(52, 168, 83, 0.03); border: 1px dashed rgba(52, 168, 83, 0.2); display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
                 <span style="font-size: 13px; font-weight: 600; color: #34a853; display: flex; align-items: center; gap: 4px;">🧪 AI 接口连通性测试</span>
                 <p style="font-size: 12px; color: #6e6e73; margin: 0; line-height: 1.4;">点击下方一键测试，将发送测试请求并计算调用响应时长、验证接口连通度。</p>
                 
@@ -918,12 +895,26 @@
                 </div>
               </div>
             </div>
+          </div>
 
-            <!-- Section 3: Investment Strategy -->
-            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff;">
-              <p class="eyebrow" style="color: #0071e3; font-size: 12px;">INVESTMENT STRATEGY</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 6px; margin-top: 6px;">投资策略方针</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0;">规范投资纪律的自定义核心策略条目</p>
+          <!-- Section 3: Investment Strategy -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="strategy" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 18px; line-height: 1;">📋</span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">投资策略方针</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">自定义管理核心策略条目，规范并约束当前账户的投资纪律</p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">STRATEGY</span>
+                <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.strategy ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
+              </div>
+            </div>
+
+            <div class="panel-body-strategy" style="display: ${window.settingsCollapsedState.strategy ? 'none' : 'block'}; padding: 24px;">
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">规范投资纪律的自定义核心策略条目</p>
               
               <div style="max-height: 220px; overflow-y: auto; margin-bottom: 18px; padding-right: 6px;">
                 ${strategyItemsHtml}
@@ -936,64 +927,28 @@
                 <button class="primary" id="add-strategy-btn" style="padding: 8px 16px; border-radius: 8px; font-size: 13px; height: 38px; line-height: 1; white-space: nowrap;">添加</button>
               </div>
             </div>
-
           </div>
 
-          <!-- Right Column: Archive and Data Backups -->
-          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
-            
-            <!-- Section 3: Archive Closed Position -->
-            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff;">
-              <p class="eyebrow" style="color: #ff3b30; font-size: 12px;">RETIRED ARCHIVE</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 6px; margin-top: 6px;">归档已清仓基金</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0;">在此登记清算退出基金，保留反思和决策痕迹</p>
-              
-              <div style="display: grid; grid-template-columns: 1.5fr 1fr; gap: 12px; margin-bottom: 12px;">
-                <div>
-                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 4px;">基金名称</label>
-                  <input type="text" id="closed-name-input" placeholder="如：华夏黄金" 
-                         style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box;" />
-                </div>
-                <div>
-                  <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 4px;">基金代码 (6位)</label>
-                  <input type="text" id="closed-code-input" placeholder="000000" maxlength="6"
-                         style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; font-family: monospace; outline: none; box-sizing: border-box;" />
+          <!-- Section 4: Danger Zone -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(255, 59, 48, 0.15); box-shadow: 0 4px 12px rgba(255, 59, 48, 0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="dangerzone" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: rgba(255, 59, 48, 0.02); border-bottom: 1px solid rgba(255, 59, 48, 0.08); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="font-size: 18px; line-height: 1;">⚠️</span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #ff3b30;">危险区域</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">清空浏览器本地 LocalStorage 存储并进行数据重置</p>
                 </div>
               </div>
-
-              <div style="margin-bottom: 18px;">
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 4px;">清仓原因（以分号或英文逗号分隔多个原因）</label>
-                <input type="text" id="closed-reasons-input" placeholder="例如：达到止盈目标; 行业基本面变差" 
-                       style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box;" />
-              </div>
-
-              <button class="primary" id="archive-closed-btn" style="width: 100%; padding: 12px; border-radius: 8px; font-size: 13px; background: #ff3b30; color: #fff; border: 0; font-weight: 600; cursor: pointer;">提交归档记录</button>
-            </div>
-
-            <!-- Section 4: Storage Backup & Restore -->
-            <div class="panel" style="padding: 24px; border-radius: 18px; box-sizing: border-box; background: #fff;">
-              <p class="eyebrow" style="color: #af52de; font-size: 12px;">DATA BACKUP & RECOVERY</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 6px; margin-top: 6px;">数据备份与恢复</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0;">直接导入或导出备份您的交易账户 JSON 数据</p>
-              
-              <div style="margin-bottom: 16px;">
-                <textarea id="backup-json-area" placeholder="导出数据会在此生成，或者粘贴备份 JSON 进行导入恢复..." 
-                          style="width: 100%; height: 140px; padding: 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 12px; font-family: monospace; background: #f5f5f7; color: #1d1d1f; resize: none; outline: none; box-sizing: border-box;"></textarea>
-              </div>
-
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
-                <button class="secondary-button" id="copy-json-btn" style="padding: 10px; border-radius: 8px; font-size: 13px; background: #e8e8ed; color: #1d1d1f; border: 0; cursor: pointer; font-weight: 600; text-align: center; display: block; width: 100%;">复制备份 JSON</button>
-                <button class="primary" id="import-json-btn" style="padding: 10px; border-radius: 8px; font-size: 13px; background: #0071e3; color: #fff; border: 0; cursor: pointer; font-weight: 600; text-align: center; display: block; width: 100%;">导入恢复数据</button>
-              </div>
-
-              <!-- Danger zone reset -->
-              <div style="border-top: 1px solid rgba(0,0,0,0.08); padding-top: 18px; margin-top: 18px;">
-                <h3 style="font-size: 14px; font-weight: 600; color: #ff3b30; margin: 0 0 6px 0;">危险区域</h3>
-                <p style="font-size: 12px; color: #86868b; margin: 0 0 14px 0;">清空浏览器本地 LocalStorage 存储，重置为系统出厂初始 Mock 数据。</p>
-                <button id="reset-storage-btn" style="width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; text-align: center; display: block;">清空并恢复出厂默认值</button>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #ff3b30; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(255,59,48,0.05); padding: 3px 8px; border-radius: 4px;">DANGER ZONE</span>
+                <span class="toggle-arrow" style="font-size: 14px; color: #ff3b30; transition: transform 0.2s; transform: ${window.settingsCollapsedState.dangerzone ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
 
+            <div class="panel-body-dangerzone" style="display: ${window.settingsCollapsedState.dangerzone ? 'none' : 'block'}; padding: 24px;">
+              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">清空浏览器本地 LocalStorage 存储，重置为系统出厂初始 Mock 数据。此操作不可逆，请谨慎操作。</p>
+              <button id="reset-storage-btn" style="width: 100%; padding: 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; text-align: center; display: block;">清空并恢复出厂默认值</button>
+            </div>
           </div>
 
         </div>
@@ -1017,98 +972,233 @@
     }
   }
 
+  function runAiDiagnostics(userQuery) {
+    const a = acct();
+    if (!a) return;
+
+    // Check if the query contains commands to alter holdings, e.g. "大成产业趋势混合C 昨天减仓一半"
+    if (userQuery && a.funds && a.funds.length > 0) {
+      let acted = false;
+      let actionMsg = '';
+      
+      a.funds.forEach(f => {
+        const cleanName = f.name ? f.name.replace(/(混合|A|C|债券|股票|基金|指数)/g, '').trim() : '';
+        const matchedByName = f.name && (userQuery.includes(f.name) || (cleanName.length >= 2 && userQuery.includes(cleanName)));
+        const matchedByCode = f.code && userQuery.includes(f.code);
+        
+        if (matchedByName || matchedByCode) {
+          // Check for "减仓一半" / "卖出一半" / "减半" / "减持一半" / "减仓50%" / "减持50%" / "卖出50%"
+          if (/(减仓一半|卖出一半|减半|减持一半|减仓50%|减持50%|卖出50%)/.test(userQuery)) {
+            const oldAmt = f.amount;
+            f.amount = Number((f.amount * 0.5).toFixed(2));
+            acted = true;
+            actionMsg += `\n- 【减仓一半】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 调整为 ¥${f.amount.toLocaleString()}。`;
+          }
+          // Check for "清仓" / "全部卖出" / "卖出全部" / "减仓100%" / "全部减掉"
+          else if (/(清仓|全部卖出|卖出全部|减仓100%|全部减掉)/.test(userQuery)) {
+            const oldAmt = f.amount;
+            f.amount = 0;
+            acted = true;
+            actionMsg += `\n- 【清仓退出】已将【${f.name}】（原金额 ¥${oldAmt.toLocaleString()}）清空（设为 ¥0）。`;
+          }
+          // Check for specific percentage reduction like "减仓30%" or "减持20%"
+          else if (/(减仓|减持|卖出|减持占比|减仓占比)(\d+)%/.test(userQuery)) {
+            const match = userQuery.match(/(减仓|减持|卖出|减持占比|减仓占比)(\d+)%/);
+            const pct = parseFloat(match[2]);
+            if (pct > 0 && pct <= 100) {
+              const oldAmt = f.amount;
+              const ratio = (100 - pct) / 100;
+              f.amount = Number((f.amount * ratio).toFixed(2));
+              acted = true;
+              actionMsg += `\n- 【减仓 ${pct}%】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 减少至 ¥${f.amount.toLocaleString()}。`;
+            }
+          }
+          // Check for specific percentage increase like "加仓30%" or "增持20%"
+          else if (/(加仓|增持|买入)(\d+)%/.test(userQuery)) {
+            const match = userQuery.match(/(加仓|增持|买入)(\d+)%/);
+            const pct = parseFloat(match[2]);
+            if (pct > 0) {
+              const oldAmt = f.amount;
+              const ratio = (100 + pct) / 100;
+              f.amount = Number((f.amount * ratio).toFixed(2));
+              acted = true;
+              actionMsg += `\n- 【加仓 ${pct}%】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 增加至 ¥${f.amount.toLocaleString()}。`;
+            }
+          }
+          // Check for specific value reduction like "减仓1000元" or "卖出5000"
+          else if (/(减仓|减持|卖出)(\d+)(元|万)?/.test(userQuery)) {
+            const match = userQuery.match(/(减仓|减持|卖出)(\d+)(元|万)?/);
+            let val = parseFloat(match[2]);
+            if (match[3] === '万') val *= 10000;
+            if (val > 0) {
+              const oldAmt = f.amount;
+              f.amount = Math.max(0, Number((f.amount - val).toFixed(2)));
+              acted = true;
+              actionMsg += `\n- 【减仓 ¥${val.toLocaleString()}】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 减少至 ¥${f.amount.toLocaleString()}。`;
+            }
+          }
+          // Check for specific value increase like "加仓1000元" or "买入5000"
+          else if (/(加仓|增持|买入)(\d+)(元|万)?/.test(userQuery)) {
+            const match = userQuery.match(/(加仓|增持|买入)(\d+)(元|万)?/);
+            let val = parseFloat(match[2]);
+            if (match[3] === '万') val *= 10000;
+            if (val > 0) {
+              const oldAmt = f.amount;
+              f.amount = Number((f.amount + val).toFixed(2));
+              acted = true;
+              actionMsg += `\n- 【加仓 ¥${val.toLocaleString()}】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 增加至 ¥${f.amount.toLocaleString()}。`;
+            }
+          }
+        }
+      });
+      
+      if (acted) {
+        window.savePortfolioState?.();
+        alert(`✨ 智能 AI 指令识别成功！${actionMsg}\n\n系统已实时更新持仓，并正在向 AI 引擎发送最新数据以重构未来策略与诊断建议报告！`);
+      }
+    }
+
+    // 1. If no query, update valuation estimates as usual
+    if (!userQuery && a.funds && a.funds.length > 0) {
+      a.funds.forEach(f => {
+        const fluctuation = (Math.random() * 0.024 - 0.012);
+        f.today = Number((f.today + fluctuation).toFixed(4));
+        if (f.today < -0.08) f.today = -0.08;
+        if (f.today > 0.08) f.today = 0.08;
+      });
+      window.savePortfolioState?.();
+    }
+
+    // 2. Build the portfolio payload to send to the real AI engine
+    const portfolioData = {
+      account: a.name || '默认账户',
+      holdings: (a.funds || []).map(f => ({
+        name: f.name || '',
+        code: f.code || '',
+        amount: Number(f.amount) || 0,
+        profit: Number(f.cost ? (f.amount - f.cost) : 0).toFixed(2),
+        today_change: Number((f.today || 0) * f.amount || 0).toFixed(2)
+      }))
+    };
+
+    if (userQuery) {
+      portfolioData.userQuery = userQuery;
+    }
+
+    const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
+    const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
+    const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
+    const aiAPIKey = window.AI_API_KEY || '';
+
+    const requestBody = {
+      portfolio: portfolioData,
+      config: {
+        provider: aiProvider,
+        baseURL: aiBaseURL,
+        model: aiModelName,
+        apiKey: aiAPIKey
+      }
+    };
+
+    // Update button text if it exists
+    const runAnalysisBtn = document.querySelector('#run-ai-analysis-btn');
+    let btnText = null;
+    if (runAnalysisBtn) {
+      btnText = runAnalysisBtn.querySelector('.btn-text');
+      runAnalysisBtn.disabled = true;
+      runAnalysisBtn.style.opacity = '0.7';
+      if (btnText) btnText.textContent = userQuery ? '正在调取 AI 问答及调仓建议...' : '正在调取今日最新估值与诊断...';
+    }
+
+    fetch('/api/ai/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    })
+    .then(async response => {
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error || `HTTP ${response.status}`);
+      }
+      const resData = await response.json();
+      if (resData.success && resData.analysis) {
+        window.lastAIAnalysisResult = resData.analysis;
+        const activeAccountName = a.name || '默认账户';
+        const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        localStorage.setItem('LAST_AI_ANALYSIS', JSON.stringify(resData.analysis));
+        localStorage.setItem('LAST_AI_ANALYSIS_' + activeAccountName, JSON.stringify(resData.analysis));
+        localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
+        localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
+      } else {
+        throw new Error('AI 返回数据格式不正确');
+      }
+    })
+    .catch(err => {
+      console.error('AI Analysis failed:', err);
+      alert(`AI 诊断分析失败: ${err.message}。系统将继续使用内置规则计算引擎提供基础版调仓操作建议。`);
+    })
+    .finally(() => {
+      window.lastAnalysisTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      render('analysis');
+    });
+  }
+
+  // Handle Enter key on AI Q&A Input
+  root.addEventListener('keydown', e => {
+    if (e.target.id === 'ai-question-input' && e.key === 'Enter') {
+      const btn = document.querySelector('#ai-ask-submit-btn');
+      if (btn) btn.click();
+    }
+  });
+
   root.addEventListener('click',e=>{
     const runAnalysisBtn = e.target.closest('#run-ai-analysis-btn');
     if (runAnalysisBtn) {
-      const btnText = runAnalysisBtn.querySelector('.btn-text');
-      const btnIcon = runAnalysisBtn.querySelector('.btn-icon');
-      
-      runAnalysisBtn.disabled = true;
-      runAnalysisBtn.style.opacity = '0.7';
-      if (btnText) btnText.textContent = '正在调取今日最新估值与诊断...';
-      if (btnIcon) {
-        btnIcon.innerHTML = `
-          <svg style="animation: rotate 1s linear infinite; width: 15px; height: 15px; display: inline-block; vertical-align: middle; margin-right: 4px;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-            <circle cx="12" cy="12" r="10" stroke="rgba(255,255,255,0.2)"></circle>
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="#ffffff" stroke-linecap="round"></path>
-          </svg>
-        `;
-      }
+      runAiDiagnostics(window.lastAIUserQuestion);
+      return;
+    }
 
-      // 1. Update valuation estimates as usual
+    const aiAskSubmitBtn = e.target.closest('#ai-ask-submit-btn');
+    if (aiAskSubmitBtn) {
+      const input = document.querySelector('#ai-question-input');
+      const val = input ? input.value.trim() : '';
+      if (!val) {
+        alert('请输入需要咨询的问题！');
+        return;
+      }
+      window.lastAIUserQuestion = val;
+      runAiDiagnostics(val);
+      return;
+    }
+
+    const clearAiQuestionBtn = e.target.closest('#clear-ai-question-btn');
+    if (clearAiQuestionBtn) {
+      window.lastAIUserQuestion = '';
+      runAiDiagnostics('');
+      return;
+    }
+
+    const adjustHoldingBtn = e.target.closest('.adjust-holding-btn');
+    if (adjustHoldingBtn) {
+      const code = adjustHoldingBtn.dataset.code;
       const a = acct();
-      if (a && a.funds && a.funds.length > 0) {
-        a.funds.forEach(f => {
-          const fluctuation = (Math.random() * 0.024 - 0.012);
-          f.today = Number((f.today + fluctuation).toFixed(4));
-          if (f.today < -0.08) f.today = -0.08;
-          if (f.today > 0.08) f.today = 0.08;
-        });
-        window.savePortfolioState?.();
+      const fund = a.funds.find(x => x.code === code);
+      if (fund) {
+        const val = prompt('请输入 [' + fund.name + '] 的持仓金额 (元)：', fund.amount);
+        if (val !== null) {
+          const amt = parseFloat(val);
+          if (!isNaN(amt) && amt >= 0) {
+            fund.amount = amt;
+            window.savePortfolioState?.();
+            alert('持仓金额已成功修改为 ¥' + amt.toLocaleString());
+            render('analysis');
+          } else {
+            alert('请输入有效的正数金额！');
+          }
+        }
       }
-
-      // 2. Build the portfolio payload to send to the real AI engine
-      const portfolioData = {
-        account: a.name || '默认账户',
-        holdings: (a.funds || []).map(f => ({
-          name: f.name || '',
-          code: f.code || '',
-          amount: Number(f.amount) || 0,
-          profit: Number(f.cost ? (f.amount - f.cost) : 0).toFixed(2),
-          today_change: Number((f.today || 0) * f.amount || 0).toFixed(2)
-        }))
-      };
-
-      const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
-      const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
-      const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
-      const aiAPIKey = window.AI_API_KEY || '';
-
-      const requestBody = {
-        portfolio: portfolioData,
-        config: {
-          provider: aiProvider,
-          baseURL: aiBaseURL,
-          model: aiModelName,
-          apiKey: aiAPIKey
-        }
-      };
-
-      if (btnText) btnText.textContent = '正在调用 AI 引擎生成投资诊断报表...';
-
-      fetch('/api/ai/analyze', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      })
-      .then(async response => {
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          throw new Error(errData?.error || `HTTP ${response.status}`);
-        }
-        const resData = await response.json();
-        if (resData.success && resData.analysis) {
-          window.lastAIAnalysisResult = resData.analysis;
-          const activeAccountName = a.name || '默认账户';
-          const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          localStorage.setItem('LAST_AI_ANALYSIS', JSON.stringify(resData.analysis));
-          localStorage.setItem('LAST_AI_ANALYSIS_' + activeAccountName, JSON.stringify(resData.analysis));
-          localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
-          localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
-        } else {
-          throw new Error('AI 返回数据格式不正确');
-        }
-      })
-      .catch(err => {
-        console.error('AI Analysis failed:', err);
-        alert(`AI 诊断分析失败: ${err.message}。系统将继续使用内置规则计算引擎提供基础版调仓操作建议。`);
-      })
-      .finally(() => {
-        window.lastAnalysisTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        render('analysis');
-      });
       return;
     }
 
@@ -1138,6 +1228,17 @@
     }
 
     // --- Settings page interactive controls ---
+    const toggleHeader = e.target.closest('.settings-toggle-header');
+    if (toggleHeader) {
+      const panelKey = toggleHeader.dataset.panel;
+      if (panelKey) {
+        window.settingsCollapsedState = window.settingsCollapsedState || { datasource: false, aimodel: false, strategy: false, dangerzone: true };
+        window.settingsCollapsedState[panelKey] = !window.settingsCollapsedState[panelKey];
+        setting();
+      }
+      return;
+    }
+
     const addStrategyBtn = e.target.closest('#add-strategy-btn');
     if (addStrategyBtn) {
       const input = document.querySelector('#new-strategy-input');
@@ -1164,37 +1265,7 @@
       return;
     }
 
-    const archiveClosedBtn = e.target.closest('#archive-closed-btn');
-    if (archiveClosedBtn) {
-      const name = document.querySelector('#closed-name-input')?.value.trim();
-      const code = document.querySelector('#closed-code-input')?.value.trim();
-      const reasonsStr = document.querySelector('#closed-reasons-input')?.value.trim();
 
-      if (!name || !code || code.length !== 6 || !/^\d{6}$/.test(code)) {
-        alert('请输入正确的基金名称和 6 位数字代码！');
-        return;
-      }
-
-      const reasons = reasonsStr ? reasonsStr.split(/[,;，；]/).map(r => r.trim()).filter(Boolean) : ['调仓清算'];
-      const a = acct();
-      if (!a.closedPositions) a.closedPositions = [];
-      
-      const shanghaiToday = new Date(Date.now() + 8 * 3600000).toISOString().split('T')[0];
-      a.closedPositions.push({
-        name,
-        code,
-        closedBefore: shanghaiToday,
-        reason: reasons
-      });
-
-      window.savePortfolioState?.();
-      document.querySelector('#closed-name-input').value = '';
-      document.querySelector('#closed-code-input').value = '';
-      document.querySelector('#closed-reasons-input').value = '';
-      alert('清仓记录已成功归档！');
-      setting();
-      return;
-    }
 
     const saveApiBtn = e.target.closest('#save-api-btn');
     if (saveApiBtn) {
