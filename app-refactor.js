@@ -38,6 +38,177 @@
     return { adviceText, adviceColor: '#0071e3', adviceBg: 'rgba(0, 113, 227, 0.08)' };
   }
 
+  function loadCachedAiResult(a) {
+    const accountName = a.name || '默认账户';
+    const str = localStorage.getItem('LAST_AI_ANALYSIS_' + accountName) || localStorage.getItem('LAST_AI_ANALYSIS');
+    if (!str) return null;
+    try { return JSON.parse(str); } catch (e) { return null; }
+  }
+
+  /**
+   * 统一决策报告：本地规则引擎 + AI 结果合并为一份标准结构，
+   * 分析页与首页“今日操作建议”模块共用，避免两套口径。
+   */
+  function buildDecisionReport(a) {
+    const funds = a.funds || [];
+    const strategyList = a.strategy || [];
+    const closedPositions = a.closedPositions || [];
+    const totalAssets = funds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
+
+    const categoryTotals = {};
+    funds.forEach(f => {
+      const cat = f.category || '其他';
+      categoryTotals[cat] = (categoryTotals[cat] || 0) + (Number(f.amount) || 0);
+    });
+
+    const colorMap = {
+      '权益类': '#ff3b30',
+      '黄金类': '#ffd60a',
+      '债券类': '#34a853',
+      '海外类': '#0071e3',
+      '其他': '#af52de'
+    };
+    const allocations = Object.keys(categoryTotals).map(cat => {
+      const amt = categoryTotals[cat];
+      const pct = totalAssets > 0 ? (amt / totalAssets) * 100 : 0;
+      return {
+        category: cat,
+        amount: amt,
+        amountStr: money(amt),
+        pct,
+        pctStr: pct.toFixed(2) + '%',
+        color: colorMap[cat] || colorMap['其他']
+      };
+    }).sort((x, y) => y.amount - x.amount);
+
+    const categoryTargets = buildCategoryTargets(strategyList);
+    const activeCategories = new Set(funds.map(f => f.category || '其他'));
+    let activeTargetsSum = 0;
+    activeCategories.forEach(cat => { activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10; });
+
+    // 本地健康度 / 偏离度（沿用原分析页口径）
+    let healthScore = 60;
+    let healthText = '亟待调整';
+    let healthColor = '#ff3b30';
+    let deviationText = '当前账户无持仓数据';
+    if (activeCategories.size >= 4) {
+      healthScore = 95; healthText = '配置极佳'; healthColor = '#34a853';
+    } else if (activeCategories.size === 3) {
+      healthScore = 85; healthText = '配置良好'; healthColor = '#34a853';
+    } else if (activeCategories.size === 2) {
+      healthScore = 75; healthText = '配比一般'; healthColor = '#ff9500';
+    } else if (activeCategories.size === 1) {
+      healthScore = 60; healthText = '风险集中'; healthColor = '#ff3b30';
+    }
+    let maxCatPct = 0;
+    allocations.forEach(al => { if (al.pct > maxCatPct) maxCatPct = al.pct; });
+    deviationText = '组合配比均衡度良好';
+    if (maxCatPct > 65) deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
+    else if (maxCatPct > 45) deviationText = '大类配比略有偏离，建议微调持仓结构';
+    else if (funds.length === 0) deviationText = '当前账户无持仓数据';
+
+    // 本地风险评分（0-100，越高越危险）：集中度 + 亏损 + 波动
+    let localRisk = 50;
+    if (activeCategories.size === 1) localRisk += 15;
+    else if (activeCategories.size === 2) localRisk += 5;
+    if (maxCatPct > 65) localRisk += 10;
+    else if (maxCatPct > 45) localRisk += 5;
+    const profitRates = funds.map(f => {
+      const amount = Number(f.amount) || 0;
+      const profit = Number(f.holdingProfit ?? f.profit) || 0;
+      return amount > 0 ? profit / amount : 0;
+    });
+    const avgRate = profitRates.length ? profitRates.reduce((s, r) => s + r, 0) / profitRates.length : 0;
+    if (avgRate < -0.1) localRisk += 10;
+    else if (avgRate < 0) localRisk += 5;
+    else if (avgRate > 0.15) localRisk -= 5;
+    localRisk = Math.max(5, Math.min(95, localRisk));
+
+    const aiResult = loadCachedAiResult(a);
+    if (aiResult) {
+      healthScore = aiResult.healthScore !== undefined ? Number(aiResult.healthScore) : healthScore;
+      healthText = aiResult.healthText || healthText;
+      healthColor = aiResult.healthColor || healthColor;
+      deviationText = aiResult.deviationText || deviationText;
+    }
+    const aiRisk = aiResult && Number.isFinite(Number(aiResult.riskScore)) ? Number(aiResult.riskScore) : null;
+    const riskScore = aiRisk !== null ? Math.round(aiRisk * 0.6 + localRisk * 0.4) : localRisk;
+    const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
+
+    // 逐基金统一决策行（本地规则 + AI 建议合并）
+    const rows = funds.map(f => {
+      const cat = f.category || '其他';
+      const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
+      const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
+      const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
+      const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
+      const currentPct = totalAssets > 0 ? ((Number(f.amount) || 0) / totalAssets) * 100 : 0;
+      const diffPct = currentPct - targetPct;
+      const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
+
+      let aiSugg = null;
+      if (aiResult && aiResult.suggestions) {
+        aiSugg = aiResult.suggestions.find(s =>
+          (s.code && String(s.code) === String(f.code)) ||
+          (s.fund && (s.fund.includes(f.name) || f.name.includes(s.fund)))
+        ) || null;
+      }
+
+      let adviceText, adviceColor, adviceBg, adviceReason;
+      if (aiSugg) {
+        adviceText = aiSugg.action;
+        adviceReason = aiSugg.reason;
+        if (/(加|低吸|买|定投)/.test(adviceText)) { adviceColor = '#ff3b30'; adviceBg = 'rgba(255, 59, 48, 0.08)'; }
+        else if (/(减|止盈|卖|赎)/.test(adviceText)) { adviceColor = '#ff9500'; adviceBg = 'rgba(255, 149, 0, 0.08)'; }
+        else { adviceColor = '#0071e3'; adviceBg = 'rgba(0, 113, 227, 0.08)'; }
+      } else {
+        const fb = buildAdviceText(diffPct, parsedRules);
+        adviceText = fb.adviceText;
+        adviceColor = fb.adviceColor;
+        adviceBg = fb.adviceBg;
+        adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
+      }
+
+      const todayRate = Number(f.today || 0) * 100;
+      let actionType = 'hold';
+      if (/(加|低吸|买|定投)/.test(adviceText)) actionType = 'buy';
+      else if (/(减|止盈|卖|赎)/.test(adviceText)) actionType = 'sell';
+
+      return {
+        code: f.code,
+        name: f.name,
+        cat,
+        amount: Number(f.amount) || 0,
+        currentPct,
+        todayRate,
+        isTodayPositive: todayRate >= 0,
+        adviceText,
+        adviceColor,
+        adviceBg,
+        adviceReason,
+        actionType
+      };
+    });
+
+    return {
+      funds,
+      strategyList,
+      closedPositions,
+      allocations,
+      totalAssets,
+      healthScore,
+      healthText,
+      healthColor,
+      deviationText,
+      riskScore,
+      riskLevel,
+      hasAi: Boolean(aiResult),
+      summary: aiResult && aiResult.summary ? aiResult.summary : null,
+      rows,
+      aiResult
+    };
+  }
+
   function parseStrategyDetails(f, list) {
     const matched = [];
     const rules = {
@@ -107,16 +278,9 @@
   }
 
   function buildTodayAdviceModule(a) {
-    const accountName = a.name || '默认账户';
-
-    let cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS_' + accountName) || localStorage.getItem('LAST_AI_ANALYSIS');
-    let aiResult = null;
-    if (cachedAnalysisStr) {
-      try { aiResult = JSON.parse(cachedAnalysisStr); } catch (e) { aiResult = null; }
-    }
-
-    const summaryHtml = aiResult && aiResult.summary ? `
-      <div class="today-advice-summary"><strong>今日操作建议的总结：</strong>${esc(aiResult.summary)}</div>
+    const report = buildDecisionReport(a);
+    const summaryHtml = report.summary ? `
+      <div class="today-advice-summary"><strong>今日操作建议的总结：</strong>${esc(report.summary)}</div>
     ` : `
       <div class="today-advice-empty">今日操作建议总结尚未生成，点击右上角 › 前往分析页运行 AI 诊断</div>
     `;
@@ -197,13 +361,16 @@
           ${editing ? '<button class="secondary-button" data-action="add-account">新增账户</button>' : ''}
         </div>
         <div class="account-list">
-          ${Object.values(s.accounts).map(a => `
-            <div class="account-card ${editing ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
-              ${editing ? '<input type="checkbox" data-check="' + esc(a.name) + '" ' + (selected.has(a.name) ? 'checked' : '') + ' />' : ''}
-              <div><b>${esc(a.name)}</b><small>${a.funds.length ? a.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
-              <div><strong>${money(a.funds.reduce((x, f) => x + f.amount, 0))}</strong><span>${money(a.funds.reduce((x, f) => x + f.amount * f.today, 0))}</span></div>
-            </div>
-          `).join('')}
+          ${Object.values(s.accounts).map(a => {
+            const synced = Boolean(a.__source);
+            return `
+              <div class="account-card ${editing && !synced ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
+                ${editing && !synced ? '<input type="checkbox" data-check="' + esc(a.name) + '" ' + (selected.has(a.name) ? 'checked' : '') + ' />' : ''}
+                <div><b>${esc(a.name)}${synced ? ' <span class="synced-badge">同步</span>' : ''}</b><small>${a.funds.length ? a.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
+                <div><strong>${money(a.funds.reduce((x, f) => x + f.amount, 0))}</strong><span>${money(a.funds.reduce((x, f) => x + f.amount * f.today, 0))}</span></div>
+              </div>
+            `;
+          }).join('')}
         </div>
         ${editing ? `<div class="account-delete-bar"><button class="danger-button" data-action="delete" ${!selected.size ? 'disabled' : ''}>删除所选</button></div>` : ''}
       </section>
@@ -245,129 +412,29 @@
   function analysis(){
     title.textContent = '';
     const a = acct();
-    const funds = a.funds || [];
-    
-    // Calculate aggregate allocations by category
-    const categoryTotals = {};
-    let totalAssets = 0;
-    funds.forEach(f => {
-      const amt = Number(f.amount) || 0;
-      const cat = f.category || '其他';
-      categoryTotals[cat] = (categoryTotals[cat] || 0) + amt;
-      totalAssets += amt;
-    });
+    const report = buildDecisionReport(a);
+    const {
+      funds,
+      strategyList,
+      closedPositions,
+      allocations,
+      totalAssets,
+      healthScore,
+      healthText,
+      healthColor,
+      deviationText,
+      riskScore,
+      riskLevel,
+      summary,
+      rows
+    } = report;
+    const aiResult = report.aiResult;
 
-    const colorMap = {
-      '权益类': '#ff3b30',
-      '黄金类': '#ffd60a',
-      '债券类': '#34a853',
-      '海外类': '#0071e3',
-      '其他': '#af52de'
-    };
-
-    const allocations = Object.keys(categoryTotals).map(cat => {
-      const amt = categoryTotals[cat];
-      const pct = totalAssets > 0 ? (amt / totalAssets) * 100 : 0;
-      return {
-        category: cat,
-        amount: amt,
-        amountStr: money(amt),
-        pct,
-        pctStr: pct.toFixed(2) + '%',
-        color: colorMap[cat] || colorMap['其他']
-      };
-    }).sort((x, y) => y.amount - x.amount);
-
-    const strategyList = a.strategy || [];
-    const closedPositions = a.closedPositions || [];
-
-    // Parse targets dynamically from user's active configuration strategies
-    // Fallback to standard asset targets
-    const categoryTargets = buildCategoryTargets(strategyList);
-
-    const activeCategories = new Set(funds.map(f => f.category || '其他'));
-    let activeTargetsSum = 0;
-    activeCategories.forEach(cat => {
-      activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10;
-    });
-
-    const getNormalizedCategoryTarget = (cat) => {
-      if (activeTargetsSum === 0) return (categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10);
-      const base = categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10;
-      return (base / activeTargetsSum) * 100;
-    };
-
-    // Load cached AI diagnosis results for the specific active account to prevent cross-account sync issues
     const activeAccountName = a.name || '默认账户';
-    let cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS_' + activeAccountName);
     let cachedTime = localStorage.getItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
     let cachedModel = localStorage.getItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
-
-    // Fallback to global cache if account-specific cache is empty
-    if (!cachedAnalysisStr) {
-      cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS');
-      cachedTime = window.lastAnalysisTime || '';
-      cachedModel = localStorage.getItem('AI_MODEL_NAME') || '';
-    }
-
-    let aiResult = null;
-    if (cachedAnalysisStr) {
-      try {
-        aiResult = JSON.parse(cachedAnalysisStr);
-      } catch (e) {
-        console.error('Failed to parse cached AI analysis:', e);
-      }
-    }
-
-    // Dynamic metrics dynamically evaluated by AI when available, otherwise fallback to local rule calculations
-    let healthScore = 60;
-    let healthText = '亟待调整';
-    let healthColor = '#ff3b30';
-    let deviationText = '当前账户无持仓数据';
-
-    if (aiResult) {
-      healthScore = aiResult.healthScore !== undefined ? aiResult.healthScore : 60;
-      healthText = aiResult.healthText || '亟待调整';
-      healthColor = aiResult.healthColor || '#ff3b30';
-      deviationText = aiResult.deviationText || '由 AI 动态评估组合偏离状态';
-    } else {
-      const uniqueCats = new Set(funds.map(f => f.category || '其他'));
-      if (uniqueCats.size >= 4) {
-        healthScore = 95;
-        healthText = '配置极佳';
-        healthColor = '#34a853';
-      } else if (uniqueCats.size === 3) {
-        healthScore = 85;
-        healthText = '配置良好';
-        healthColor = '#34a853';
-      } else if (uniqueCats.size === 2) {
-        healthScore = 75;
-        healthText = '配比一般';
-        healthColor = '#ff9500';
-      } else if (uniqueCats.size === 1) {
-        healthScore = 60;
-        healthText = '风险集中';
-        healthColor = '#ff3b30';
-      }
-
-      let maxCatPct = 0;
-      allocations.forEach(al => {
-        if (al.pct > maxCatPct) maxCatPct = al.pct;
-      });
-
-      deviationText = '组合配比均衡度良好';
-      if (maxCatPct > 65) {
-        deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
-      } else if (maxCatPct > 45) {
-        deviationText = '大类配比略有偏离，建议微调持仓结构';
-      } else if (funds.length === 0) {
-        deviationText = '当前账户无持仓数据';
-      }
-    }
-
-    // Today's estimated return (strictly fetched from unified window.portfolio.todayProfit)
-    const todayEstReturn = window.portfolio ? window.portfolio.todayProfit : 0;
-    const todayEstRate = totalAssets > 0 ? (todayEstReturn / totalAssets) * 100 : 0;
+    if (!cachedTime) cachedTime = window.lastAnalysisTime || '';
+    if (!cachedModel) cachedModel = localStorage.getItem('AI_MODEL_NAME') || '';
 
 
     let allocHtml = '';
@@ -539,12 +606,16 @@
               <span style="font-size: 11px; color: #86868b; font-weight: 500;">持仓分析</span>
               <strong style="font-size: 13.5px; color: #1d1d1f; font-weight: 700; min-height: 32px; display: flex; align-items: center; line-height: 1.5;">${deviationText}</strong>
             </div>
+            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 11px; color: #86868b; font-weight: 500;">风险评分</span>
+              <strong style="font-size: 22px; color: #1d1d1f; font-weight: 700;">${riskScore}分 <span style="font-size: 13.5px; font-weight: 600; color: ${riskScore >= 70 ? '#ff3b30' : riskScore >= 40 ? '#ff9500' : '#34a853'}; margin-left: 6px;">${riskLevel}风险</span></strong>
+            </div>
           </div>
           ` : ''}
 
-          ${aiResult && aiResult.summary ? `
+          ${summary ? `
           <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 4px;">
-            <strong>今日操作建议的总结：</strong>${esc(aiResult.summary)}
+            <strong>今日操作建议的总结：</strong>${esc(summary)}
           </div>
           ` : ''}
         </div>
@@ -584,99 +655,16 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${funds.map(f => {
-                    const cat = f.category || '其他';
-                    const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-                    
-                    // Dynamic targets computed according to user investment strategies (Investment Discipline)
-                    const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
-                    const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
-                    const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
-                    const targetAmt = totalAssets * (targetPct / 100);
-
-                    const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
-                    const diffPct = currentPct - targetPct;
-
-                    // Parse strategies matching this fund
-                    const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
-
-                    // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
-                    const getAiSuggestion = (fund) => {
-                      if (!aiResult || !aiResult.suggestions) return null;
-                      return aiResult.suggestions.find(s => 
-                        (s.code && String(s.code) === String(fund.code)) || 
-                        (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
-                      );
-                    };
-
-                    const aiSugg = getAiSuggestion(f);
-
-                    let adviceText = '';
-                    let adviceColor = '';
-                    let adviceBg = '';
-                    let adviceReason = '';
-
-                    if (aiSugg) {
-                      adviceText = aiSugg.action;
-                      adviceReason = aiSugg.reason;
-                      if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
-                        adviceColor = '#ff3b30'; // Red
-                        adviceBg = 'rgba(255, 59, 48, 0.08)';
-                      } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
-                        adviceColor = '#ff9500'; // Amber
-                        adviceBg = 'rgba(255, 149, 0, 0.08)';
-                      } else {
-                        adviceColor = '#0071e3'; // Blue
-                        adviceBg = 'rgba(0, 113, 227, 0.08)';
-                      }
-                    } else {
-                      // Fallback to local rule engine
-                      if (diffPct > 4) {
-                        adviceText = '分批止盈 / 适当减仓';
-                        if (parsedRules.recovery) {
-                          adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
-                        } else if (parsedRules.targetReturn) {
-                          adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
-                        }
-                        adviceColor = '#ff9500'; // Amber/Orange
-                        adviceBg = 'rgba(255, 149, 0, 0.08)';
-                      } else if (diffPct < -4) {
-                        if (parsedRules.suspendedBuy) {
-                          adviceText = '暂停申购 / 观望';
-                          adviceColor = '#86868b'; // Gray
-                          adviceBg = 'rgba(134, 134, 139, 0.08)';
-                        } else {
-                          adviceText = '分批低吸 / 逢低定投';
-                          if (parsedRules.fixedInvest) {
-                            adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
-                          } else if (parsedRules.limit) {
-                            adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
-                          }
-                          adviceColor = '#ff3b30'; // Red
-                          adviceBg = 'rgba(255, 59, 48, 0.08)';
-                        }
-                      } else {
-                        adviceText = '持有待涨 / 观望';
-                        if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
-                          adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
-                        }
-                        adviceColor = '#0071e3'; // Blue
-                        adviceBg = 'rgba(0, 113, 227, 0.08)';
-                      }
-                      adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
-                    }
-
-                    const todayRate = Number(f.today || 0) * 100;
-                    const isTodayPositive = todayRate >= 0;
-
+                  ${rows.map(row => {
+                    const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, adviceText, adviceColor, adviceBg, adviceReason } = row;
                     return `
                       <tr style="border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.15s;">
                         <td style="padding: 16px; vertical-align: middle;">
-                          <div style="font-weight: 600; color: #1d1d1f;">${esc(f.name)}</div>
-                          <div style="font-size: 11px; color: #86868b; font-family: monospace; margin-top: 2px;">${f.code} · ${esc(cat)}</div>
+                          <div style="font-weight: 600; color: #1d1d1f;">${esc(fundName)}</div>
+                          <div style="font-size: 11px; color: #86868b; font-family: monospace; margin-top: 2px;">${fundCode} · ${esc(cat)}</div>
                         </td>
                         <td style="padding: 16px; vertical-align: middle;">
-                          <div style="font-weight: 600; color: #1d1d1f;">${money(f.amount)}</div>
+                          <div style="font-weight: 600; color: #1d1d1f;">${money(fundAmount)}</div>
                           <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${currentPct.toFixed(2)}%</div>
                         </td>
                         <td style="padding: 16px; vertical-align: middle;">
@@ -701,97 +689,14 @@
 
             <!-- Mobile Cards View (Hidden on desktop, visible on mobile) -->
             <div class="analysis-cards" style="display: none; flex-direction: column; gap: 16px;">
-              ${funds.map(f => {
-                const cat = f.category || '其他';
-                const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-                
-                // Dynamic targets computed according to user investment strategies (Investment Discipline)
-                const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
-                const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
-                const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
-                const targetAmt = totalAssets * (targetPct / 100);
-
-                const currentPct = totalAssets > 0 ? (f.amount / totalAssets) * 100 : 0;
-                const diffPct = currentPct - targetPct;
-
-                // Parse strategies matching this fund
-                const { rules: parsedRules } = parseStrategyDetails(f, strategyList);
-
-                // Match AI suggestion for details (DeepSeek only returns: action, reason, targetPct)
-                const getAiSuggestion = (fund) => {
-                  if (!aiResult || !aiResult.suggestions) return null;
-                  return aiResult.suggestions.find(s => 
-                    (s.code && String(s.code) === String(fund.code)) || 
-                    (s.fund && (s.fund.includes(fund.name) || fund.name.includes(s.fund)))
-                  );
-                };
-
-                const aiSugg = getAiSuggestion(f);
-
-                let adviceText = '';
-                let adviceColor = '';
-                let adviceBg = '';
-                let adviceReason = '';
-
-                if (aiSugg) {
-                  adviceText = aiSugg.action;
-                  adviceReason = aiSugg.reason;
-                  if (adviceText.includes('加') || adviceText.includes('低吸') || adviceText.includes('买') || adviceText.includes('定投')) {
-                    adviceColor = '#ff3b30';
-                    adviceBg = 'rgba(255, 59, 48, 0.08)';
-                  } else if (adviceText.includes('减') || adviceText.includes('止盈') || adviceText.includes('卖') || adviceText.includes('赎')) {
-                    adviceColor = '#ff9500';
-                    adviceBg = 'rgba(255, 149, 0, 0.08)';
-                  } else {
-                    adviceColor = '#0071e3';
-                    adviceBg = 'rgba(0, 113, 227, 0.08)';
-                  }
-                } else {
-                  // Fallback to local rule engine
-                  if (diffPct > 4) {
-                    adviceText = '分批止盈 / 适当减仓';
-                    if (parsedRules.recovery) {
-                      adviceText = `止盈回本 (目标:${money(parsedRules.recovery)})`;
-                    } else if (parsedRules.targetReturn) {
-                      adviceText = `目标止盈 (门槛:${parsedRules.targetReturn})`;
-                    }
-                    adviceColor = '#ff9500';
-                    adviceBg = 'rgba(255, 149, 0, 0.08)';
-                  } else if (diffPct < -4) {
-                    if (parsedRules.suspendedBuy) {
-                      adviceText = '暂停申购 / 观望';
-                      adviceColor = '#86868b';
-                      adviceBg = 'rgba(134, 134, 139, 0.08)';
-                    } else {
-                      adviceText = '分批低吸 / 逢低定投';
-                      if (parsedRules.fixedInvest) {
-                        adviceText = `低吸定投 (${money(parsedRules.fixedInvest)}/期)`;
-                      } else if (parsedRules.limit) {
-                        adviceText = `限额定投 (单次:${money(parsedRules.limit)})`;
-                      }
-                      adviceColor = '#ff3b30';
-                      adviceBg = 'rgba(255, 59, 48, 0.08)';
-                    }
-                  } else {
-                    adviceText = '持有待涨 / 观望';
-                    if (parsedRules.fixedInvest && !parsedRules.suspendedBuy) {
-                      adviceText = `策略观望 (定投:${money(parsedRules.fixedInvest)})`;
-                    }
-                    adviceColor = '#0071e3';
-                    adviceBg = 'rgba(0, 113, 227, 0.08)';
-                  }
-                  adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
-                }
-
-                const todayRate = Number(f.today || 0) * 100;
-                const isTodayPositive = todayRate >= 0;
-
+              ${rows.map(row => {
+                const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, adviceText, adviceColor, adviceBg, adviceReason } = row;
                 return `
                   <div style="background: #f5f5f7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(0,0,0,0.03);">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
                       <div>
-                        <b style="font-size: 14.5px; color: #1d1d1f; display: block; line-height: 1.3;">${esc(f.name)}</b>
-                        <span style="font-size: 11px; color: #86868b; font-family: monospace;">${f.code} · ${esc(cat)}</span>
+                        <b style="font-size: 14.5px; color: #1d1d1f; display: block; line-height: 1.3;">${esc(fundName)}</b>
+                        <span style="font-size: 11px; color: #86868b; font-family: monospace;">${fundCode} · ${esc(cat)}</span>
                       </div>
                       <span style="display: inline-block; padding: 5px 10px; border-radius: 14px; font-size: 11.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
                         ${esc(adviceText)}
@@ -801,7 +706,7 @@
                     <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 12px; text-align: left;">
                       <div>
                         <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目前持仓</span>
-                        <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(f.amount)}</strong>
+                        <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(fundAmount)}</strong>
                         <span style="font-size: 11px; color: #6e6e73;">${currentPct.toFixed(1)}%</span>
                       </div>
                       <div>
@@ -845,6 +750,228 @@
     `;
   }
 
+  // ─────────────────────────────────────────────
+  // 第三方基金同步（养基宝 / 小倍养基）
+  // ─────────────────────────────────────────────
+  let providerStatusCache = { yangjibao: null, xiaobeiyangji: null };
+  let providerQrTimer = null;
+
+  function providerApi(path, options) {
+    return fetch(path, options).then(async res => {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.error || `HTTP ${res.status}`);
+        err.status = res.status;
+        err.data = data;
+        throw err;
+      }
+      return data;
+    });
+  }
+
+  // ─────────────────────────────────────────────
+  // Apple 风格提示 / 弹窗
+  // ─────────────────────────────────────────────
+  function showToast(message, type = 'success') {
+    const old = document.querySelector('.apple-toast');
+    if (old) old.remove();
+    const toast = document.createElement('div');
+    toast.className = 'apple-toast';
+    toast.setAttribute('role', 'status');
+    const icon = type === 'error' ? '!' : type === 'warning' ? '⚠' : '✓';
+    toast.innerHTML = `<span class="apple-toast-icon">${icon}</span><span>${esc(message)}</span>`;
+    document.body.appendChild(toast);
+    requestAnimationFrame(() => toast.classList.add('visible'));
+    setTimeout(() => {
+      toast.classList.remove('visible');
+      setTimeout(() => toast.remove(), 260);
+    }, 2800);
+  }
+
+  function showAppleDialog({ title, message = '', okText = '确定', cancelText = '取消', danger = false }) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay apple-dialog-overlay';
+      overlay.innerHTML = `
+        <div class="confirm-dialog apple-dialog" role="alertdialog" aria-modal="true">
+          <h2>${esc(title)}</h2>
+          ${message ? `<p class="apple-dialog-message">${esc(message)}</p>` : ''}
+          <div class="confirm-actions apple-dialog-actions">
+            ${cancelText ? `<button type="button" class="apple-dialog-cancel" data-role="cancel">${esc(cancelText)}</button>` : ''}
+            <button type="button" class="${danger ? 'apple-dialog-danger' : 'primary'}" data-role="ok">${esc(okText)}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+      const close = result => {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 180);
+        resolve(result);
+      };
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || e.target.closest('[data-role="cancel"]')) close(false);
+        else if (e.target.closest('[data-role="ok"]')) close(true);
+      });
+    });
+  }
+
+  async function refreshProviderStatus() {
+    const [yjb, xbyj] = await Promise.all([
+      providerApi('/api/provider/yangjibao/status').catch(() => null),
+      providerApi('/api/provider/xiaobeiyangji/status').catch(() => null)
+    ]);
+    providerStatusCache.yangjibao = yjb;
+    providerStatusCache.xiaobeiyangji = xbyj;
+  }
+
+  // 同步账户权威数据：从服务端加载并合并进本地状态（标记 __source，不持久化到 localStorage）
+  async function refreshSyncedAccounts() {
+    try {
+      const data = await providerApi('/api/portfolio/accounts');
+      const serverAccounts = data.accounts || [];
+      const serverNames = new Set(serverAccounts.map(a => a.name));
+      Object.keys(s.accounts).forEach(name => {
+        const account = s.accounts[name];
+        if (account && account.__source && !serverNames.has(name)) delete s.accounts[name];
+      });
+      serverAccounts.forEach(acc => {
+        acc.__source = acc.name.startsWith('养基宝-') ? 'yangjibao' : acc.name.startsWith('小倍养基-') ? 'xiaobeiyangji' : 'sync';
+        s.accounts[acc.name] = acc;
+      });
+      return serverAccounts;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function applyProviderStatus() {
+    const yjb = providerStatusCache.yangjibao;
+    const yjbConnected = Boolean(yjb && yjb.logged_in);
+    const yjbStatus = document.querySelector('#yjb-status-text');
+    if (yjbStatus) yjbStatus.textContent = yjbConnected ? '已连接' : '未登录';
+    const yjbLoginArea = document.querySelector('#yjb-login-area');
+    const yjbConnectedArea = document.querySelector('#yjb-connected-area');
+    if (yjbLoginArea) yjbLoginArea.style.display = yjbConnected ? 'none' : 'block';
+    if (yjbConnectedArea) {
+      yjbConnectedArea.style.display = yjbConnected ? 'block' : 'none';
+      const last = yjbConnectedArea.querySelector('#yjb-last-sync');
+      if (last) last.textContent = yjb && yjb.last_sync_at ? String(yjb.last_sync_at).replace('T', ' ').slice(0, 19) : '—';
+    }
+
+    const xbyj = providerStatusCache.xiaobeiyangji;
+    const xbyjConnected = Boolean(xbyj && xbyj.logged_in);
+    const xbyjStatus = document.querySelector('#xbyj-status-text');
+    if (xbyjStatus) xbyjStatus.textContent = xbyjConnected ? '已连接' : '未登录';
+    const xbyjLoginArea = document.querySelector('#xbyj-login-area');
+    const xbyjConnectedArea = document.querySelector('#xbyj-connected-area');
+    if (xbyjLoginArea) xbyjLoginArea.style.display = xbyjConnected ? 'none' : 'block';
+    if (xbyjConnectedArea) {
+      xbyjConnectedArea.style.display = xbyjConnected ? 'block' : 'none';
+      const last = xbyjConnectedArea.querySelector('#xbyj-last-sync');
+      if (last) last.textContent = xbyj && xbyj.last_sync_at ? String(xbyj.last_sync_at).replace('T', ' ').slice(0, 19) : '—';
+    }
+  }
+
+  function runProviderImport(sourceName, overwrite) {
+    const names = { yangjibao: '养基宝', xiaobeiyangji: '小倍养基' };
+    return providerApi(`/api/provider/${sourceName}/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ overwrite: Boolean(overwrite) })
+    }).then(async data => {
+      const accountCount = (data.accounts || []).length;
+      const fundCount = (data.accounts || []).reduce((sum, a) => sum + (a.funds || []).length, 0);
+      await refreshProviderStatus().catch(() => {});
+      await refreshSyncedAccounts();
+      if (view === 'portfolio' || view === 'overview') render(view);
+      showToast(`同步完成：成功导入 ${fundCount} 个基金、${accountCount} 个账户`);
+      const runAi = await showAppleDialog({
+        title: '同步完成',
+        message: `成功导入 ${fundCount} 个基金、${accountCount} 个账户。是否立即进行 AI 分析，生成今日投资报告？`,
+        okText: '立即分析',
+        cancelText: '稍后再说'
+      });
+      if (runAi) {
+        runAiDiagnostics('');
+      }
+      return { accountCount, fundCount };
+    }).catch(err => {
+      if (err.data && err.data.token_expired) {
+        showToast('登录已过期，请重新登录后再次同步', 'warning');
+      } else {
+        showToast(`同步失败：${err.message || '网络错误'}`, 'error');
+      }
+      refreshProviderStatus().then(() => { if (view === 'setting') applyProviderStatus(); }).catch(() => {});
+      throw err;
+    });
+  }
+
+  function showProviderQRModal(sourceName) {
+    const names = { yangjibao: '养基宝', xiaobeiyangji: '小倍养基' };
+    const overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay provider-qr-overlay';
+    overlay.innerHTML = `
+      <div class="confirm-dialog" style="text-align: center; max-width: 360px;">
+        <h2>${names[sourceName] || sourceName}扫码登录</h2>
+        <div id="provider-qr-image" style="margin: 18px auto; width: 240px; height: 240px; display: grid; place-items: center; color: #86868b; font-size: 13px;">正在获取二维码…</div>
+        <p id="provider-qr-status" style="color: #86868b; font-size: 12px; margin: 0 0 14px 0;">请使用微信扫描二维码完成登录</p>
+        <div class="confirm-actions"><button type="button" data-close>取消</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('visible'));
+
+    const close = () => {
+      if (providerQrTimer) { clearInterval(providerQrTimer); providerQrTimer = null; }
+      overlay.classList.remove('visible');
+      setTimeout(() => overlay.remove(), 180);
+    };
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay || e.target.closest('[data-close]')) close();
+    });
+
+    providerApi(`/api/provider/${sourceName}/qrcode`, { method: 'POST' }).then(qr => {
+      const box = overlay.querySelector('#provider-qr-image');
+      const img = document.createElement('img');
+      img.src = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(qr.qr_url)}`;
+      img.width = 240;
+      img.height = 240;
+      img.alt = '登录二维码';
+      img.style.borderRadius = '8px';
+      box.innerHTML = '';
+      box.appendChild(img);
+
+      const started = Date.now();
+      providerQrTimer = setInterval(async () => {
+        if (Date.now() - started > 90000) {
+          clearInterval(providerQrTimer); providerQrTimer = null;
+          const status = overlay.querySelector('#provider-qr-status');
+          if (status) status.textContent = '二维码已过期，请重新获取';
+          return;
+        }
+        try {
+          const st = await providerApi(`/api/provider/${sourceName}/status?qr_id=${encodeURIComponent(qr.qr_id)}`);
+          if (st.state === 'confirmed') {
+            clearInterval(providerQrTimer); providerQrTimer = null;
+            const status = overlay.querySelector('#provider-qr-status');
+            if (status) status.textContent = '登录成功';
+            setTimeout(() => {
+              close();
+              refreshProviderStatus().then(() => { if (view === 'setting') applyProviderStatus(); }).catch(() => {});
+              showToast(`${names[sourceName] || sourceName}登录成功`);
+            }, 500);
+          } else if (st.state === 'expired') {
+            clearInterval(providerQrTimer); providerQrTimer = null;
+            const status = overlay.querySelector('#provider-qr-status');
+            if (status) status.textContent = '二维码已过期，请重新获取';
+          }
+        } catch (e) { /* 网络波动继续轮询 */ }
+      }, 2000);
+    }).catch(() => {
+      const box = overlay.querySelector('#provider-qr-image');
+      if (box) box.textContent = '获取二维码失败，请重试';
+    });
+  }
+
   function setting(){
     title.textContent = '';
     const a = acct();
@@ -855,7 +982,7 @@
     const savedModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
     const savedAPIKey = window.AI_API_KEY || '';
 
-    window.settingsCollapsedState = window.settingsCollapsedState || { datasource: false, aimodel: false, strategy: false, dangerzone: true };
+    window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, strategy: true, dangerzone: true };
 
     let strategyItemsHtml = '';
     if (strategyList.length > 0) {
@@ -1053,6 +1180,71 @@
             </div>
           </div>
 
+          <!-- Section 2.5: Third-party Fund Sync -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="providers" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="12" y1="9" x2="12" y2="15"></line><line x1="8" y1="13" x2="16" y2="13"></line></svg></span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">第三方基金同步</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">养基宝 / 小倍养基一键导入持仓，自动同步估值</p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">PROVIDERS</span>
+                <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.providers ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
+              </div>
+            </div>
+
+            <div class="panel-body-providers" style="display: ${window.settingsCollapsedState.providers ? 'none' : 'block'}; padding: 24px;">
+              <!-- 养基宝 -->
+              <div style="background: #fafafa; border: 1px solid rgba(0,0,0,0.04); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <b style="font-size: 14px; color: #1d1d1f;">养基宝</b>
+                  <span id="yjb-status-text" style="font-size: 12px; color: #86868b;">检查中…</span>
+                </div>
+                <div id="yjb-login-area" style="display: none;">
+                  <button class="primary" id="yjb-qrcode-btn" style="width: 100%; padding: 9px 12px; border-radius: 8px; font-size: 13px;">扫码登录</button>
+                </div>
+                <div id="yjb-connected-area" style="display: none;">
+                  <div style="font-size: 12px; color: #6e6e73; margin-bottom: 10px;">最后同步：<b id="yjb-last-sync" style="color: #1d1d1f;">—</b></div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="primary" id="yjb-import-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">同步持仓</button>
+                    <button class="secondary-button" id="yjb-overwrite-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">覆盖重导</button>
+                    <button id="yjb-logout-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600;">退出登录</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 小倍养基 -->
+              <div style="background: #fafafa; border: 1px solid rgba(0,0,0,0.04); border-radius: 12px; padding: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                  <b style="font-size: 14px; color: #1d1d1f;">小倍养基</b>
+                  <span id="xbyj-status-text" style="font-size: 12px; color: #86868b;">检查中…</span>
+                </div>
+                <div id="xbyj-login-area" style="display: none;">
+                  <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <input type="tel" id="xbyj-phone" placeholder="手机号" style="flex: 1; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 13px; background: #fff; outline: none;" />
+                    <button class="secondary-button" id="xbyj-sms-btn" style="padding: 8px 12px; border-radius: 6px; font-size: 13px; white-space: nowrap;">发送验证码</button>
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <input type="text" id="xbyj-code" placeholder="短信验证码" style="flex: 1; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 13px; background: #fff; outline: none;" />
+                    <button class="primary" id="xbyj-login-btn" style="padding: 8px 12px; border-radius: 6px; font-size: 13px;">登录</button>
+                  </div>
+                  <div style="font-size: 11px; color: #86868b; margin-top: 8px; line-height: 1.5;">收不到验证码？请确认手机号已在「小倍养基」App 注册，并避免频繁点击发送。</div>
+                </div>
+                <div id="xbyj-connected-area" style="display: none;">
+                  <div style="font-size: 12px; color: #6e6e73; margin-bottom: 10px;">最后同步：<b id="xbyj-last-sync" style="color: #1d1d1f;">—</b></div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="primary" id="xbyj-import-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">同步全部账户</button>
+                    <button class="secondary-button" id="xbyj-overwrite-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">覆盖重导</button>
+                    <button id="xbyj-logout-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600;">退出登录</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Section 3: Investment Strategy -->
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="strategy" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
@@ -1107,6 +1299,8 @@
         </div>
       </section>
     `;
+    applyProviderStatus();
+    refreshProviderStatus().then(() => { if (view === 'setting') applyProviderStatus(); }).catch(() => {});
   }
 
   function render(v){
@@ -1404,7 +1598,7 @@
     if (toggleHeader) {
       const panelKey = toggleHeader.dataset.panel;
       if (panelKey) {
-        window.settingsCollapsedState = window.settingsCollapsedState || { datasource: false, aimodel: false, strategy: false, dangerzone: true };
+        window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, strategy: true, dangerzone: true };
         window.settingsCollapsedState[panelKey] = !window.settingsCollapsedState[panelKey];
         setting();
       }
@@ -1677,6 +1871,84 @@
       return;
     }
 
+    // --- 第三方基金同步 ---
+    const yjbQrcodeBtn = e.target.closest('#yjb-qrcode-btn');
+    if (yjbQrcodeBtn) { showProviderQRModal('yangjibao'); return; }
+
+    const yjbImportBtn = e.target.closest('#yjb-import-btn');
+    if (yjbImportBtn) { runProviderImport('yangjibao', false); return; }
+
+    const yjbOverwriteBtn = e.target.closest('#yjb-overwrite-btn');
+    if (yjbOverwriteBtn) {
+      showAppleDialog({
+        title: '覆盖重导',
+        message: '将清空养基宝账户已有持仓后重新导入，是否继续？',
+        okText: '覆盖重导',
+        danger: true
+      }).then(ok => { if (ok) runProviderImport('yangjibao', true); });
+      return;
+    }
+
+    const yjbLogoutBtn = e.target.closest('#yjb-logout-btn');
+    if (yjbLogoutBtn) {
+      providerApi('/api/provider/yangjibao/logout', { method: 'POST' })
+        .then(() => refreshProviderStatus())
+        .then(() => { if (view === 'setting') applyProviderStatus(); showToast('已退出养基宝'); })
+        .catch(() => showToast('退出登录失败', 'error'));
+      return;
+    }
+
+    const xbyjSmsBtn = e.target.closest('#xbyj-sms-btn');
+    if (xbyjSmsBtn) {
+      const phone = ((document.querySelector('#xbyj-phone') || {}).value || '').trim();
+      if (!/^1\d{10}$/.test(phone)) { showToast('请输入正确的手机号', 'warning'); return; }
+      providerApi('/api/provider/xiaobeiyangji/sendSMS', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone })
+      }).then(() => showToast('验证码已发送，请注意查收')).catch(err => showToast(`验证码发送失败：${err.message || '网络错误'}`, 'error'));
+      return;
+    }
+
+    const xbyjLoginBtn = e.target.closest('#xbyj-login-btn');
+    if (xbyjLoginBtn) {
+      const phone = ((document.querySelector('#xbyj-phone') || {}).value || '').trim();
+      const code = ((document.querySelector('#xbyj-code') || {}).value || '').trim();
+      if (!/^1\d{10}$/.test(phone)) { showToast('请输入正确的手机号', 'warning'); return; }
+      if (!code) { showToast('请输入验证码', 'warning'); return; }
+      providerApi('/api/provider/xiaobeiyangji/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone, code })
+      }).then(() => refreshProviderStatus())
+        .then(() => { if (view === 'setting') applyProviderStatus(); showToast('小倍养基登录成功'); })
+        .catch(err => showToast(`登录失败：${err.message || '网络错误'}`, 'error'));
+      return;
+    }
+
+    const xbyjImportBtn = e.target.closest('#xbyj-import-btn');
+    if (xbyjImportBtn) { runProviderImport('xiaobeiyangji', false); return; }
+
+    const xbyjOverwriteBtn = e.target.closest('#xbyj-overwrite-btn');
+    if (xbyjOverwriteBtn) {
+      showAppleDialog({
+        title: '覆盖重导',
+        message: '将清空小倍养基账户已有持仓后重新导入，是否继续？',
+        okText: '覆盖重导',
+        danger: true
+      }).then(ok => { if (ok) runProviderImport('xiaobeiyangji', true); });
+      return;
+    }
+
+    const xbyjLogoutBtn = e.target.closest('#xbyj-logout-btn');
+    if (xbyjLogoutBtn) {
+      providerApi('/api/provider/xiaobeiyangji/logout', { method: 'POST' })
+        .then(() => refreshProviderStatus())
+        .then(() => { if (view === 'setting') applyProviderStatus(); showToast('已退出小倍养基'); })
+        .catch(() => showToast('退出登录失败', 'error'));
+      return;
+    }
+
     const row=e.target.closest('[data-account]');
     if(row&&!editing){
       s.setActive(row.dataset.account);
@@ -1711,6 +1983,8 @@
   });
   document.querySelectorAll('.nav-tab').forEach(b=>b.addEventListener('click',()=>{editing=false;selected.clear();render(b.dataset.view)}));
   render('portfolio');
+  // 阶段1：启动时从服务端加载同步账户权威数据
+  refreshSyncedAccounts().then(() => render(view)).catch(() => {});
   // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
   // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。
   s.render = render;

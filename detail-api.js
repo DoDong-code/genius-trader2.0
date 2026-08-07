@@ -151,6 +151,10 @@
   }
 
   function fundCostPrice(fund, latestNav) {
+    // 优先使用数据源提供的单位成本（costNav），避免“市值-收益”反推在口径不一致时失真
+    if (fund && Number.isFinite(Number(fund.costNav)) && Number(fund.costNav) > 0) {
+      return Number(fund.costNav);
+    }
     const amount = Number(fund?.amount) || 0;
     const profit = Number(fund?.holdingProfit ?? fund?.profit) || 0;
     if (amount <= 0 || !Number.isFinite(latestNav) || latestNav <= 0) return null;
@@ -199,9 +203,14 @@
     const costPrice = fundCostPrice(fund, Number(last.nav));
     let costLine = '';
     let costTopPct = 0;
+    let costHint = '';
     if (costPrice != null) {
-      const costY = padding + ((maximum - costPrice) / range) * (height - padding * 2);
-      costTopPct = ((maximum - costPrice) / range) * 100;
+      const rawCostY = padding + ((maximum - costPrice) / range) * (height - padding * 2);
+      // 成本价超出当前走势区间时，将虚线钳制在图表可视区内，避免“跑出曲线图”
+      const costY = Math.max(padding, Math.min(height - padding, rawCostY));
+      costTopPct = Math.min(92, Math.max(8, ((costY - padding) / (height - padding * 2)) * 100));
+      if (costPrice > maximum) costHint = '（高于当前区间）';
+      else if (costPrice < minimum) costHint = '（低于当前区间）';
       costLine = `
         <line x1="${padding}" y1="${costY.toFixed(2)}" x2="${width - padding}" y2="${costY.toFixed(2)}"
           stroke="#0071e3" stroke-width="1.5" stroke-dasharray="5,4" opacity="0.8"
@@ -232,7 +241,7 @@
           ${costLine}
           ${txnMarkers}
         </svg>
-        ${costPrice != null ? `<div class="detail-chart-cost-label" style="top: ${costTopPct.toFixed(2)}%;">成本 ${costPrice.toFixed(4)}</div>` : ''}
+        ${costPrice != null ? `<div class="detail-chart-cost-label" style="top: ${costTopPct.toFixed(2)}%;">成本 ${costPrice.toFixed(4)}${costHint}</div>` : ''}
       </div>
       <div class="detail-chart-meta">
         <span>${escapeHtml(first.date)}</span>

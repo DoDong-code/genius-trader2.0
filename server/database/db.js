@@ -119,11 +119,32 @@ function initialize(db) {
       calibrated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (fund_code) REFERENCES fund(fund_code) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS source_credentials (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_name TEXT NOT NULL UNIQUE,
+      token TEXT NOT NULL DEFAULT '',
+      refresh_token TEXT NOT NULL DEFAULT '',
+      cookie TEXT NOT NULL DEFAULT '',
+      user_info TEXT,
+      status TEXT NOT NULL DEFAULT 'disconnected',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   const stockColumns = db.prepare('PRAGMA table_info(stock_price)').all();
   if (!stockColumns.some(column => column.name === 'updated_at')) {
     db.exec("ALTER TABLE stock_price ADD COLUMN updated_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'");
+  }
+
+  // 阶段1：同步账户持仓权威化 —— portfolio 表补充类别与交易流水字段
+  const portfolioColumns = db.prepare('PRAGMA table_info(portfolio)').all();
+  if (!portfolioColumns.some(column => column.name === 'category')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN category TEXT NOT NULL DEFAULT '基金'");
+  }
+  if (!portfolioColumns.some(column => column.name === 'transactions')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN transactions TEXT NOT NULL DEFAULT '[]'");
   }
 }
 

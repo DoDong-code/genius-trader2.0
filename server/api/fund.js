@@ -36,6 +36,13 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // 第三方 Provider API（养基宝 / 小倍养基）
+  if (url.pathname.startsWith('/api/provider/')) {
+    const { handleProviderApi } = require('./provider');
+    await handleProviderApi(request, response, url);
+    return true;
+  }
+
   // Handle AI Routes
   if (url.pathname.startsWith('/api/ai/')) {
     if (url.pathname === '/api/ai/models' && request.method === 'GET') {
@@ -131,6 +138,12 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  if (url.pathname === '/api/portfolio/accounts' && request.method === 'GET') {
+    const { listSyncedAccounts } = require('../services/portfolioService');
+    sendJson(response, 200, { success: true, accounts: listSyncedAccounts() });
+    return true;
+  }
+
   let match = routeMatch(url.pathname, /^\/api\/fund\/import\/(\d{6})$/);
   if (match) {
     const result = await importFund(match[0], {
@@ -163,10 +176,11 @@ async function handleFundApi(request, response, url) {
   if (match) {
     const amount = url.searchParams.has('amount')
       ? Number(url.searchParams.get('amount')) : undefined;
-    const estimate = await calculateFundEstimate(match[0], {
-      amount,
-      force: url.searchParams.get('force') === '1'
-    });
+    const force = url.searchParams.get('force') === '1';
+    // 估值优先级：小倍养基 / 养基宝（已登录）→ 本地引擎测算（兜底）
+    const { fetchProviderEstimate } = require('../services/providerEstimate');
+    const estimate = (await fetchProviderEstimate(match[0], amount, { force }))
+      || await calculateFundEstimate(match[0], { amount, force });
     sendJson(response, 200, { success: true, ...estimate });
     return true;
   }

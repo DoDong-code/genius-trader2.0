@@ -6,8 +6,15 @@
 
   function save(){
     try{
+      // 同步账户由服务端权威存储，不写入 localStorage
+      const persisted={};
+      Object.keys(state.accounts).forEach(name=>{
+        const account=state.accounts[name];
+        if(account&&account.__source)return;
+        persisted[name]=account;
+      });
       localStorage.setItem(storageKey,JSON.stringify({
-        accounts:state.accounts,
+        accounts:persisted,
         active:state.getActive()
       }));
     }catch(error){
