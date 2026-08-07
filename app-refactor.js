@@ -9,7 +9,7 @@
   function overview(){const a=acct(),total=a.funds.reduce((x,f)=>x+f.amount,0),day=a.funds.reduce((x,f)=>x+f.amount*f.today,0);title.textContent='天才交易员上线';root.innerHTML='<div class="kpis"><div class="kpi"><span class="kpi-label">当前账户总资产</span><strong class="kpi-value">'+money(total)+'</strong></div><div class="kpi"><span class="kpi-label">昨日收益</span><strong class="kpi-value">'+money(day)+'</strong><span class="kpi-sub">'+(total?(day/total*100).toFixed(2):'0.00')+'%</span></div><div class="kpi"><span class="kpi-label">今日收益</span><strong class="kpi-value">¥0.00</strong><span class="kpi-sub"><span class="estimate-state">估算</span><span>0.00%</span></span></div><div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">¥0</strong><span class="kpi-sub">0.00%</span></div><div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−¥9,839</strong><span class="kpi-sub">−19.12%</span></div></div><section class="list-section account-section"><div class="section-head"><div><p class="eyebrow">账户管理</p><h2>选择账户</h2></div><button class="primary" data-action="toggle-edit">'+(editing?'完成编辑':'编辑')+'</button>'+(editing?'<button class="secondary-button" data-action="add-account">新增账户</button>':'')+'</div><div class="account-list">'+Object.values(s.accounts).map(a=>'<div class="account-card '+(editing?'account-edit-row':'')+'" data-account="'+esc(a.name)+'">'+(editing?'<input type="checkbox" data-check="'+esc(a.name)+'" '+(selected.has(a.name)?'checked':'')+' />':'')+'<div><b>'+esc(a.name)+'</b><small>'+(a.funds.length?a.funds.length+' 项持仓':'暂无持仓')+'</small></div><div><strong>'+money(a.funds.reduce((x,f)=>x+f.amount,0))+'</strong><span>'+money(a.funds.reduce((x,f)=>x+f.amount*f.today,0))+'</span></div></div>').join('')+'</div>'+(editing?'<div class="account-delete-bar"><button class="danger-button" data-action="delete" '+(!selected.size?'disabled':'')+'>删除所选</button></div>':'')+'</section>'}
   function portfolio(){title.textContent=s.getActive();const a=acct();root.innerHTML='<section class="list-section"><div class="section-head"><div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / '+a.funds.length+' 项</span><span class="mobile-label">'+a.funds.length+' 项</span></p><h2 class="holdings-title">持仓列表</h2></div><div class="section-head-actions"><button class="secondary-button column-customizer-btn" data-action="customize-columns"><span class="desktop-label">自定义表头</span><span class="mobile-label">自定义</span></button><button class="primary add-fund-button" data-action="add-fund">增加基金</button></div></div><div class="holding-head"><span data-col-key="fund">基金</span><span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span><span data-col-key="todayProfit"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></span><span data-col-key="amount"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></span></div><div class="fund-list">'+a.funds.map(f=>'<button class="fund-row" data-code="'+f.code+'" title="'+esc(f.name)+'"><div class="fund-info" data-col-key="fund"><b title="'+esc(f.name)+'">'+esc(f.name)+'</b><small class="fund-meta"><span class="fund-code-text">'+f.code+'</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">'+f.category+'</span></small></div><div class="fund-est" data-col-key="holdingProfit"><strong>'+money(f.amount*f.hold)+'</strong><span>'+((f.hold*100).toFixed(2))+'%</span></div><div class="fund-today" data-col-key="todayProfit"><strong>'+money(f.amount*f.today)+'</strong><span>'+((f.today*100).toFixed(2))+'%</span></div><div class="fund-amount" data-col-key="amount"><strong>'+money(f.amount)+'</strong><span>'+((((Number.isFinite(f.holdingRate)?f.holdingRate:f.hold)||0)*100).toFixed(2))+'%</span></div></button>').join('')+'</div></section>'}
   function analysis(){
-    title.textContent = '配置诊断与分析';
+    title.textContent = '';
     const a = acct();
     const funds = a.funds || [];
     
@@ -259,7 +259,7 @@
     } else {
       strategyHtml = `
         <div class="empty-state" style="padding: 40px 10px; color: #86868b; text-align: center;">
-          <span style="font-size: 32px; display: block; margin-bottom: 12px;">💡</span>
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#86868b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display: block; margin: 0 auto 12px auto;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
           <span>未设立投资策略方针。可在设置中增加策略细则</span>
         </div>
       `;
@@ -298,122 +298,124 @@
               display: flex !important;
             }
           }
+
+          /* Tooltip Details Reset & Styling */
+          details.tooltip-details summary::-webkit-details-marker {
+            display: none !important;
+          }
+          details.tooltip-details summary::marker {
+            content: "" !important;
+            display: none !important;
+          }
+          details.tooltip-details summary {
+            list-style: none !important;
+          }
+          details.tooltip-details summary:hover {
+            background: #0071e3 !important;
+            color: #ffffff !important;
+            transform: scale(1.08);
+          }
+          details.tooltip-details[open] summary {
+            background: #0071e3 !important;
+            color: #ffffff !important;
+          }
         </style>
 
-        <!-- Two-column grid for top panels -->
-        <div class="analysis-layout-grid" style="margin-bottom: 28px;">
-          <!-- Left Column: AI diagnostics -->
-          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
-            
-            <!-- AI Diagnostic and One-Click Analysis Panel -->
-            <div class="panel" style="padding: 28px; border-radius: 18px; display: flex; flex-direction: column; gap: 20px; background: linear-gradient(135deg, #ffffff 0%, #f9f9fb 100%); border: 1px solid rgba(0,0,0,0.04); box-sizing: border-box; width: 100%;">
-              <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px;">
-                <div style="flex: 1; min-width: 280px;">
-                  <span style="font-size: 11px; font-weight: 700; color: #0071e3; letter-spacing: 0.1em; text-transform: uppercase;">⚡ SYSTEM DIAGNOSTIC</span>
-                  <h2 style="font-size: 24px; font-weight: 700; color: #1d1d1f; margin: 4px 0 6px 0;">一键投资组合诊断与调仓策略</h2>
-                  <p style="font-size: 14px; color: #6e6e73; margin: 0; line-height: 1.6;">点击下方按钮重新诊断持仓配比，刷新各基金估算净值涨幅，并根据偏离度与投资策略约束生成智能调仓操作建议。</p>
+        <!-- AI建议 Panel (Full-width, and "今日预估组合收益" removed) -->
+        <div class="panel" style="padding: 28px; border-radius: 18px; display: flex; flex-direction: column; gap: 24px; background: linear-gradient(135deg, #ffffff 0%, #f9f9fb 100%); border: 1px solid rgba(0,0,0,0.04); box-sizing: border-box; width: 100%; margin-bottom: 28px;">
+          <div>
+            <span style="font-size: 11px; font-weight: 700; color: #0071e3; letter-spacing: 0.1em; text-transform: uppercase;">AI ADVICE</span>
+            <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0 6px 0;">
+              <h2 style="font-size: 24px; font-weight: 700; color: #1d1d1f; margin: 0;">AI建议</h2>
+              <details class="tooltip-details" style="position: relative; display: inline-block;">
+                <summary style="list-style: none; outline: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 11px; font-weight: 700; border: none; user-select: none; transition: all 0.2s;">
+                  ?
+                </summary>
+                <div class="tooltip-bubble" style="position: absolute; left: 0; top: 24px; z-index: 1000; width: 280px; padding: 14px 18px; border-radius: 12px; background: #ffffff; color: #1d1d1f; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.06); font-size: 13px; line-height: 1.6; font-weight: normal; text-align: left; white-space: normal;">
+                  <div style="position: absolute; top: -6px; left: 12px; transform: rotate(45deg); width: 10px; height: 10px; background: #ffffff; border-left: 1px solid rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06);"></div>
+                  点击诊断按钮重新诊断持仓配比，刷新各基金估算净值涨幅，并根据偏离度与投资策略约束生成智能调仓操作建议。
                 </div>
-                <button id="run-ai-analysis-btn" class="primary" style="padding: 12px 24px; border-radius: 10px; font-size: 14px; font-weight: 600; display: inline-flex; align-items: center; gap: 10px; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
-                  <span class="btn-icon">⚡</span>
-                  <span class="btn-text">一键获取最新估值诊断</span>
+              </details>
+            </div>
+          </div>
+
+          <!-- AI Q&A Window (Moved below subtitle) -->
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 13.5px; font-weight: 600; color: #1d1d1f; display: inline-flex; align-items: center; gap: 4px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#86868b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display: inline-block; vertical-align: text-bottom; margin-right: 4px;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>智能 AI 交互问答与调仓重构
+              </span>
+              <details class="tooltip-details" style="position: relative; display: inline-block;">
+                <summary style="list-style: none; outline: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 11px; font-weight: 700; border: none; user-select: none; transition: all 0.2s;">
+                  ?
+                </summary>
+                <div class="tooltip-bubble" style="position: absolute; left: 0; top: 24px; z-index: 1000; width: 320px; padding: 14px 18px; border-radius: 12px; background: #ffffff; color: #1d1d1f; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.06); font-size: 13px; line-height: 1.6; font-weight: normal; text-align: left; white-space: normal;">
+                  <div style="position: absolute; top: -6px; left: 12px; transform: rotate(45deg); width: 10px; height: 10px; background: #ffffff; border-left: 1px solid rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06);"></div>
+                  您可以针对当前投资组合进行提问。例如：“如果我想在下半年降低风险，应当怎么做？”、“增加1万黄金 and 减持一半新能源基金后，配比如何变化？”。AI 将根据提问实时重构诊断总结 and 具体基金建议。
+                </div>
+              </details>
+            </div>
+            <div style="display: flex; gap: 10px; align-items: center; width: 100%; flex-wrap: wrap;">
+              <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />
+              <div style="display: flex; gap: 10px; align-items: center;">
+                <button id="ai-ask-submit-btn" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
+                <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
+                  <span class="btn-text">诊断</span>
                 </button>
               </div>
-
-              <!-- Analysis Results KPI Stats -->
-              ${totalAssets > 0 ? `
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; border-top: 1px solid rgba(0,0,0,0.06); padding-top: 20px; margin-top: 4px;">
-                <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
-                  <strong style="font-size: 22px; color: #1d1d1f; font-weight: 700;">${healthScore}分 <span style="font-size: 13.5px; font-weight: 600; color: ${healthColor}; margin-left: 6px;">${healthText}</span></strong>
+            </div>
+            ${window.lastAIUserQuestion ? `
+              <div style="background: rgba(0, 113, 227, 0.03); border: 1px dashed rgba(0, 113, 227, 0.25); padding: 10px 14px; border-radius: 8px; font-size: 12.5px; color: #0071e3; display: flex; justify-content: space-between; align-items: center;">
+                <div style="line-height: 1.4;">
+                  <strong>当前提问：</strong>"${esc(window.lastAIUserQuestion)}"
                 </div>
-                <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">大类资产偏离状态</span>
-                  <strong style="font-size: 13.5px; color: #1d1d1f; font-weight: 700; min-height: 32px; display: flex; align-items: center; line-height: 1.5;">${deviationText}</strong>
-                </div>
-                <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">今日预估组合收益</span>
-                  <strong style="font-size: 22px; color: ${todayEstReturn >= 0 ? '#ff3b30' : '#34a853'}; font-weight: 700;">
-                    ${todayEstReturn >= 0 ? '+' : ''}${todayEstRate.toFixed(2)}%
-                    <span style="font-size: 13px; font-weight: 500; margin-left: 6px;">(${todayEstReturn >= 0 ? '+' : ''}${money(todayEstReturn)})</span>
-                  </strong>
-                </div>
+                <button id="clear-ai-question-btn" style="background: none; border: none; color: #ff3b30; cursor: pointer; font-size: 12px; font-weight: 500; text-decoration: underline; padding: 0; margin-left: 12px; white-space: nowrap;">恢复默认诊断</button>
               </div>
-              ` : ''}
+            ` : ''}
+          </div>
 
-              <!-- AI Diagnostics Info (Model & Time) -->
+          <!-- Analysis Results KPI Stats -->
+          ${totalAssets > 0 ? `
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
+              <strong style="font-size: 22px; color: #1d1d1f; font-weight: 700;">${healthScore}分 <span style="font-size: 13.5px; font-weight: 600; color: ${healthColor}; margin-left: 6px;">${healthText}</span></strong>
               ${cachedTime ? `
-              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; border-top: 1px solid rgba(0,0,0,0.06); padding-top: 14px; margin-top: 8px;">
-                <div style="background: rgba(52, 168, 83, 0.02); border: 1px solid rgba(52, 168, 83, 0.08); padding: 12px 16px; border-radius: 10px; display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500; text-transform: uppercase;">AI模型</span>
-                  <strong style="font-size: 14px; color: #34a853; font-weight: 600;">${esc(cachedModel || '未知模型')}</strong>
+                <div style="font-size: 11px; color: #86868b; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 6px;">
+                  <span>模型: <span style="color: #34a853; font-weight: 500;">${esc(cachedModel || '未知模型')}</span></span>
+                  <span>时间: <span style="color: #34a853; font-weight: 500;">${esc(cachedTime)}</span></span>
                 </div>
-                <div style="background: rgba(52, 168, 83, 0.02); border: 1px solid rgba(52, 168, 83, 0.08); padding: 12px 16px; border-radius: 10px; display: flex; flex-direction: column; gap: 4px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500; text-transform: uppercase;">分析时间</span>
-                  <strong style="font-size: 14px; color: #34a853; font-weight: 600;">${esc(cachedTime)}</strong>
-                </div>
-              </div>
               ` : ''}
-
-              ${aiResult && aiResult.summary ? `
-              <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 12px;">
-                <strong>💡 AI 诊断总结：</strong>${esc(aiResult.summary)}
-              </div>
-              ` : ''}
-
-              <!-- AI Q&A Window -->
-              <div style="border-top: 1px solid rgba(0,0,0,0.06); padding-top: 18px; margin-top: 8px; display: flex; flex-direction: column; gap: 10px;">
-                <div style="display: flex; align-items: center; justify-content: space-between;">
-                  <span style="font-size: 13.5px; font-weight: 600; color: #1d1d1f; display: flex; align-items: center; gap: 6px;">
-                    💬 智能 AI 交互问答与调仓重构
-                  </span>
-                </div>
-                <p style="font-size: 12.5px; color: #86868b; margin: 0; line-height: 1.5;">
-                  您可以针对当前投资组合进行提问。例如：“如果我想在下半年降低风险，应当怎么做？”、“增加1万黄金和减持一半新能源基金后，配比如何变化？”。AI 将根据提问实时重构诊断总结 and 具体基金建议。
-                </p>
-                <div style="display: flex; gap: 10px; align-items: center; width: 100%;">
-                  <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />
-                  <button id="ai-ask-submit-btn" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问并重构建议</button>
-                </div>
-                ${window.lastAIUserQuestion ? `
-                  <div style="background: rgba(0, 113, 227, 0.03); border: 1px dashed rgba(0, 113, 227, 0.25); padding: 10px 14px; border-radius: 8px; font-size: 12.5px; color: #0071e3; display: flex; justify-content: space-between; align-items: center;">
-                    <div style="line-height: 1.4;">
-                      <strong>当前提问：</strong>"${esc(window.lastAIUserQuestion)}"
-                    </div>
-                    <button id="clear-ai-question-btn" style="background: none; border: none; color: #ff3b30; cursor: pointer; font-size: 12px; font-weight: 500; text-decoration: underline; padding: 0; margin-left: 12px; white-space: nowrap;">恢复默认诊断</button>
-                  </div>
-                ` : ''}
-              </div>
             </div>
-
+            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
+              <span style="font-size: 11px; color: #86868b; font-weight: 500;">持仓分析</span>
+              <strong style="font-size: 13.5px; color: #1d1d1f; font-weight: 700; min-height: 32px; display: flex; align-items: center; line-height: 1.5;">${deviationText}</strong>
+            </div>
           </div>
+          ` : ''}
 
-          <!-- Right Column: Asset Allocation, Investment Strategy, and Retired Archive -->
-          <div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
-            
-            <!-- Allocation Analysis -->
-            <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-              <p class="eyebrow" style="color: #86868b;">PORTFOLIO ALLOCATION</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">资产配比分析</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">当前账户下的细分大类资产构成比例</p>
-              ${allocHtml}
-            </div>
-
-            <!-- Operating Strategy -->
-            <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-              <p class="eyebrow" style="color: #86868b;">INVESTMENT DISCIPLINE</p>
-              <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">投资操作策略</h2>
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">指导当前账户投资纪律的核心方针</p>
-              ${strategyHtml}
-            </div>
-
+          ${aiResult && aiResult.summary ? `
+          <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 4px;">
+            <strong>AI 诊断总结：</strong>${esc(aiResult.summary)}
           </div>
+          ` : ''}
         </div>
 
         <!-- Today's Operations and Recommendations Panel (Full Width Sibling) -->
-        <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
+        <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%; margin-bottom: 28px;">
           <p class="eyebrow" style="color: #86868b;">REAL-TIME TACTICAL ACTIONS</p>
-          <h2 style="font-size: 21px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">今日具体基金操作建议</h2>
-          <p style="font-size: 13.5px; color: #86868b; margin-bottom: 24px; margin-top: 0;">通过科学测算当前仓位占比与标准化目标偏离度，结合投资策略方针对其进行校正限制，输出最严谨的基金申赎策略建议：</p>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px; margin-top: 6px;">
+            <h2 style="font-size: 21px; font-weight: 650; margin: 0;">今日具体基金操作建议</h2>
+            <details class="tooltip-details" style="position: relative; display: inline-block;">
+              <summary style="list-style: none; outline: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 11px; font-weight: 700; border: none; user-select: none; transition: all 0.2s;">
+                ?
+              </summary>
+              <div class="tooltip-bubble" style="position: absolute; left: 0; top: 24px; z-index: 1000; width: 280px; padding: 14px 18px; border-radius: 12px; background: #ffffff; color: #1d1d1f; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.06); font-size: 13px; line-height: 1.6; font-weight: normal; text-align: left; white-space: normal;">
+                <div style="position: absolute; top: -6px; left: 12px; transform: rotate(45deg); width: 10px; height: 10px; background: #ffffff; border-left: 1px solid rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06);"></div>
+                通过科学测算当前仓位占比与标准化目标偏离度，结合投资策略方针对其进行校正限制，输出最严谨的基金申赎策略建议。
+              </div>
+            </details>
+          </div>
 
           ${funds.length === 0 ? `
             <div style="padding: 40px 10px; text-align: center; color: #86868b;">
@@ -681,12 +683,32 @@
             </div>
           `}
         </div>
+
+        <!-- Bottom Grid: Asset Allocation and Investment Strategy (Moved to Bottom) -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 28px; margin-top: 28px; width: 100%;">
+          <!-- Allocation Analysis -->
+          <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
+            <p class="eyebrow" style="color: #86868b;">PORTFOLIO ALLOCATION</p>
+            <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">资产配比分析</h2>
+            <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">当前账户下的细分大类资产构成比例</p>
+            ${allocHtml}
+          </div>
+
+          <!-- Operating Strategy -->
+          <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
+            <p class="eyebrow" style="color: #86868b;">INVESTMENT DISCIPLINE</p>
+            <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">投资操作策略</h2>
+            <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">指导当前账户投资纪律的核心方针</p>
+            ${strategyHtml}
+          </div>
+        </div>
+
       </section>
     `;
   }
 
   function setting(){
-    title.textContent = '系统设置';
+    title.textContent = '';
     const a = acct();
     const strategyList = a.strategy || [];
 
@@ -731,7 +753,7 @@
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="datasource" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 18px; line-height: 1;">🌐</span>
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">数据源接口配置</h2>
                   <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局资产数据的抓取接口基地址，支持本地与远程调试</p>
@@ -785,7 +807,7 @@
 
               <!-- Interface Testing Area (增加时可以调用/测试) -->
               <div style="padding: 14px; border-radius: 12px; background: rgba(0, 113, 227, 0.03); border: 1px dashed rgba(0, 113, 227, 0.2); margin-top: 14px;">
-                <span style="font-size: 13px; font-weight: 600; color: #0071e3; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">🧪 接口连通性测试</span>
+                <span style="font-size: 13px; font-weight: 600; color: #0071e3; display: flex; align-items: center; gap: 4px; margin-bottom: 6px;">接口连通性测试</span>
                 <p style="font-size: 12px; color: #6e6e73; margin: 0 0 10px 0; line-height: 1.4;">输入一个基金代码，即可测试当前或待保存的数据源接口是否能连通并成功调用。</p>
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
                   <input type="text" id="test-fund-code-input" placeholder="000001" maxlength="6" value="000001"
@@ -802,7 +824,7 @@
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="aimodel" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 18px; line-height: 1;">🤖</span>
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="15" x2="23" y2="15"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="15" x2="4" y2="15"></line></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">AI模型接口配置</h2>
                   <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局 AI 分析服务，切换商户、基地址或模型名称</p>
@@ -879,7 +901,7 @@
 
               <!-- Fourth Part: Interface Connection Test Area -->
               <div style="padding: 14px; border-radius: 12px; background: rgba(52, 168, 83, 0.03); border: 1px dashed rgba(52, 168, 83, 0.2); display: flex; flex-direction: column; gap: 10px; margin-top: 16px;">
-                <span style="font-size: 13px; font-weight: 600; color: #34a853; display: flex; align-items: center; gap: 4px;">🧪 AI 接口连通性测试</span>
+                <span style="font-size: 13px; font-weight: 600; color: #34a853; display: flex; align-items: center; gap: 4px;">AI 接口连通性测试</span>
                 <p style="font-size: 12px; color: #6e6e73; margin: 0; line-height: 1.4;">点击下方一键测试，将发送测试请求并计算调用响应时长、验证接口连通度。</p>
                 
                 <div>
@@ -901,7 +923,7 @@
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="strategy" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 18px; line-height: 1;">📋</span>
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">投资策略方针</h2>
                   <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">自定义管理核心策略条目，规范并约束当前账户的投资纪律</p>
@@ -933,7 +955,7 @@
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(255, 59, 48, 0.15); box-shadow: 0 4px 12px rgba(255, 59, 48, 0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="dangerzone" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: rgba(255, 59, 48, 0.02); border-bottom: 1px solid rgba(255, 59, 48, 0.08); user-select: none;">
               <div style="display: flex; align-items: center; gap: 12px;">
-                <span style="font-size: 18px; line-height: 1;">⚠️</span>
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #ff3b30;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #ff3b30;">危险区域</h2>
                   <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">清空浏览器本地 LocalStorage 存储并进行数据重置</p>
@@ -1054,7 +1076,7 @@
       
       if (acted) {
         window.savePortfolioState?.();
-        alert(`✨ 智能 AI 指令识别成功！${actionMsg}\n\n系统已实时更新持仓，并正在向 AI 引擎发送最新数据以重构未来策略与诊断建议报告！`);
+        alert(`智能 AI 指令识别成功！${actionMsg}\n\n系统已实时更新持仓，并正在向 AI 引擎发送最新数据以重构未来策略与诊断建议报告！`);
       }
     }
 
@@ -1137,7 +1159,11 @@
     })
     .catch(err => {
       console.error('AI Analysis failed:', err);
-      alert(`AI 诊断分析失败: ${err.message}。系统将继续使用内置规则计算引擎提供基础版调仓操作建议。`);
+      let errMsg = err.message;
+      if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted') || errMsg.toLowerCase().includes('rate_limit') || errMsg.toLowerCase().includes('limit')) {
+        errMsg = `Gemini/AI API 额度已用尽（Resource Exhausted）或触发限频。\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商（如 Kimi、DeepSeek、OpenAI）或配置您自己高配额的 API Key；\n3. 如果是在 Google AI Studio 调试，可以考虑为您的 API Key 开启随现随付（Pay-as-you-go）方案。`;
+      }
+      alert(`AI 诊断分析失败:\n${errMsg}\n\n系统将继续使用内置规则计算引擎提供基础版偏离度调仓操作建议。`);
     })
     .finally(() => {
       window.lastAnalysisTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -1154,6 +1180,14 @@
   });
 
   root.addEventListener('click',e=>{
+    // Close other tooltips when clicking outside or clicking another one
+    const clickedDetails = e.target.closest('.tooltip-details');
+    document.querySelectorAll('details.tooltip-details').forEach(d => {
+      if (d !== clickedDetails) {
+        d.removeAttribute('open');
+      }
+    });
+
     const runAnalysisBtn = e.target.closest('#run-ai-analysis-btn');
     if (runAnalysisBtn) {
       runAiDiagnostics(window.lastAIUserQuestion);

@@ -514,6 +514,103 @@
     fund.hold = nextRate;
   }
 
+  function updateCostAnalysis(backdrop, fund) {
+    const container = backdrop.querySelector('#cost-analysis-container');
+    const content = backdrop.querySelector('#cost-analysis-content');
+    if (!container || !content) return;
+
+    const amount = Number(fund.amount) || 0;
+    const history = backdrop.fundHistory;
+    if (amount <= 0 || !Array.isArray(history) || !history.length) {
+      container.style.display = 'none';
+      return;
+    }
+
+    const values = history.map(item => Number(item.nav)).filter(Number.isFinite);
+    if (!values.length) {
+      container.style.display = 'none';
+      return;
+    }
+
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+    const latestNav = backdrop.latestNav || Number(history[history.length - 1]?.nav) || 0;
+
+    if (latestNav <= 0) {
+      container.style.display = 'none';
+      return;
+    }
+
+    const holdingProfit = Number(fund.holdingProfit ?? fund.profit) || 0;
+    const holdingRate = Number.isFinite(fund.holdingRate) ? fund.holdingRate : Number(fund.hold) || 0;
+
+    // Calculate cost price
+    const costPrice = latestNav * (1 - (holdingProfit / amount));
+
+    const navRange = maximum - minimum || 1;
+    const costPct = Math.max(0, Math.min(100, ((costPrice - minimum) / navRange) * 100));
+    const currentPct = Math.max(0, Math.min(100, ((latestNav - minimum) / navRange) * 100));
+
+    const isPositive = holdingProfit >= 0;
+    const currentColor = isPositive ? '#ff3b30' : '#34a853';
+
+    content.innerHTML = `
+      <div class="cost-analysis-card" style="background: #fafafa; border-radius: 12px; padding: 16px; margin-top: 12px; border: 1px solid rgba(0,0,0,0.04); box-sizing: border-box;">
+        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; text-align: left; margin-bottom: 24px;">
+          <div>
+            <span style="font-size: 11px; color: #86868b; display: block; margin-bottom: 4px;">买入成本</span>
+            <strong style="font-size: 15px; color: #1d1d1f; font-family: system-ui; font-weight: 600;">${costPrice.toFixed(4)}</strong>
+          </div>
+          <div>
+            <span style="font-size: 11px; color: #86868b; display: block; margin-bottom: 4px;">当前价格</span>
+            <strong style="font-size: 15px; color: #1d1d1f; font-family: system-ui; font-weight: 600;">${latestNav.toFixed(4)}</strong>
+          </div>
+          <div>
+            <span style="font-size: 11px; color: #86868b; display: block; margin-bottom: 4px;">盈亏比例</span>
+            <strong class="${holdingProfit > 0 ? 'positive' : holdingProfit < 0 ? 'negative' : ''}" style="font-size: 15px; font-family: system-ui; font-weight: 650;">
+              ${holdingProfit > 0 ? '+' : ''}${(holdingRate * 100).toFixed(2)}%
+            </strong>
+          </div>
+        </div>
+
+        <div style="font-size: 11.5px; color: #1d1d1f; font-weight: 600; margin-bottom: 12px; text-align: left;">
+          价格与成本历史位置
+        </div>
+
+        <!-- Horizontal visual range track -->
+        <div class="cost-track-container" style="position: relative; margin: 44px 0 36px 0; padding: 0 10px;">
+          <!-- Track bar -->
+          <div class="cost-track-bar" style="height: 8px; background: linear-gradient(to right, #e5e5ea, #d1d1d6); border-radius: 4px; position: relative; box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);">
+            
+            <!-- Cost Line (成本线) - Blue -->
+            <div style="position: absolute; left: ${costPct}%; top: -6px; height: 20px; width: 2px; background: #0071e3; z-index: 2; box-shadow: 0 0 4px rgba(0,113,227,0.3);"></div>
+            <!-- Cost Label above the track -->
+            <div style="position: absolute; left: ${costPct}%; bottom: 14px; transform: translateX(-50%); white-space: nowrap; font-size: 11px; color: #0071e3; text-align: center; font-weight: 600; z-index: 3; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.04));">
+              成本线: ${costPrice.toFixed(4)}
+              <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid #0071e3; margin: 2px auto 0 auto;"></div>
+            </div>
+
+            <!-- Current Line (当前线) - Dynamic Red/Green -->
+            <div style="position: absolute; left: ${currentPct}%; top: -6px; height: 20px; width: 2px; background: ${currentColor}; z-index: 2; box-shadow: 0 0 4px rgba(0,0,0,0.15);"></div>
+            <!-- Current Label below the track -->
+            <div style="position: absolute; left: ${currentPct}%; top: 14px; transform: translateX(-50%); white-space: nowrap; font-size: 11px; color: ${currentColor}; text-align: center; font-weight: 600; z-index: 3; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.04));">
+              <div style="width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 4px solid ${currentColor}; margin: 0 auto 2px auto;"></div>
+              当前线: ${latestNav.toFixed(4)}
+            </div>
+
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 10.5px; color: #86868b; font-family: monospace;">
+          <span>历史最低: ${minimum.toFixed(4)}</span>
+          <span>历史最高: ${maximum.toFixed(4)}</span>
+        </div>
+      </div>
+    `;
+
+    container.style.display = 'block';
+  }
+
   function refreshDrawerHoldingMetrics(backdrop, fund) {
     const cells = backdrop.querySelectorAll('.detail-values > div');
     const amount = Number(fund.amount) || 0;
@@ -529,6 +626,8 @@
     update(0, money(amount), '');
     update(2, money(profit), tone(profit));
     update(3, percent(rate), tone(rate));
+
+    updateCostAnalysis(backdrop, fund);
   }
 
   function localDateTimeInputValue() {
@@ -707,6 +806,12 @@
             <div><span>持有收益率</span><b class="${tone(holdingRate)}">${percent(holdingRate)}</b></div>
           </div>
 
+          <div class="detail-section" id="cost-analysis-container" style="display: none; transition: opacity 0.3s ease;">
+            <p class="eyebrow">持仓诊断</p>
+            <h3>我的成本分析</h3>
+            <div id="cost-analysis-content"></div>
+          </div>
+
           <div class="detail-section">
             <div class="detail-section-head">
               <div><p class="eyebrow">历史净值</p><h3 class="detail-history-title">近1年走势</h3></div>
@@ -793,6 +898,10 @@
       if (!backdrop.isConnected) return;
       const history = payload.history || [];
       setupHistoryExplorer(backdrop, history, fund);
+
+      backdrop.fundHistory = history;
+      backdrop.latestNav = Number(payload.latest_nav?.nav || (history.length ? history[history.length - 1].nav : 0));
+      updateCostAnalysis(backdrop, fund);
       state.textContent = payload.data_status?.history === 'normal'
         ? '✓ 数据正常'
         : '⚠ 等待数据源';

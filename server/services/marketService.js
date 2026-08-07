@@ -414,7 +414,7 @@ async function fetchStockPayload(secid) {
         accept: 'application/json,*/*',
         referer: 'https://quote.eastmoney.com/',
         attempts: 1,
-        timeout: 8000
+        timeout: 3000
       }));
     } catch (error) {
       lastError = error;
@@ -425,16 +425,20 @@ async function fetchStockPayload(secid) {
 
 async function fetchStockQuote(code) {
   for (const secid of stockSecIds(code)) {
-    const payload = await fetchStockPayload(secid);
-    const data = payload?.data;
-    if (!data) continue;
-    return {
-      stock_code: String(data.f12 || code),
-      stock_name: data.f14 || data.f58 || null,
-      price: Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
-      change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
-      source: payload?.rt === 4 ? 'push2-delay' : 'push2'
-    };
+    try {
+      const payload = await fetchStockPayload(secid);
+      const data = payload?.data;
+      if (!data) continue;
+      return {
+        stock_code: String(data.f12 || code),
+        stock_name: data.f14 || data.f58 || null,
+        price: Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
+        change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
+        source: payload?.rt === 4 ? 'push2-delay' : 'push2'
+      };
+    } catch (error) {
+      console.warn(`[marketService] Failed to fetch stock quote for secid ${secid}:`, error.message);
+    }
   }
   return null;
 }
