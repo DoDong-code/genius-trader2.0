@@ -186,7 +186,7 @@
   // --- Column Customization State & Functions ---
   let sortKey = null;
   let sortDirection = 'default';
-  const defaultOrder = ['fund', 'holdingProfit', 'todayProfit', 'amount'];
+  const defaultOrder = ['fund', 'todayProfit', 'holdingProfit', 'amount'];
   const columnLabels = {
     fund: { desktop: '基金', mobile: '基金' },
     holdingProfit: { desktop: '持有收益', mobile: '持有' },
@@ -200,6 +200,11 @@
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length === 4) {
+          // 旧默认顺序（基金/持有收益/今日收益/持有金额）迁移到新默认顺序
+          if (JSON.stringify(parsed) === JSON.stringify(['fund', 'holdingProfit', 'todayProfit', 'amount'])) {
+            saveColumnOrder([...defaultOrder]);
+            return [...defaultOrder];
+          }
           return parsed;
         }
       }
@@ -234,7 +239,7 @@
 
     header.addEventListener('dragstart', e => {
       const span = e.target.closest('[data-col-key]');
-      if (!span) return;
+      if (!span || span.dataset.colKey === 'fund') return;
       draggedKey = span.dataset.colKey;
       span.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
@@ -266,7 +271,7 @@
     header.addEventListener('drop', e => {
       e.preventDefault();
       const span = e.target.closest('[data-col-key]');
-      if (!span) return;
+      if (!span || span.dataset.colKey === 'fund') return;
       const targetKey = span.dataset.colKey;
       span.classList.remove('drag-over');
 
@@ -303,7 +308,7 @@
     overlay.innerHTML = `
       <form class="confirm-dialog fund-modal" style="max-width: 440px;">
         <h2>自定义表头顺序</h2>
-        <p style="margin-bottom: 16px; color: #86868b; font-size: 13px; line-height: 1.5;">点击箭头或拖动选项，自定义持仓列表的左右顺序。</p>
+        <p style="margin-bottom: 16px; color: #86868b; font-size: 13px; line-height: 1.5;">拖动选项，自定义持仓列表的左右顺序（基金列固定在最前）。</p>
         <div class="column-list">
           <!-- Dynamically populated -->
         </div>
@@ -318,17 +323,19 @@
     const columnListContainer = overlay.querySelector('.column-list');
 
     function renderList() {
-      columnListContainer.innerHTML = currentColumnOrder.map((key, index) => {
+      columnListContainer.innerHTML = currentColumnOrder.map((key) => {
         const lbl = columnLabels[key];
-        const isFirst = index === 0;
-        const isLast = index === currentColumnOrder.length - 1;
+        if (key === 'fund') {
+          return `
+            <div class="column-item column-item-fixed" data-key="fund" title="基金列固定在最前">
+              <span class="column-item-name">${lbl.desktop}</span>
+              <span style="font-size: 11px; color: #86868b; font-weight: 500;">固定</span>
+            </div>
+          `;
+        }
         return `
           <div class="column-item" data-key="${key}" draggable="true">
             <span class="column-item-name">${lbl.desktop}</span>
-            <div class="column-item-actions">
-              <button type="button" class="column-move-btn" data-dir="left" ${isFirst ? 'disabled' : ''} title="向左移动">←</button>
-              <button type="button" class="column-move-btn" data-dir="right" ${isLast ? 'disabled' : ''} title="向右移动">→</button>
-            </div>
           </div>
         `;
       }).join('');
@@ -345,36 +352,13 @@
       if (event.target === overlay || event.target.closest('.column-done-btn')) {
         close();
       }
-
-      const moveBtn = event.target.closest('.column-move-btn');
-      if (moveBtn) {
-        const item = moveBtn.closest('.column-item');
-        const key = item.dataset.key;
-        const dir = moveBtn.dataset.dir;
-        const index = currentColumnOrder.indexOf(key);
-
-        if (dir === 'left' && index > 0) {
-          const temp = currentColumnOrder[index - 1];
-          currentColumnOrder[index - 1] = currentColumnOrder[index];
-          currentColumnOrder[index] = temp;
-        } else if (dir === 'right' && index < currentColumnOrder.length - 1) {
-          const temp = currentColumnOrder[index + 1];
-          currentColumnOrder[index + 1] = currentColumnOrder[index];
-          currentColumnOrder[index] = temp;
-        }
-
-        saveColumnOrder(currentColumnOrder);
-        applyColumnOrder(currentColumnOrder);
-        renderList();
-        enhance();
-      }
     });
 
     let modalDraggedKey = null;
 
     columnListContainer.addEventListener('dragstart', e => {
       const item = e.target.closest('.column-item');
-      if (!item) return;
+      if (!item || item.dataset.key === 'fund') return;
       modalDraggedKey = item.dataset.key;
       item.style.opacity = '0.5';
     });
@@ -386,7 +370,7 @@
     columnListContainer.addEventListener('drop', e => {
       e.preventDefault();
       const item = e.target.closest('.column-item');
-      if (!item) return;
+      if (!item || item.dataset.key === 'fund') return;
       const targetKey = item.dataset.key;
 
       if (modalDraggedKey && targetKey && modalDraggedKey !== targetKey) {

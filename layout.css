@@ -1160,6 +1160,14 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 .column-item:hover {
   background: #e8e8ed;
 }
+.column-item-fixed {
+  background: rgba(0,0,0,0.03);
+  cursor: default;
+}
+.column-item-fixed .column-item-name::before {
+  content: "🔒";
+  cursor: default;
+}
 .column-item-name {
   font-weight: 600;
   color: #1d1d1f;
@@ -1222,4 +1230,54 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 .holding-row > div[data-col-key]:not([data-col-key="fund"]) {
   align-items: flex-end !important;
   text-align: right !important;
+}
+
+/* 基金详情走势图：成本虚线标签与买卖点图例 */
+.detail-chart-cost-label {
+  position: absolute;
+  left: 8px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: #0071e3;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 113, 227, 0.22);
+  border-radius: 6px;
+  padding: 2px 7px;
+  pointer-events: none;
+  z-index: 4;
+  white-space: nowrap;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.06);
+}
+.detail-chart-legend {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #86868b;
+  font-variant-numeric: tabular-nums;
+}
+.detail-chart-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 3px;
+  border-radius: 2px;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.detail-chart-legend .legend-dash {
+  background: repeating-linear-gradient(90deg, #0071e3 0 4px, transparent 4px 7px);
+}
+.detail-chart-legend .legend-buy,
+.detail-chart-legend .legend-sell {
+  height: 8px;
+  width: 8px;
+  border-radius: 50%;
+}
+.detail-chart-legend .legend-buy {
+  background: #ff3b30;
+}
+.detail-chart-legend .legend-sell {
+  background: #ff9500;
 }

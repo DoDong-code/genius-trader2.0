@@ -171,6 +171,7 @@
     if (selected !== 'all' && state.accounts[selected]) state.setActive(selected);
     updateTabs();
     updateCard();
+    if (typeof window.onAccountTabChange === 'function') window.onAccountTabChange(selected);
   });
 
   root.addEventListener('click', function (event) {

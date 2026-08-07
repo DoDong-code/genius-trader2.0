@@ -447,6 +447,8 @@ module.exports = {
   fetchText,
   parseEstimate,
   fetchRealtimeEstimate,
+  isTradingDay,
+  shanghaiDateString,
   parseHistoryPayload,
   parseTiantianHistory,
   fetchHistory,

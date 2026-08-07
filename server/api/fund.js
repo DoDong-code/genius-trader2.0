@@ -108,6 +108,24 @@ async function handleFundApi(request, response, url) {
 
   if (request.method !== 'GET') return false;
 
+  if (url.pathname === '/api/market/status') {
+    const { isTradingDay, shanghaiDateString } = require('../services/marketService');
+    const now = new Date();
+    sendJson(response, 200, {
+      success: true,
+      trading_day: isTradingDay(),
+      date: shanghaiDateString(),
+      time: new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).format(now)
+    });
+    return true;
+  }
+
   if (url.pathname === '/api/funds') {
     sendJson(response, 200, { success: true, funds: listFunds() });
     return true;

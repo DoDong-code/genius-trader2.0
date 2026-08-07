@@ -1,13 +1,247 @@
 (function(){
   window.FUND_API_BASE = localStorage.getItem('FUND_API_BASE') || '';
   window.AI_API_KEY = localStorage.getItem('AI_API_KEY') || '';
+  window.__accountTabSelected = 'all';
   const s=window.portfolioState;if(!s)return;
   const root=document.querySelector('#view-root'),title=document.querySelector('#page-title');
   let view='portfolio',editing=false,selected=new Set();
   const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=n=>'¥'+Math.round(n).toLocaleString('zh-CN'), acct=()=>s.accounts[s.getActive()];
-  function overview(){const a=acct(),total=a.funds.reduce((x,f)=>x+f.amount,0),day=a.funds.reduce((x,f)=>x+f.amount*f.today,0);title.textContent='天才交易员上线';root.innerHTML='<div class="kpis"><div class="kpi"><span class="kpi-label">当前账户总资产</span><strong class="kpi-value">'+money(total)+'</strong></div><div class="kpi"><span class="kpi-label">昨日收益</span><strong class="kpi-value">'+money(day)+'</strong><span class="kpi-sub">'+(total?(day/total*100).toFixed(2):'0.00')+'%</span></div><div class="kpi"><span class="kpi-label">今日收益</span><strong class="kpi-value">¥0.00</strong><span class="kpi-sub"><span class="estimate-state">估算</span><span>0.00%</span></span></div><div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">¥0</strong><span class="kpi-sub">0.00%</span></div><div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−¥9,839</strong><span class="kpi-sub">−19.12%</span></div></div><section class="list-section account-section"><div class="section-head"><div><p class="eyebrow">账户管理</p><h2>选择账户</h2></div><button class="primary" data-action="toggle-edit">'+(editing?'完成编辑':'编辑')+'</button>'+(editing?'<button class="secondary-button" data-action="add-account">新增账户</button>':'')+'</div><div class="account-list">'+Object.values(s.accounts).map(a=>'<div class="account-card '+(editing?'account-edit-row':'')+'" data-account="'+esc(a.name)+'">'+(editing?'<input type="checkbox" data-check="'+esc(a.name)+'" '+(selected.has(a.name)?'checked':'')+' />':'')+'<div><b>'+esc(a.name)+'</b><small>'+(a.funds.length?a.funds.length+' 项持仓':'暂无持仓')+'</small></div><div><strong>'+money(a.funds.reduce((x,f)=>x+f.amount,0))+'</strong><span>'+money(a.funds.reduce((x,f)=>x+f.amount*f.today,0))+'</span></div></div>').join('')+'</div>'+(editing?'<div class="account-delete-bar"><button class="danger-button" data-action="delete" '+(!selected.size?'disabled':'')+'>删除所选</button></div>':'')+'</section>'}
-  function portfolio(){title.textContent=s.getActive();const a=acct();root.innerHTML='<section class="list-section"><div class="section-head"><div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / '+a.funds.length+' 项</span><span class="mobile-label">'+a.funds.length+' 项</span></p><h2 class="holdings-title">持仓列表</h2></div><div class="section-head-actions"><button class="secondary-button column-customizer-btn" data-action="customize-columns"><span class="desktop-label">自定义表头</span><span class="mobile-label">自定义</span></button><button class="primary add-fund-button" data-action="add-fund">增加基金</button></div></div><div class="holding-head"><span data-col-key="fund">基金</span><span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span><span data-col-key="todayProfit"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></span><span data-col-key="amount"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></span></div><div class="fund-list">'+a.funds.map(f=>'<button class="fund-row" data-code="'+f.code+'" title="'+esc(f.name)+'"><div class="fund-info" data-col-key="fund"><b title="'+esc(f.name)+'">'+esc(f.name)+'</b><small class="fund-meta"><span class="fund-code-text">'+f.code+'</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">'+f.category+'</span></small></div><div class="fund-est" data-col-key="holdingProfit"><strong>'+money(f.amount*f.hold)+'</strong><span>'+((f.hold*100).toFixed(2))+'%</span></div><div class="fund-today" data-col-key="todayProfit"><strong>'+money(f.amount*f.today)+'</strong><span>'+((f.today*100).toFixed(2))+'%</span></div><div class="fund-amount" data-col-key="amount"><strong>'+money(f.amount)+'</strong><span>'+((((Number.isFinite(f.holdingRate)?f.holdingRate:f.hold)||0)*100).toFixed(2))+'%</span></div></button>').join('')+'</div></section>'}
+
+  function buildCategoryTargets(strategyList) {
+    const t = { '权益类': 35, '黄金类': 20, '债券类': 25, '海外类': 20, '其他': 10 };
+    (strategyList || []).forEach(st => {
+      ['权益类', '黄金类', '债券类', '海外类', '其他'].forEach(k => {
+        const m = st.match(new RegExp(k + '[^0-9%]*(\\d+)\\s*%'));
+        if (m) t[k] = parseFloat(m[1]);
+      });
+    });
+    return t;
+  }
+
+  function buildAdviceText(diffPct, rules) {
+    if (diffPct > 4) {
+      let adviceText = '分批止盈 / 适当减仓';
+      if (rules.recovery) adviceText = `止盈回本 (目标:${money(rules.recovery)})`;
+      else if (rules.targetReturn) adviceText = `目标止盈 (门槛:${rules.targetReturn})`;
+      return { adviceText, adviceColor: '#ff9500', adviceBg: 'rgba(255, 149, 0, 0.08)' };
+    }
+    if (diffPct < -4) {
+      if (rules.suspendedBuy) return { adviceText: '暂停申购 / 观望', adviceColor: '#86868b', adviceBg: 'rgba(134, 134, 139, 0.08)' };
+      let adviceText = '分批低吸 / 逢低定投';
+      if (rules.fixedInvest) adviceText = `低吸定投 (${money(rules.fixedInvest)}/期)`;
+      else if (rules.limit) adviceText = `限额定投 (单次:${money(rules.limit)})`;
+      return { adviceText, adviceColor: '#ff3b30', adviceBg: 'rgba(255, 59, 48, 0.08)' };
+    }
+    let adviceText = '持有待涨 / 观望';
+    if (rules.fixedInvest && !rules.suspendedBuy) adviceText = `策略观望 (定投:${money(rules.fixedInvest)})`;
+    return { adviceText, adviceColor: '#0071e3', adviceBg: 'rgba(0, 113, 227, 0.08)' };
+  }
+
+  function parseStrategyDetails(f, list) {
+    const matched = [];
+    const rules = {
+      limit: null,
+      recovery: null,
+      targetReturn: null,
+      fixedInvest: null,
+      suspendedBuy: false
+    };
+
+    list.forEach(st => {
+      let isMatch = false;
+      // 1. Direct match by 6-digit fund code
+      if (st.includes(f.code)) {
+        isMatch = true;
+      } else {
+        // 2. Match by well-known brands
+        const brands = ["富国", "易方达", "华夏", "汇添富", "兴全", "景顺", "天弘", "交银", "广发", "中欧", "万家", "招商", "博时", "南方", "嘉实", "华安", "工银", "建信", "农银"];
+        for (const b of brands) {
+          if (f.name.includes(b) && st.includes(b)) {
+            isMatch = true;
+            break;
+          }
+        }
+      }
+
+      // 3. Match by partial substring of length >= 2 if no brand matched
+      if (!isMatch) {
+        const cleanName = f.name.replace(/(基金|混合|指数|股票|债券|A|C|LOF|ETF|联接)/g, '');
+        if (cleanName.length >= 2) {
+          for (let i = 0; i <= cleanName.length - 2; i++) {
+            const slice = cleanName.substring(i, i + 2);
+            if (st.includes(slice)) {
+              isMatch = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (isMatch) {
+        matched.push(st);
+        // Parse limit (限额)
+        const limitMatch = st.match(/限额\s*(\d+)/);
+        if (limitMatch) rules.limit = parseInt(limitMatch[1], 10);
+
+        // Parse recovery (回本)
+        const recoveryMatch = st.match(/回本\s*(\d+)/);
+        if (recoveryMatch) rules.recovery = parseInt(recoveryMatch[1], 10);
+
+        // Parse fixed invest (定投)
+        const fixedMatch = st.match(/定投\s*(\d+)/);
+        if (fixedMatch) rules.fixedInvest = parseInt(fixedMatch[1], 10);
+
+        // Parse target profit (止盈)
+        const targetProfitMatch = st.match(/止盈\s*(\d+%?)/);
+        if (targetProfitMatch) rules.targetReturn = targetProfitMatch[1];
+
+        // Check for suspended buy or only-sell constraints (e.g. 暂停申购, 已经暂停申购, 只允许卖出, 暂停买入, 禁止买入)
+        if (st.includes("暂停申购") || st.includes("暂停买入") || st.includes("只允许卖出") || st.includes("只允许卖") || st.includes("禁止买入") || st.includes("禁止申购") || st.includes("暂停买")) {
+          rules.suspendedBuy = true;
+        }
+      }
+    });
+
+    return { matched, rules };
+  }
+
+  function buildTodayAdviceModule(a) {
+    const accountName = a.name || '默认账户';
+
+    let cachedAnalysisStr = localStorage.getItem('LAST_AI_ANALYSIS_' + accountName) || localStorage.getItem('LAST_AI_ANALYSIS');
+    let aiResult = null;
+    if (cachedAnalysisStr) {
+      try { aiResult = JSON.parse(cachedAnalysisStr); } catch (e) { aiResult = null; }
+    }
+
+    const summaryHtml = aiResult && aiResult.summary ? `
+      <div class="today-advice-summary"><strong>今日操作建议的总结：</strong>${esc(aiResult.summary)}</div>
+    ` : `
+      <div class="today-advice-empty">今日操作建议总结尚未生成，点击右上角 › 前往分析页运行 AI 诊断</div>
+    `;
+
+    const todayKey = new Date().toLocaleDateString('en-CA');
+    const updatedTime = localStorage.getItem('TODAY_ADVICE_AUTO_UPDATED_TIME_' + todayKey) || '';
+
+    return `
+      <section class="today-advice-section">
+        <div class="today-advice-head">
+          <div>
+            <p class="eyebrow">TODAY'S ACTIONS</p>
+            <h2>今日操作建议</h2>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px;">
+            <div class="today-advice-meta">
+              <span>每个交易日 14:40 自动更新</span>
+              ${updatedTime ? `<span> · 今日 ${updatedTime} 已更新</span>` : ''}
+            </div>
+            <span class="today-advice-arrow" id="go-analysis-btn" role="button" aria-label="查看完整分析与操作建议" title="查看完整分析与操作建议">›</span>
+          </div>
+        </div>
+        ${summaryHtml}
+      </section>
+    `;
+  }
+
+  let todayAdviceTimer = null;
+  function scheduleTodayAdviceUpdate() {
+    if (todayAdviceTimer) clearInterval(todayAdviceTimer);
+    const runCheck = async () => {
+      try {
+        const res = await fetch('/api/market/status');
+        const data = await res.json();
+        if (!data || !data.success) return;
+        const dateStr = data.date;
+        const timeStr = data.time || '';
+        const flagKey = 'TODAY_ADVICE_AUTO_UPDATED_' + dateStr;
+        if (data.trading_day && timeStr >= '14:40' && localStorage.getItem(flagKey) !== '1') {
+          localStorage.setItem(flagKey, '1');
+          localStorage.setItem('TODAY_ADVICE_AUTO_UPDATED_TIME_' + dateStr, timeStr.slice(0, 5));
+          if (typeof window.refreshFundEstimates === 'function') window.refreshFundEstimates();
+          setTimeout(() => { if (view === 'overview') overview(); }, 8000);
+        }
+      } catch (e) { /* 忽略瞬时网络错误 */ }
+    };
+    runCheck();
+    todayAdviceTimer = setInterval(runCheck, 60000);
+  }
+
+  window.onAccountTabChange = function (sel) {
+    window.__accountTabSelected = sel || 'all';
+    if (view === 'overview') render('overview');
+  };
+
+  function overview(){
+    const a = acct();
+    const total = a.funds.reduce((x, f) => x + f.amount, 0);
+    const day = a.funds.reduce((x, f) => x + f.amount * f.today, 0);
+    title.textContent = '天才交易员上线';
+    const selectedTab = window.__accountTabSelected || 'all';
+    const showAccountMgmt = selectedTab === 'all';
+    const adviceModule = showAccountMgmt ? '' : buildTodayAdviceModule(a);
+    root.innerHTML = `
+      <div class="kpis">
+        <div class="kpi"><span class="kpi-label">当前账户总资产</span><strong class="kpi-value">${money(total)}</strong></div>
+        <div class="kpi"><span class="kpi-label">昨日收益</span><strong class="kpi-value">${money(day)}</strong><span class="kpi-sub">${total ? (day / total * 100).toFixed(2) : '0.00'}%</span></div>
+        <div class="kpi"><span class="kpi-label">今日收益</span><strong class="kpi-value">¥0.00</strong><span class="kpi-sub"><span class="estimate-state">估算</span><span>0.00%</span></span></div>
+        <div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">¥0</strong><span class="kpi-sub">0.00%</span></div>
+        <div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−¥9,839</strong><span class="kpi-sub">−19.12%</span></div>
+      </div>
+      ${adviceModule}
+      ${showAccountMgmt ? `
+      <section class="list-section account-section">
+        <div class="section-head">
+          <div><p class="eyebrow">账户管理</p><h2>选择账户</h2></div>
+          <button class="primary" data-action="toggle-edit">${editing ? '完成编辑' : '编辑'}</button>
+          ${editing ? '<button class="secondary-button" data-action="add-account">新增账户</button>' : ''}
+        </div>
+        <div class="account-list">
+          ${Object.values(s.accounts).map(a => `
+            <div class="account-card ${editing ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
+              ${editing ? '<input type="checkbox" data-check="' + esc(a.name) + '" ' + (selected.has(a.name) ? 'checked' : '') + ' />' : ''}
+              <div><b>${esc(a.name)}</b><small>${a.funds.length ? a.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
+              <div><strong>${money(a.funds.reduce((x, f) => x + f.amount, 0))}</strong><span>${money(a.funds.reduce((x, f) => x + f.amount * f.today, 0))}</span></div>
+            </div>
+          `).join('')}
+        </div>
+        ${editing ? `<div class="account-delete-bar"><button class="danger-button" data-action="delete" ${!selected.size ? 'disabled' : ''}>删除所选</button></div>` : ''}
+      </section>
+      ` : ''}
+    `;
+    if (!showAccountMgmt) scheduleTodayAdviceUpdate();
+  }
+  function portfolio(){
+    title.textContent = s.getActive();
+    const a = acct();
+    root.innerHTML = `
+      <section class="list-section">
+        <div class="section-head">
+          <div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / ${a.funds.length} 项</span><span class="mobile-label">${a.funds.length} 项</span></p><h2 class="holdings-title">持仓列表</h2></div>
+          <div class="section-head-actions">
+            <button class="secondary-button column-customizer-btn" data-action="customize-columns"><span class="desktop-label">自定义表头</span><span class="mobile-label">自定义</span></button>
+            <button class="primary add-fund-button" data-action="add-fund">增加基金</button>
+          </div>
+        </div>
+        <div class="holding-head">
+          <span data-col-key="fund">基金</span>
+          <span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span>
+          <span data-col-key="todayProfit"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></span>
+          <span data-col-key="amount"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></span>
+        </div>
+        <div class="fund-list">
+          ${a.funds.map(f => `
+            <button class="fund-row" data-code="${f.code}" title="${esc(f.name)}">
+              <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${f.category}</span></small></div>
+              <div class="fund-est" data-col-key="holdingProfit"><strong>${money(f.amount * f.hold)}</strong><span>${((f.hold * 100).toFixed(2))}%</span></div>
+              <div class="fund-today" data-col-key="todayProfit"><strong>${money(f.amount * f.today)}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
+              <div class="fund-amount" data-col-key="amount"><strong>${money(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
+            </button>
+          `).join('')}
+        </div>
+      </section>
+    `;
+  }
   function analysis(){
     title.textContent = '';
     const a = acct();
@@ -49,24 +283,7 @@
 
     // Parse targets dynamically from user's active configuration strategies
     // Fallback to standard asset targets
-    const categoryTargets = {
-      '权益类': 35,
-      '黄金类': 20,
-      '债券类': 25,
-      '海外类': 20,
-      '其他': 10
-    };
-
-    strategyList.forEach(st => {
-      const keys = ['权益类', '黄金类', '债券类', '海外类', '其他'];
-      keys.forEach(k => {
-        const regex = new RegExp(k + '[^0-9%]*(\\d+)\\s*%');
-        const match = st.match(regex);
-        if (match) {
-          categoryTargets[k] = parseFloat(match[1]);
-        }
-      });
-    });
+    const categoryTargets = buildCategoryTargets(strategyList);
 
     const activeCategories = new Set(funds.map(f => f.category || '其他'));
     let activeTargetsSum = 0;
@@ -152,75 +369,6 @@
     const todayEstReturn = window.portfolio ? window.portfolio.todayProfit : 0;
     const todayEstRate = totalAssets > 0 ? (todayEstReturn / totalAssets) * 100 : 0;
 
-
-    // Smart Investment Strategy constraint parsing
-    const parseStrategyDetails = (f, list) => {
-      const matched = [];
-      const rules = {
-        limit: null,
-        recovery: null,
-        targetReturn: null,
-        fixedInvest: null,
-        suspendedBuy: false
-      };
-
-      list.forEach(st => {
-        let isMatch = false;
-        // 1. Direct match by 6-digit fund code
-        if (st.includes(f.code)) {
-          isMatch = true;
-        } else {
-          // 2. Match by well-known brands
-          const brands = ["富国", "易方达", "华夏", "汇添富", "兴全", "景顺", "天弘", "交银", "广发", "中欧", "万家", "招商", "博时", "南方", "嘉实", "华安", "工银", "建信", "农银"];
-          for (const b of brands) {
-            if (f.name.includes(b) && st.includes(b)) {
-              isMatch = true;
-              break;
-            }
-          }
-        }
-
-        // 3. Match by partial substring of length >= 2 if no brand matched
-        if (!isMatch) {
-          const cleanName = f.name.replace(/(基金|混合|指数|股票|债券|A|C|LOF|ETF|联接)/g, '');
-          if (cleanName.length >= 2) {
-            for (let i = 0; i <= cleanName.length - 2; i++) {
-              const slice = cleanName.substring(i, i + 2);
-              if (st.includes(slice)) {
-                isMatch = true;
-                break;
-              }
-            }
-          }
-        }
-
-        if (isMatch) {
-          matched.push(st);
-          // Parse limit (限额)
-          const limitMatch = st.match(/限额\s*(\d+)/);
-          if (limitMatch) rules.limit = parseInt(limitMatch[1], 10);
-
-          // Parse recovery (回本)
-          const recoveryMatch = st.match(/回本\s*(\d+)/);
-          if (recoveryMatch) rules.recovery = parseInt(recoveryMatch[1], 10);
-
-          // Parse fixed invest (定投)
-          const fixedMatch = st.match(/定投\s*(\d+)/);
-          if (fixedMatch) rules.fixedInvest = parseInt(fixedMatch[1], 10);
-
-          // Parse target profit (止盈)
-          const targetProfitMatch = st.match(/止盈\s*(\d+%?)/);
-          if (targetProfitMatch) rules.targetReturn = targetProfitMatch[1];
-
-          // Check for suspended buy or only-sell constraints (e.g. 暂停申购, 已经暂停申购, 只允许卖出, 暂停买入, 禁止买入)
-          if (st.includes("暂停申购") || st.includes("暂停买入") || st.includes("只允许卖出") || st.includes("只允许卖") || st.includes("禁止买入") || st.includes("禁止申购") || st.includes("暂停买")) {
-            rules.suspendedBuy = true;
-          }
-        }
-      });
-
-      return { matched, rules };
-    };
 
     let allocHtml = '';
     if (allocations.length > 0) {
@@ -396,7 +544,7 @@
 
           ${aiResult && aiResult.summary ? `
           <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 4px;">
-            <strong>AI 诊断总结：</strong>${esc(aiResult.summary)}
+            <strong>今日操作建议的总结：</strong>${esc(aiResult.summary)}
           </div>
           ` : ''}
         </div>
@@ -428,12 +576,11 @@
               <table class="analysis-table" style="width: 100%; border-collapse: collapse; text-align: left; font-size: 14px;">
                 <thead>
                   <tr style="border-bottom: 1.5px solid rgba(0,0,0,0.08); color: #86868b; font-weight: 500; font-size: 12px; letter-spacing: 0.03em;">
-                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 18%;">基金名称 & 代码</th>
-                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 14%;">目前仓位 (占比)</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 20%;">基金名称 & 代码</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 15%;">目前仓位 (占比)</th>
                     <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 12%;">今日估算涨幅</th>
-                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 16%;">目标仓位 (建议占比)</th>
-                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 15%;">操作建议</th>
-                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 25%;">评估理由</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 20%;">操作建议</th>
+                    <th style="padding: 12px 16px; font-weight: 600; text-align: left; width: 33%;">评估理由</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -536,10 +683,6 @@
                           <span class="est-badge ${isTodayPositive ? 'positive' : 'negative'}" style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; background: ${isTodayPositive ? 'rgba(255, 59, 48, 0.06)' : 'rgba(52, 168, 83, 0.06)'};">
                             ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
                           </span>
-                        </td>
-                        <td style="padding: 16px; vertical-align: middle;">
-                          <div style="font-weight: 600; color: #1d1d1f;">${money(targetAmt)}</div>
-                          <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${targetPct.toFixed(2)}%</div>
                         </td>
                         <td style="padding: 16px; vertical-align: middle;">
                           <span style="display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
@@ -655,7 +798,7 @@
                       </span>
                     </div>
 
-                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 12px; text-align: left;">
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; border-top: 1px solid rgba(0,0,0,0.05); padding-top: 12px; text-align: left;">
                       <div>
                         <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目前持仓</span>
                         <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(f.amount)}</strong>
@@ -666,11 +809,6 @@
                         <span style="font-size: 12.5px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; display: block;">
                           ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
                         </span>
-                      </div>
-                      <div>
-                        <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">目标仓位</span>
-                        <strong style="font-size: 12.5px; color: #1d1d1f; display: block;">${money(targetAmt)}</strong>
-                        <span style="font-size: 11px; color: #6e6e73;">${targetPct.toFixed(1)}%</span>
                       </div>
                     </div>
 
@@ -756,7 +894,7 @@
                 <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">数据源接口配置</h2>
-                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局资产数据的抓取接口基地址，支持本地与远程调试</p>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局资产数据的抓取接口基地址，修改后立即应用到估值及详情查询</p>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -766,8 +904,6 @@
             </div>
 
             <div class="panel-body-datasource" style="display: ${window.settingsCollapsedState.datasource ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">配置全局资产数据的抓取接口基地址，修改后立即应用到估值及详情查询。</p>
-              
               <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px;">接口基地址 (API Base URL)</label>
                 <div style="display: flex; gap: 10px;">
@@ -827,7 +963,7 @@
                 <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="15" x2="23" y2="15"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="15" x2="4" y2="15"></line></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">AI模型接口配置</h2>
-                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局 AI 分析服务，切换商户、基地址或模型名称</p>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">配置全局 AI 分析服务接口，修改后立即应用到持仓分析、智能建议、风险评估</p>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -837,8 +973,6 @@
             </div>
 
             <div class="panel-body-aimodel" style="display: ${window.settingsCollapsedState.aimodel ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">配置全局 AI 分析服务接口，修改后立即应用到持仓分析、智能建议、风险评估。</p>
-              
               <div style="display: flex; flex-direction: column; gap: 16px;">
                 <!-- First Part: AI Provider selection -->
                 <div>
@@ -926,7 +1060,7 @@
                 <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #86868b;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect></svg></span>
                 <div style="text-align: left;">
                   <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">投资策略方针</h2>
-                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">自定义管理核心策略条目，规范并约束当前账户的投资纪律</p>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">规范投资纪律的自定义核心策略条目</p>
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
@@ -936,8 +1070,6 @@
             </div>
 
             <div class="panel-body-strategy" style="display: ${window.settingsCollapsedState.strategy ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">规范投资纪律的自定义核心策略条目</p>
-              
               <div style="max-height: 220px; overflow-y: auto; margin-bottom: 18px; padding-right: 6px;">
                 ${strategyItemsHtml}
               </div>
@@ -968,7 +1100,6 @@
             </div>
 
             <div class="panel-body-dangerzone" style="display: ${window.settingsCollapsedState.dangerzone ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #86868b; margin-bottom: 18px; margin-top: 0; line-height: 1.5;">清空浏览器本地 LocalStorage 存储，重置为系统出厂初始 Mock 数据。此操作不可逆，请谨慎操作。</p>
               <button id="reset-storage-btn" style="width: 100%; padding: 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; text-align: center; display: block;">清空并恢复出厂默认值</button>
             </div>
           </div>
@@ -1094,6 +1225,7 @@
     // 2. Build the portfolio payload to send to the real AI engine
     const portfolioData = {
       account: a.name || '默认账户',
+      strategies: a.strategy || [],
       holdings: (a.funds || []).map(f => ({
         name: f.name || '',
         code: f.code || '',
@@ -1214,6 +1346,12 @@
       return;
     }
 
+    const goAnalysisBtn = e.target.closest('#go-analysis-btn');
+    if (goAnalysisBtn) {
+      render('analysis');
+      return;
+    }
+
     const adjustHoldingBtn = e.target.closest('.adjust-holding-btn');
     if (adjustHoldingBtn) {
       const code = adjustHoldingBtn.dataset.code;
@@ -1304,7 +1442,7 @@
     const saveApiBtn = e.target.closest('#save-api-btn');
     if (saveApiBtn) {
       const input = document.querySelector('#api-base-url-input');
-      const val = input ? input.value.trim() : '';
+      const val = input ? input.value.trim().replace(/\/+$/, '') : '';
       localStorage.setItem('FUND_API_BASE', val);
       window.FUND_API_BASE = val;
       alert('数据源基地址保存并应用成功！');
@@ -1317,7 +1455,7 @@
       const testCodeInput = document.querySelector('#test-fund-code-input');
       const testCode = testCodeInput ? testCodeInput.value.trim() : '000001';
       const baseUrlInput = document.querySelector('#api-base-url-input');
-      const baseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+      const baseUrl = baseUrlInput ? baseUrlInput.value.trim().replace(/\/+$/, '') : '';
       
       const resultDiv = document.querySelector('#test-api-result');
       if (resultDiv) {
@@ -1573,4 +1711,7 @@
   });
   document.querySelectorAll('.nav-tab').forEach(b=>b.addEventListener('click',()=>{editing=false;selected.clear();render(b.dataset.view)}));
   render('portfolio');
+  // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
+  // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。
+  s.render = render;
 })();

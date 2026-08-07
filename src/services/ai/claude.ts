@@ -59,6 +59,11 @@ export async function analyzePortfolio(portfolioData: PortfolioData, config: AIC
 持仓基金数据：
 ${JSON.stringify(portfolioData, null, 2)}
 
+你当前的投资纪律核心策略（必须作为所有建议的重要参考与约束，所有操作建议均不得违背这些纪律）：
+${portfolioData.strategies && portfolioData.strategies.length > 0
+  ? portfolioData.strategies.map((s, i) => `${i + 1}. ${s}`).join('\n')
+  : '未设置自定义策略，请基于稳健、理性的常规投资纪律给出建议'}
+
 请严格按照以下 JSON 格式进行回复（不要包含任何 markdown 标记、\`\`\`json 块、多余文字或注释，确保其为可以直接解析的纯 JSON 对象）：
 {
   "healthScore": 组合健康度分值 (0-100的数字),
@@ -66,7 +71,7 @@ ${JSON.stringify(portfolioData, null, 2)}
   "healthColor": "状态颜色代码 (如 #34a853 代表极佳/良好, #ff9500 代表一般, #ff3b30 代表较差)",
   "deviationText": "大类资产偏离状态说明 (根据你对该组合各大类偏离情况的专业评价)",
   "riskScore": 评估风险分值 (0-100的数字),
-  "summary": "一句简短精炼的持仓整体风险总结",
+  "summary": "今日操作建议的总结 (结合投资纪律核心策略，用一句话概括今天最应执行的操作与纪律提醒)",
   "suggestions": [
     {
       "fund": "基金名称",
