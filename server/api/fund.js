@@ -30,9 +30,51 @@ function routeMatch(pathname, expression) {
   return match ? match.slice(1).map(decodeURIComponent) : null;
 }
 
+function readJsonBody(request) {
+  return new Promise((resolve, reject) => {
+    let chunkStr = '';
+    request.on('data', chunk => { chunkStr += chunk; });
+    request.on('end', () => {
+      try {
+        resolve(chunkStr ? JSON.parse(chunkStr) : {});
+      } catch (e) {
+        reject(Object.assign(new Error('Invalid JSON'), { statusCode: 400 }));
+      }
+    });
+    request.on('error', err => reject(err));
+  });
+}
+
 async function handleFundApi(request, response, url) {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
+    return true;
+  }
+
+  if (url.pathname === '/api/portfolio/delete' && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const { clearSyncedAccount } = require('../services/portfolioService');
+    if (!body.account_id) {
+      sendJson(response, 400, { success: false, error: '缺少 account_id' });
+      return true;
+    }
+    clearSyncedAccount(body.account_id);
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
+  if (url.pathname === '/api/portfolio/rename' && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const { transaction } = require('../database/db');
+    if (!body.from || !body.to) {
+      sendJson(response, 400, { success: false, error: '缺少 from/to' });
+      return true;
+    }
+    transaction(db => {
+      db.prepare('DELETE FROM portfolio WHERE account_id = ?').run(String(body.to));
+      db.prepare('UPDATE portfolio SET account_id = ? WHERE account_id = ?').run(String(body.to), String(body.from));
+    });
+    sendJson(response, 200, { success: true });
     return true;
   }
 

@@ -597,6 +597,20 @@
     update(3, percent(rate), tone(rate));
   }
 
+  function updateAutoInvestBanner(backdrop, fund) {
+    const content = backdrop.querySelector('.detail-transaction-content');
+    const section = content && content.closest('.detail-section');
+    if (!section) return;
+    const existing = section.querySelector('.auto-invest-banner');
+    if (existing) existing.remove();
+    if (fund.autoInvest && fund.autoInvest.enabled) {
+      const banner = document.createElement('div');
+      banner.className = 'auto-invest-banner';
+      banner.textContent = `定投计划：每${fund.autoInvest.frequency === 'daily' ? '日' : fund.autoInvest.frequency === 'weekly' ? '周' : '月'} ${money(fund.autoInvest.amount)}，下次 ${fund.autoInvest.nextDate || '—'}`;
+      section.insertBefore(banner, content);
+    }
+  }
+
   function localDateTimeInputValue() {
     const date = new Date();
     const offset = date.getTimezoneOffset();
@@ -634,6 +648,8 @@
       '<button type="button" class="active" data-holding-mode="edit">直接修改</button>',
       '<button type="button" data-holding-mode="add">同步加仓</button>',
       '<button type="button" data-holding-mode="reduce">同步减仓</button>',
+      '<button type="button" data-holding-mode="liquidate">清仓</button>',
+      '<button type="button" data-holding-mode="invest">定投</button>',
       '</div>',
       '<div class="holding-trade-fields" hidden>',
       '<div class="holding-edit-grid">',
@@ -641,6 +657,13 @@
       '<label><span data-trade-fee-label>买入费率</span><input name="trade-fee" type="number" min="0" step="0.0001" value="0"></label>',
       '<label><span data-trade-time-label>买入时间</span><input name="trade-time" type="datetime-local" value="' + localDateTimeInputValue() + '"></label>',
       '</div>',
+      '</div>',
+      '<div class="holding-invest-fields" hidden>',
+      '<div class="holding-edit-grid">',
+      '<label>每期定投金额<input name="invest-amount" type="number" min="0.01" step="0.01" value=""></label>',
+      '<label>定投周期<select name="invest-frequency" style="width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,0.12);border-radius:8px;background:#f5f5f7;font:inherit;margin-top:8px;color:#1d1d1f;"><option value="daily">每日</option><option value="weekly">每周</option><option value="monthly" selected>每月</option></select></label>',
+      '</div>',
+      '<label>定投开始时间<input name="invest-date" type="datetime-local" value="' + localDateTimeInputValue() + '"></label>',
       '</div>',
       '<p class="holding-editor-error" role="alert"></p>',
       '<div class="confirm-actions">',
@@ -655,6 +678,7 @@
 
     const form = overlay.querySelector('form');
     const tradeFields = form.querySelector('.holding-trade-fields');
+    const investFields = form.querySelector('.holding-invest-fields');
     const error = form.querySelector('.holding-editor-error');
     let mode = 'edit';
 
@@ -671,14 +695,23 @@
     const setMode = nextMode => {
       mode = nextMode;
       error.textContent = '';
-      tradeFields.hidden = mode === 'edit';
+      tradeFields.hidden = mode === 'edit' || mode === 'invest';
+      investFields.hidden = mode !== 'invest';
       form.querySelectorAll('[data-holding-mode]').forEach(button => {
         button.classList.toggle('active', button.dataset.holdingMode === mode);
       });
-      const isReduce = mode === 'reduce';
+      const isReduce = mode === 'reduce' || mode === 'liquidate';
       form.querySelector('[data-trade-amount-label]').textContent = isReduce ? '卖出金额' : '买入金额';
       form.querySelector('[data-trade-fee-label]').textContent = isReduce ? '卖出费率' : '买入费率';
       form.querySelector('[data-trade-time-label]').textContent = isReduce ? '卖出时间' : '买入时间';
+      if (mode === 'liquidate') {
+        form.querySelector('[name="trade-amount"]').value = amount.toFixed(2);
+        form.querySelector('[name="trade-fee"]').value = '0';
+      }
+      if (mode === 'invest') {
+        form.querySelector('[name="invest-amount"]').value = '';
+        form.querySelector('[name="invest-date"]').value = localDateTimeInputValue();
+      }
     };
 
     form.querySelectorAll('[data-holding-mode]').forEach(button => {
@@ -701,6 +734,76 @@
 
       if (!Number.isFinite(nextAmount) || nextAmount < 0 || !Number.isFinite(nextProfit)) {
         error.textContent = '请填写有效的持有金额 and 持有收益。';
+        return;
+      }
+
+      if (mode === 'liquidate') {
+        const feeRate = Number(feeInput.value);
+        if (!Number.isFinite(feeRate) || feeRate < 0 || feeRate > 100) {
+          error.textContent = '请填写有效的卖出费率（0-100）。';
+          return;
+        }
+        const fee = amount * feeRate / 100;
+        const date = transactionDateLabel(timeInput.value);
+        // 记录卖出流水
+        fund.transactions = Array.isArray(fund.transactions) ? fund.transactions : [];
+        fund.transactions.unshift({ type: 'sell', amount, fee, date });
+        // 记录清仓日志（已清仓列表）
+        const account = window.portfolioState.accounts[window.portfolioState.getActive()];
+        if (account) {
+          account.closedPositions = Array.isArray(account.closedPositions) ? account.closedPositions : [];
+          account.closedPositions.unshift({
+            name: fund.name,
+            code: fund.code,
+            closedBefore: date,
+            reason: '手动清仓',
+            amount,
+            profit,
+            fee
+          });
+          const index = account.funds.findIndex(f => f.code === fund.code);
+          if (index !== -1) account.funds.splice(index, 1);
+        }
+        window.savePortfolioState?.();
+        close();
+        document.body.classList.remove('drawer-open');
+        drawerBackdrop.remove();
+        if (typeof window.portfolioState.render === 'function') window.portfolioState.render('portfolio');
+        if (typeof window.showToast === 'function') window.showToast(`已清仓「${fund.name}」，并从列表移除`, 'success');
+        return;
+      }
+
+      if (mode === 'invest') {
+        const investAmount = Number(form.querySelector('[name="invest-amount"]').value);
+        const frequency = form.querySelector('[name="invest-frequency"]').value;
+        const investDate = form.querySelector('[name="invest-date"]').value;
+        if (!Number.isFinite(investAmount) || investAmount <= 0) {
+          error.textContent = '请填写有效的定投金额。';
+          return;
+        }
+        const date = transactionDateLabel(investDate);
+        fund.transactions = Array.isArray(fund.transactions) ? fund.transactions : [];
+        fund.transactions.unshift({ type: 'buy', amount: investAmount, fee: 0, date });
+        nextAmount += investAmount;
+        // 计算下一次定投日期
+        const nextDateBase = investDate ? new Date(investDate) : new Date();
+        if (frequency === 'daily') nextDateBase.setDate(nextDateBase.getDate() + 1);
+        else if (frequency === 'weekly') nextDateBase.setDate(nextDateBase.getDate() + 7);
+        else nextDateBase.setMonth(nextDateBase.getMonth() + 1);
+        fund.autoInvest = {
+          enabled: true,
+          amount: investAmount,
+          frequency,
+          nextDate: nextDateBase.toISOString().slice(0, 10)
+        };
+        normalizeHolding(fund, nextAmount, nextProfit);
+        window.savePortfolioState?.();
+        refreshDrawerHoldingMetrics(drawerBackdrop, fund);
+        updateAutoInvestBanner(drawerBackdrop, fund);
+        const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
+        if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
+        close();
+        if (typeof window.showToast === 'function') window.showToast('已设置定投并买入本期', 'success');
         return;
       }
 
@@ -810,6 +913,9 @@
           <div class="detail-section">
             <p class="eyebrow">交易记录</p>
             <h3>最近操作</h3>
+            ${fund.autoInvest && fund.autoInvest.enabled ? `
+              <div class="auto-invest-banner">定投计划：每${fund.autoInvest.frequency === 'daily' ? '日' : fund.autoInvest.frequency === 'weekly' ? '周' : '月'} ${money(fund.autoInvest.amount)}，下次 ${fund.autoInvest.nextDate || '—'}</div>
+            ` : ''}
             <div class="detail-transaction-content">${transactionsMarkup(fund)}</div>
           </div>
         </div>

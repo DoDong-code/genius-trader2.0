@@ -24,7 +24,9 @@
 
   function totals() {
     var account = state.accounts && state.accounts[state.getActive()];
-    var funds = account && Array.isArray(account.funds) ? account.funds : [];
+    var funds = account
+      ? (typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (Array.isArray(account.funds) ? account.funds : []))
+      : [];
     var amount = funds.reduce(function (sum, fund) {
       return sum + Number(fund.amount || 0);
     }, 0);

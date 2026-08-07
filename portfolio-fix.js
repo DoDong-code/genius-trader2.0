@@ -428,7 +428,9 @@
       setupDragAndDrop(header);
     }
 
-    const account = window.portfolioState.accounts[window.portfolioState.getActive()];
+    const state = window.portfolioState;
+    const account = state.accounts[state.getActive()];
+    const accountFunds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []);
     section.querySelectorAll('.fund-row').forEach(row => {
       const colFund = row.querySelector('.fund-info');
       const colEst = row.querySelector('.fund-est');
@@ -440,7 +442,7 @@
       if (colToday) colToday.dataset.colKey = 'todayProfit';
       if (colAmount) colAmount.dataset.colKey = 'amount';
 
-      const fund = account.funds.find(item => item.code === row.dataset.code);
+      const fund = accountFunds.find(item => item.code === row.dataset.code);
       if (fund && Number.isFinite(fund.holdingProfit)) {
         const strong = colEst?.querySelector('strong');
         const span = colEst?.querySelector('span');
@@ -535,7 +537,8 @@
 
       const section = root.querySelector('.list-section');
       const list = section?.querySelector('.fund-list');
-      const account = window.portfolioState?.accounts?.[window.portfolioState?.getActive?.()];
+      const state = window.portfolioState;
+      const account = state?.accounts?.[state?.getActive?.()];
       if (!list || !account) return;
 
       const nextKey = button.dataset.sortKey;
@@ -549,8 +552,9 @@
         sortDirection = 'default';
       }
 
-      const orderByCode = new Map((account.funds || []).map((fund, index) => [String(fund.code), index]));
-      const fundsByCode = new Map((account.funds || []).map(fund => [String(fund.code), fund]));
+      const accountFunds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : ((account && account.funds) || []);
+      const orderByCode = new Map(accountFunds.map((fund, index) => [String(fund.code), index]));
+      const fundsByCode = new Map(accountFunds.map(fund => [String(fund.code), fund]));
       const rows = [...list.querySelectorAll('.fund-row')];
       const orderedRows = rows.slice().sort((left, right) => {
         if (sortDirection === 'default') {

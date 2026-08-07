@@ -61,9 +61,11 @@
 
   function selectedFunds() {
     var accounts = selected === 'all'
-      ? Object.values(state.accounts)
+      ? Object.values(state.accounts).filter(function (account) { return !account.parent; })
       : [state.accounts[selected]].filter(Boolean);
-    return accounts.flatMap(function (account) { return account.funds || []; });
+    return accounts.flatMap(function (account) {
+      return typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []);
+    });
   }
 
   function summary() {
@@ -153,7 +155,9 @@
       tabs.className = 'account-segmented';
       tabs.setAttribute('role', 'tablist');
       tabs.innerHTML = '<button class="account-segment" data-account-tab="all">总览</button>' +
-        Object.keys(state.accounts).map(function (name) {
+        Object.keys(state.accounts).filter(function (name) {
+          return !state.accounts[name] || !state.accounts[name].parent; // 只展示根账户
+        }).map(function (name) {
           return '<button class="account-segment" data-account-tab="' + name.replace(/"/g, '&quot;') + '">' +
             name.replace(/（朋友账户）/, '') +
           '</button>';

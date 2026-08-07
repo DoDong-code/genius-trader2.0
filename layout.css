@@ -1286,6 +1286,24 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   line-height: 1.6;
   margin: 10px 0 0;
 }
+.apple-dialog-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 12px;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+}
+.apple-dialog-input:focus {
+  border-color: #0071e3;
+  background: #fff;
+}
 .apple-dialog-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1306,15 +1324,194 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   color: #fff;
 }
 .synced-badge {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
   margin-left: 6px;
-  padding: 1px 7px;
+  padding: 0 6px;
   border-radius: 6px;
   background: rgba(0, 113, 227, 0.1);
   color: #0071e3;
   font-size: 10px;
   font-weight: 600;
-  vertical-align: 1px;
+  line-height: 16px;
+  vertical-align: middle;
+}
+.parent-badge {
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: rgba(52, 168, 83, 0.1);
+  color: #34a853;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: middle;
+}
+.link-btn {
+  background: none;
+  border: 0;
+  color: #0071e3;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+}
+.link-btn:hover {
+  text-decoration: underline;
+}
+.danger-link {
+  color: #ff3b30;
+}
+.account-sub-actions {
+  display: flex;
+  gap: 16px;
+  padding: 6px 10px 8px 24px;
+}
+.sub-account-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.sub-account-tabs-label {
+  font-size: 12px;
+  color: #86868b;
+  margin-right: 4px;
+}
+.sub-tab {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 0;
+  background: #f0f0f2;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 150ms ease;
+}
+.sub-tab:hover {
+  background: #e8e8ed;
+}
+.sub-tab.active {
+  background: #0071e3;
+  color: #fff;
+  font-weight: 600;
+}
+.sub-tab.parent-tab {
+  background: rgba(0, 113, 227, 0.08);
+  color: #0071e3;
+}
+.auto-invest-banner {
+  background: rgba(52, 168, 83, 0.08);
+  border: 1px solid rgba(52, 168, 83, 0.2);
+  color: #248a3d;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+.closed-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.closed-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-size: 13px;
+}
+.closed-row span {
+  color: #1d1d1f;
+  font-weight: 600;
+}
+.closed-row small {
+  color: #86868b;
+  font-weight: 400;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.closed-row b {
+  font-size: 13px;
+  color: #6e6e73;
+}
+.closed-row em {
+  font-style: normal;
+  color: #86868b;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.sub-account-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 4px 0 4px 22px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.025);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+.sub-account-card:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+.sub-account-card b {
+  font-size: 13px;
+  color: #1d1d1f;
+}
+.sub-account-card small {
+  display: block;
+  color: #86868b;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.sub-account-card strong {
+  font-size: 13px;
+  color: #1d1d1f;
+}
+.sub-account-card span {
+  display: block;
+  color: #86868b;
+  font-size: 11px;
+  margin-top: 2px;
+  text-align: right;
+}
+.account-totals-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 12px 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.07);
+  font-size: 12px;
+  color: #6e6e73;
+}
+.account-totals-row b {
+  font-size: 13px;
+  color: #1d1d1f;
+  margin-left: 4px;
+}
+.fund-sub-tag {
+  color: #0071e3;
+  font-size: 11px;
 }
 
 /* 基金详情走势图：成本虚线标签与买卖点图例 */

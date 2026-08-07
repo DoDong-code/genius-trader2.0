@@ -26,6 +26,7 @@ const {
   listSyncedAccounts,
   clearSyncedAccount
 } = require('../services/portfolioService');
+const { handleFundApi } = require('../api/fund');
 
 test('AES 加密解密往返', () => {
   const plain = 'sk-test-123456';
@@ -227,6 +228,35 @@ test('同步账户持久化与读取（portfolio 表）', () => {
 
   clearSyncedAccount('养基宝-测试');
   assert.equal(listSyncedAccounts().find(a => a.name === '养基宝-测试'), undefined);
+});
+
+test('同步账户重命名 / 删除接口', async () => {
+  replaceSyncedAccount('养基宝-测试', [{
+    code: '000001',
+    name: '测试基金',
+    amount: 110,
+    shares: 100,
+    costNav: 1.0
+  }]);
+
+  const resRename = mockResponse();
+  await handleFundApi(
+    mockRequest('POST', { from: '养基宝-测试', to: '养基宝-测试2' }),
+    resRename,
+    apiUrl('/api/portfolio/rename')
+  );
+  assert.equal(resRename.statusCode, 200);
+  assert.ok(listSyncedAccounts().some(a => a.name === '养基宝-测试2'));
+  assert.ok(!listSyncedAccounts().some(a => a.name === '养基宝-测试'));
+
+  const resDelete = mockResponse();
+  await handleFundApi(
+    mockRequest('POST', { account_id: '养基宝-测试2' }),
+    resDelete,
+    apiUrl('/api/portfolio/delete')
+  );
+  assert.equal(resDelete.statusCode, 200);
+  assert.ok(!listSyncedAccounts().some(a => a.name === '养基宝-测试2'));
 });
 
 test('估值归一化：百分比 → GT 内部比率结构', () => {

@@ -47,8 +47,10 @@
     var state = window.portfolioState;
     if (!state || !state.accounts || typeof state.getActive !== 'function') return null;
     var account = state.accounts[state.getActive()];
-    return account && Array.isArray(account.funds)
-      ? account.funds.find(function (fund) { return fund.code === code; })
+    if (!account) return null;
+    var funds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []);
+    return Array.isArray(funds)
+      ? funds.find(function (fund) { return fund.code === code; })
       : null;
   }
 

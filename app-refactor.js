@@ -19,6 +19,41 @@
     return t;
   }
 
+  // ─────────────────────────────────────────────
+  // 账户层级：父账户 / 子账户
+  // ─────────────────────────────────────────────
+  const FUND_SECTORS_BY_CODE = {
+    '014002': '全球智能科技', '022184': '全球科技', '002771': '灵活配置',
+    '002207': '黄金矿业', '019633': '半导体设备', '007339': '沪深300',
+    '004253': '黄金', '013309': '恒生科技', '010827': '产业趋势',
+    '025422': '数字经济', '014847': '债券', '008173': '债券',
+    '020741': '债券', '015736': '纯债', '380006': '纯债',
+    '004103': '债券', '009690': '灵活配置', '000001': '混合', '008702': '基金'
+  };
+
+  function sectorNameOf(f) {
+    return (f && (FUND_SECTORS_BY_CODE[f.code] || f.category)) || '其他';
+  }
+
+  // 父账户有效持仓 = 自身持仓 + 全部子账户持仓（子账户带 subAccount 标记）
+  function effectiveFundsOf(account) {
+    if (!account) return [];
+    const own = Array.isArray(account.funds) ? account.funds : [];
+    if (!Array.isArray(account.children) || account.children.length === 0) return own;
+    const all = own.slice();
+    account.children.forEach(childName => {
+      const child = s.accounts[childName];
+      if (child && Array.isArray(child.funds)) {
+        child.funds.forEach(f => all.push({ ...f, subAccount: child.name }));
+      }
+    });
+    return all;
+  }
+
+  function rootAccountsOf() {
+    return Object.values(s.accounts).filter(a => !a.parent);
+  }
+
   function buildAdviceText(diffPct, rules) {
     if (diffPct > 4) {
       let adviceText = '分批止盈 / 适当减仓';
@@ -50,7 +85,7 @@
    * 分析页与首页“今日操作建议”模块共用，避免两套口径。
    */
   function buildDecisionReport(a) {
-    const funds = a.funds || [];
+    const funds = effectiveFundsOf(a);
     const strategyList = a.strategy || [];
     const closedPositions = a.closedPositions || [];
     const totalAssets = funds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
@@ -135,6 +170,16 @@
     const riskScore = aiRisk !== null ? Math.round(aiRisk * 0.6 + localRisk * 0.4) : localRisk;
     const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
 
+    // 如何组合配比降低风险（供“持仓分析”卡片展示）
+    let rebalanceSuggestion = '组合较为稳健，维持现有配置与纪律定投即可。';
+    if (maxCatPct > 65) {
+      rebalanceSuggestion = `单一板块占比过高（${maxCatPct.toFixed(0)}%），建议分散到 2-3 个行业，并增配债券类资产降低组合波动。`;
+    } else if (riskScore >= 70) {
+      rebalanceSuggestion = '风险偏高，建议降低权益/行业主题基金仓位，增配债券与稳健资产，并控制单一行业集中度。';
+    } else if (riskScore >= 40) {
+      rebalanceSuggestion = '风险适中，可小幅增加稳健资产（债券/黄金）占比，保持行业分散。';
+    }
+
     // 逐基金统一决策行（本地规则 + AI 建议合并）
     const rows = funds.map(f => {
       const cat = f.category || '其他';
@@ -202,6 +247,7 @@
       deviationText,
       riskScore,
       riskLevel,
+      rebalanceSuggestion,
       hasAi: Boolean(aiResult),
       summary: aiResult && aiResult.summary ? aiResult.summary : null,
       rows,
@@ -337,9 +383,10 @@
   };
 
   function overview(){
-    const a = acct();
-    const total = a.funds.reduce((x, f) => x + f.amount, 0);
-    const day = a.funds.reduce((x, f) => x + f.amount * f.today, 0);
+    const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };
+    const effFunds = effectiveFundsOf(a);
+    const total = effFunds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
+    const day = effFunds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
     title.textContent = '天才交易员上线';
     const selectedTab = window.__accountTabSelected || 'all';
     const showAccountMgmt = selectedTab === 'all';
@@ -361,14 +408,34 @@
           ${editing ? '<button class="secondary-button" data-action="add-account">新增账户</button>' : ''}
         </div>
         <div class="account-list">
-          ${Object.values(s.accounts).map(a => {
+          ${rootAccountsOf().map(a => {
             const synced = Boolean(a.__source);
+            const effFunds = effectiveFundsOf(a);
+            const effTotal = effFunds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
+            const effDay = effFunds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
+            const children = (a.children || []).map(n => s.accounts[n]).filter(Boolean);
             return `
-              <div class="account-card ${editing && !synced ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
-                ${editing && !synced ? '<input type="checkbox" data-check="' + esc(a.name) + '" ' + (selected.has(a.name) ? 'checked' : '') + ' />' : ''}
-                <div><b>${esc(a.name)}${synced ? ' <span class="synced-badge">同步</span>' : ''}</b><small>${a.funds.length ? a.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
-                <div><strong>${money(a.funds.reduce((x, f) => x + f.amount, 0))}</strong><span>${money(a.funds.reduce((x, f) => x + f.amount * f.today, 0))}</span></div>
+              <div class="account-card ${editing ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
+                ${editing ? '<input type="checkbox" data-check="' + esc(a.name) + '" ' + (selected.has(a.name) ? 'checked' : '') + ' />' : ''}
+                <div><b>${esc(a.name)}${synced ? ' <span class="synced-badge">同步</span>' : ''}${children.length ? ` <span class="parent-badge">${children.length} 子账户</span>` : ''}</b>
+                  <small>${effFunds.length ? effFunds.length + ' 项持仓' : '暂无持仓'}</small>
+                </div>
+                <div><strong>${money(effTotal)}</strong><span>${money(effDay)}</span></div>
               </div>
+              ${editing ? `
+                <div class="account-sub-actions">
+                  <button type="button" class="link-btn" data-action="add-sub-account" data-parent="${esc(a.name)}">＋ 新建子账户</button>
+                  ${!synced && effFunds.length ? `<button type="button" class="link-btn" data-action="split-by-sector" data-parent="${esc(a.name)}">按板块拆分</button>` : ''}
+                </div>` : ''}
+              ${children.map(c => `
+                <div class="sub-account-card" data-sub-account="${esc(c.name)}">
+                  <div><b>${esc(c.name)}</b><small>${c.funds.length ? c.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
+                  <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="text-align: right;"><strong>${money(c.funds.reduce((x, f) => x + (Number(f.amount) || 0), 0))}</strong><span>${money(c.funds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0))}</span></div>
+                    ${editing ? `<button type="button" class="link-btn danger-link" data-action="delete-sub-account" data-child="${esc(c.name)}" data-parent="${esc(a.name)}">删除</button>` : ''}
+                  </div>
+                </div>
+              `).join('')}
             `;
           }).join('')}
         </div>
@@ -380,16 +447,46 @@
   }
   function portfolio(){
     title.textContent = s.getActive();
-    const a = acct();
+    const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };
+    const funds = effectiveFundsOf(a);
+    const totalAssets = funds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
+    const totalProfit = funds.reduce((x, f) => x + (Number(f.holdingProfit ?? f.profit) || 0), 0);
+    const totalToday = funds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
+    const profitRate = (totalAssets - totalProfit) > 0 ? totalProfit / (totalAssets - totalProfit) : 0;
+    // 子账户 tab：父账户显示其子账户；子账户显示父账户下的兄弟子账户 + 返回父账户
+    const parentAccount = a.parent ? s.accounts[a.parent] : null;
+    const tabOwner = parentAccount || a;
+    const childTabs = (tabOwner.children || []).map(n => s.accounts[n]).filter(Boolean);
+    let subTabsHtml = '';
+    if (childTabs.length) {
+      const backChip = parentAccount
+        ? `<button type="button" class="sub-tab parent-tab" data-parent-tab="${esc(parentAccount.name)}">← ${esc(parentAccount.name)}</button>`
+        : '';
+      subTabsHtml = `
+        <div class="sub-account-tabs">
+          <span class="sub-account-tabs-label">子账户</span>
+          ${backChip}
+          ${childTabs.map(c => `
+            <button type="button" class="sub-tab ${c.name === a.name ? 'active' : ''}" data-sub-tab="${esc(c.name)}">${esc(c.name)}</button>
+          `).join('')}
+        </div>`;
+    }
     root.innerHTML = `
       <section class="list-section">
         <div class="section-head">
-          <div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / ${a.funds.length} 项</span><span class="mobile-label">${a.funds.length} 项</span></p><h2 class="holdings-title">持仓列表</h2></div>
+          <div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / ${funds.length} 项</span><span class="mobile-label">${funds.length} 项</span></p><h2 class="holdings-title">持仓列表</h2></div>
           <div class="section-head-actions">
             <button class="secondary-button column-customizer-btn" data-action="customize-columns"><span class="desktop-label">自定义表头</span><span class="mobile-label">自定义</span></button>
             <button class="primary add-fund-button" data-action="add-fund">增加基金</button>
           </div>
         </div>
+        <div class="account-totals-row">
+          <span>总资产 <b>${money(totalAssets)}</b></span>
+          <span>持有收益 <b class="${totalProfit >= 0 ? 'positive' : 'negative'}">${money(totalProfit)}</b></span>
+          <span>今日收益 <b class="${totalToday >= 0 ? 'positive' : 'negative'}">${money(totalToday)}</b></span>
+          <span>收益率 <b class="${totalProfit >= 0 ? 'positive' : 'negative'}">${(profitRate * 100).toFixed(2)}%</b></span>
+        </div>
+        ${subTabsHtml}
         <div class="holding-head">
           <span data-col-key="fund">基金</span>
           <span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span>
@@ -397,9 +494,9 @@
           <span data-col-key="amount"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></span>
         </div>
         <div class="fund-list">
-          ${a.funds.map(f => `
+          ${funds.map(f => `
             <button class="fund-row" data-code="${f.code}" title="${esc(f.name)}">
-              <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${f.category}</span></small></div>
+              <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${esc(f.category)}</span>${f.subAccount ? `<span class="fund-meta-sep"> · </span><span class="fund-sub-tag">${esc(f.subAccount)}</span>` : ''}</small></div>
               <div class="fund-est" data-col-key="holdingProfit"><strong>${money(f.amount * f.hold)}</strong><span>${((f.hold * 100).toFixed(2))}%</span></div>
               <div class="fund-today" data-col-key="todayProfit"><strong>${money(f.amount * f.today)}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
               <div class="fund-amount" data-col-key="amount"><strong>${money(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
@@ -411,7 +508,7 @@
   }
   function analysis(){
     title.textContent = '';
-    const a = acct();
+    const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };
     const report = buildDecisionReport(a);
     const {
       funds,
@@ -425,6 +522,7 @@
       deviationText,
       riskScore,
       riskLevel,
+      rebalanceSuggestion,
       summary,
       rows
     } = report;
@@ -589,35 +687,49 @@
             ` : ''}
           </div>
 
+          <!-- AI 问答回答窗口 -->
+          <div id="ai-answer-window" style="display: none; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 14px 16px; font-size: 13px; color: #1d1d1f; line-height: 1.7; box-shadow: 0 2px 10px rgba(0,0,0,0.03); white-space: pre-wrap; word-break: break-word;"></div>
+
+          ${summary ? `
+          <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 12px;">
+            <strong>今日操作建议的总结：</strong>${esc(summary)}
+          </div>
+          ` : ''}
+
           <!-- Analysis Results KPI Stats -->
           ${totalAssets > 0 ? `
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
-            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-              <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
-              <strong style="font-size: 22px; color: #1d1d1f; font-weight: 700;">${healthScore}分 <span style="font-size: 13.5px; font-weight: 600; color: ${healthColor}; margin-left: 6px;">${healthText}</span></strong>
-              ${cachedTime ? `
-                <div style="font-size: 11px; color: #86868b; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 10px; border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 6px;">
-                  <span>模型: <span style="color: #34a853; font-weight: 500;">${esc(cachedModel || '未知模型')}</span></span>
-                  <span>时间: <span style="color: #34a853; font-weight: 500;">${esc(cachedTime)}</span></span>
+            <!-- 合并：组合配比健康度 + 风险评分 -->
+            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
+                  <strong style="font-size: 50px; line-height: 1.05; color: #1d1d1f; font-weight: 700; letter-spacing: -0.03em;">${healthScore}分</strong>
+                  <span style="font-size: 13px; font-weight: 600; color: ${healthColor}; margin-top: 2px;">${healthText}</span>
                 </div>
-              ` : ''}
+                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; border-left: 1px solid rgba(0,0,0,0.06); padding-left: 16px;">
+                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">风险评分</span>
+                  <strong style="font-size: 50px; line-height: 1.05; color: #1d1d1f; font-weight: 700; letter-spacing: -0.03em;">${riskScore}分</strong>
+                  <span style="font-size: 13px; font-weight: 600; color: ${riskScore >= 70 ? '#ff3b30' : riskScore >= 40 ? '#ff9500' : '#34a853'}; margin-top: 2px;">${riskLevel}风险</span>
+                </div>
+              </div>
+              <div style="margin-top: auto; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.06); font-size: 11px; color: #86868b; display: flex; align-items: center; gap: 12px;">
+                <span>模型: <b style="color: #34a853; font-weight: 500;">${esc(cachedModel || '—')}</b></span>
+                <span>时间: <b style="color: #34a853; font-weight: 500;">${esc(cachedTime || '—')}</b></span>
+              </div>
             </div>
+            <!-- 持仓分析 + 如何组合配比降低风险 -->
             <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
               <span style="font-size: 11px; color: #86868b; font-weight: 500;">持仓分析</span>
               <strong style="font-size: 13.5px; color: #1d1d1f; font-weight: 700; min-height: 32px; display: flex; align-items: center; line-height: 1.5;">${deviationText}</strong>
-            </div>
-            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-              <span style="font-size: 11px; color: #86868b; font-weight: 500;">风险评分</span>
-              <strong style="font-size: 22px; color: #1d1d1f; font-weight: 700;">${riskScore}分 <span style="font-size: 13.5px; font-weight: 600; color: ${riskScore >= 70 ? '#ff3b30' : riskScore >= 40 ? '#ff9500' : '#34a853'}; margin-left: 6px;">${riskLevel}风险</span></strong>
+              <div style="border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 8px; margin-top: 4px;">
+                <span style="font-size: 11px; color: #86868b; font-weight: 500; display: block; margin-bottom: 4px;">如何组合配比降低风险</span>
+                <span style="font-size: 12px; color: #6e6e73; line-height: 1.55; display: block;">${rebalanceSuggestion}</span>
+              </div>
             </div>
           </div>
           ` : ''}
 
-          ${summary ? `
-          <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 4px;">
-            <strong>今日操作建议的总结：</strong>${esc(summary)}
-          </div>
-          ` : ''}
         </div>
 
         <!-- Today's Operations and Recommendations Panel (Full Width Sibling) -->
@@ -746,6 +858,21 @@
           </div>
         </div>
 
+        ${closedPositions.length ? `
+        <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%; margin-top: 28px;">
+          <p class="eyebrow" style="color: #86868b;">CLOSED POSITIONS</p>
+          <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">已清仓记录</h2>
+          <div class="closed-list">
+            ${closedPositions.map(c => `
+              <div class="closed-row">
+                <span>${esc(c.name)} <small>(${esc(c.code)})</small></span>
+                <b>${money(Number(c.amount) || 0)}</b>
+                <em>${esc(c.closedBefore || '')} · ${esc(c.reason || '清仓')}</em>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        ` : ''}
       </section>
     `;
   }
@@ -815,6 +942,45 @@
     });
   }
 
+  function showAppleInputDialog({ title, message = '', placeholder = '', okText = '确定', cancelText = '取消' }) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay apple-dialog-overlay';
+      overlay.innerHTML = `
+        <div class="confirm-dialog apple-dialog" role="dialog" aria-modal="true">
+          <h2>${esc(title)}</h2>
+          ${message ? `<p class="apple-dialog-message">${esc(message)}</p>` : ''}
+          <input class="apple-dialog-input" placeholder="${esc(placeholder)}" value="" autocomplete="off" />
+          <div class="confirm-actions apple-dialog-actions">
+            <button type="button" class="apple-dialog-cancel" data-role="cancel">${esc(cancelText)}</button>
+            <button type="button" class="primary" data-role="ok">${esc(okText)}</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+      const input = overlay.querySelector('.apple-dialog-input');
+      input.focus();
+      const close = result => {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 180);
+        resolve(result);
+      };
+      const submit = () => {
+        const value = input.value.trim();
+        if (!value) return;
+        close(value);
+      };
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || e.target.closest('[data-role="cancel"]')) close(null);
+        else if (e.target.closest('[data-role="ok"]')) submit();
+      });
+      input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') submit();
+        else if (e.key === 'Escape') close(null);
+      });
+    });
+  }
+
   async function refreshProviderStatus() {
     const [yjb, xbyj] = await Promise.all([
       providerApi('/api/provider/yangjibao/status').catch(() => null),
@@ -838,6 +1004,11 @@
         acc.__source = acc.name.startsWith('养基宝-') ? 'yangjibao' : acc.name.startsWith('小倍养基-') ? 'xiaobeiyangji' : 'sync';
         s.accounts[acc.name] = acc;
       });
+      // 若当前活动账户已不存在（例如默认账户被删除），回退到第一个可用账户
+      if (!s.accounts[s.getActive()]) {
+        const first = Object.keys(s.accounts)[0];
+        s.setActive(first || '');
+      }
       return serverAccounts;
     } catch (e) {
       return [];
@@ -904,6 +1075,67 @@
       refreshProviderStatus().then(() => { if (view === 'setting') applyProviderStatus(); }).catch(() => {});
       throw err;
     });
+  }
+
+  // AI 问答回答窗口：根据上方提问生成答案（输入“复盘”触发复盘分析）
+  function askAiQuestion(question) {
+    const a = acct();
+    const answerBox = document.querySelector('#ai-answer-window');
+    if (!answerBox) return;
+    answerBox.style.display = 'block';
+    answerBox.textContent = 'AI 正在思考，请稍候…';
+
+    const holdings = effectiveFundsOf(a).map(f => ({
+      name: f.name,
+      code: f.code,
+      amount: Number(f.amount) || 0,
+      profit: Number(f.holdingProfit ?? f.profit) || 0,
+      today_change: Number((f.today || 0) * (Number(f.amount) || 0)) || 0
+    }));
+    const portfolio = { account: a.name || '默认账户', strategies: a.strategy || [], holdings };
+    const isReview = /复盘/.test(question);
+
+    (async () => {
+      try {
+        let prompt;
+        if (isReview) {
+          let closedNote = '复盘分析';
+          try {
+            const market = await providerApi('/api/market/status');
+            closedNote = market && market.trading_day && (market.time || '') >= '15:00'
+              ? '今日已收盘'
+              : '今日尚未收盘（当前为盘中数据，以下为盘中复盘）';
+          } catch (e) { /* 默认提示 */ }
+          prompt = `${closedNote}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n`;
+        } else {
+          prompt = `请基于以下基金组合数据回答用户问题，回答尽量具体、给出操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n用户问题：${question}`;
+        }
+        const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
+        const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
+        const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
+        const aiAPIKey = window.AI_API_KEY || '';
+        const data = await providerApi('/api/ai/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: prompt,
+            config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey }
+          })
+        });
+        // 诊断流程可能已重新渲染页面，写入时重新获取窗口元素
+        const freshBox = document.querySelector('#ai-answer-window');
+        if (freshBox) {
+          freshBox.style.display = 'block';
+          freshBox.textContent = data.reply || 'AI 未返回有效回答';
+        }
+      } catch (err) {
+        const freshBox = document.querySelector('#ai-answer-window');
+        if (freshBox) {
+          freshBox.style.display = 'block';
+          freshBox.textContent = `回答生成失败：${err.message || '网络错误'}`;
+        }
+      }
+    })();
   }
 
   function showProviderQRModal(sourceName) {
@@ -1530,6 +1762,7 @@
       }
       window.lastAIUserQuestion = val;
       runAiDiagnostics(val);
+      askAiQuestion(val);
       return;
     }
 
@@ -1537,6 +1770,11 @@
     if (clearAiQuestionBtn) {
       window.lastAIUserQuestion = '';
       runAiDiagnostics('');
+      const answerBox = document.querySelector('#ai-answer-window');
+      if (answerBox) {
+        answerBox.style.display = 'none';
+        answerBox.textContent = '';
+      }
       return;
     }
 
@@ -1585,7 +1823,27 @@
     }
     if(action==='delete'){
       if(confirm('确定删除选中的账户吗？')){
-        selected.forEach(n=>delete s.accounts[n]);
+        selected.forEach(n=>{
+          const wasSynced = Boolean(s.accounts[n] && s.accounts[n].__source);
+          Object.values(s.accounts).forEach(a => {
+            if (Array.isArray(a.children)) {
+              const i = a.children.indexOf(n);
+              if (i !== -1) a.children.splice(i, 1);
+            }
+          });
+          const target = s.accounts[n];
+          if (target && Array.isArray(target.children)) {
+            target.children.forEach(cn => { if (s.accounts[cn]) s.accounts[cn].parent = undefined; });
+          }
+          delete s.accounts[n];
+          if (wasSynced) {
+            providerApi('/api/portfolio/delete', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ account_id: n })
+            }).catch(() => {});
+          }
+        });
         selected.clear();
         editing=false;
         render('overview');
@@ -1949,6 +2207,136 @@
       return;
     }
 
+    // --- 账户层级：新建子账户 / 按板块拆分 ---
+    const addSubAccountBtn = e.target.closest('[data-action="add-sub-account"]');
+    if (addSubAccountBtn) {
+      const parentName = addSubAccountBtn.dataset.parent;
+      showAppleInputDialog({
+        title: '新建子账户',
+        message: `为「${parentName}」创建子账户`,
+        placeholder: '例如：半导体、黄金、债券',
+        okText: '创建'
+      }).then(childName => {
+        if (!childName) return;
+        if (s.accounts[childName]) { showToast('该账户名称已存在', 'warning'); return; }
+        s.accounts[childName] = { name: childName, parent: parentName, funds: [], strategy: [], closedPositions: [] };
+        const parent = s.accounts[parentName];
+        if (parent) {
+          parent.children = parent.children || [];
+          parent.children.push(childName);
+        }
+        window.savePortfolioState?.();
+        render('overview');
+        showToast(`已创建子账户「${childName}」`);
+      });
+      return;
+    }
+
+    const splitBySectorBtn = e.target.closest('[data-action="split-by-sector"]');
+    if (splitBySectorBtn) {
+      const parentName = splitBySectorBtn.dataset.parent;
+      const parent = s.accounts[parentName];
+      if (parent) {
+        showAppleDialog({
+          title: '按板块拆分',
+          message: `将把「${parentName}」的持仓按板块拆分为子账户，父账户只保留汇总。是否继续？`,
+          okText: '开始拆分',
+          danger: true
+        }).then(ok => {
+          if (!ok) return;
+          const groups = {};
+          (parent.funds || []).forEach(f => {
+            const sector = sectorNameOf(f);
+            (groups[sector] = groups[sector] || []).push(f);
+          });
+          parent.children = parent.children || [];
+          Object.keys(groups).forEach(sector => {
+            const childName = `${parentName}-${sector}`;
+            if (!s.accounts[childName]) {
+              s.accounts[childName] = { name: childName, parent: parentName, funds: [], strategy: [], closedPositions: [] };
+            }
+            s.accounts[childName].funds = groups[sector];
+            if (!parent.children.includes(childName)) parent.children.push(childName);
+          });
+          parent.funds = [];
+          window.savePortfolioState?.();
+          render('overview');
+          showToast(`已按板块拆分为 ${Object.keys(groups).length} 个子账户`);
+        });
+      }
+      return;
+    }
+
+    const deleteSubAccountBtn = e.target.closest('[data-action="delete-sub-account"]');
+    if (deleteSubAccountBtn) {
+      const childName = deleteSubAccountBtn.dataset.child;
+      const parentName = deleteSubAccountBtn.dataset.parent;
+      showAppleDialog({
+        title: '删除子账户',
+        message: `确定删除子账户「${childName}」？其持仓将合并回父账户「${parentName}」，父级总资产不变。`,
+        okText: '删除',
+        danger: true
+      }).then(ok => {
+        if (!ok) return;
+        const parent = s.accounts[parentName];
+        const child = s.accounts[childName];
+        if (parent && child) {
+          // 子账户持仓合并回父账户（同代码合并金额/收益，流水去重），父级总资产不减少
+          (child.funds || []).forEach(cf => {
+            const existing = (parent.funds || []).find(pf => pf.code === cf.code);
+            if (existing) {
+              existing.amount = (Number(existing.amount) || 0) + (Number(cf.amount) || 0);
+              existing.holdingProfit = (Number(existing.holdingProfit ?? existing.profit) || 0) + (Number(cf.holdingProfit ?? cf.profit) || 0);
+              existing.shares = (Number(existing.shares) || 0) + (Number(cf.shares) || 0);
+              const costBasis = (Number(existing.amount) || 0) - (Number(existing.holdingProfit) || 0);
+              existing.holdingRate = costBasis > 0 ? existing.holdingProfit / costBasis : 0;
+              existing.hold = existing.holdingRate;
+              (cf.transactions || []).forEach(t => {
+                const dup = (existing.transactions || []).some(x => x.type === t.type && x.date === t.date && Math.abs((x.amount || 0) - (t.amount || 0)) < 0.01);
+                if (!dup) {
+                  existing.transactions = existing.transactions || [];
+                  existing.transactions.unshift(t);
+                }
+              });
+            } else {
+              parent.funds = parent.funds || [];
+              parent.funds.push(cf);
+            }
+          });
+          if (Array.isArray(parent.children)) {
+            const index = parent.children.indexOf(childName);
+            if (index !== -1) parent.children.splice(index, 1);
+          }
+        }
+        delete s.accounts[childName];
+        window.savePortfolioState?.();
+        render('overview');
+        showToast(`已删除子账户「${childName}」，持仓已合并回父账户`);
+      });
+      return;
+    }
+
+    const subAccountCard = e.target.closest('[data-sub-account]');
+    if (subAccountCard && !editing) {
+      s.setActive(subAccountCard.dataset.subAccount);
+      render('portfolio');
+      return;
+    }
+
+    const subTab = e.target.closest('[data-sub-tab]');
+    if (subTab) {
+      s.setActive(subTab.dataset.subTab);
+      render('portfolio');
+      return;
+    }
+
+    const parentTab = e.target.closest('[data-parent-tab]');
+    if (parentTab) {
+      s.setActive(parentTab.dataset.parentTab);
+      render('portfolio');
+      return;
+    }
+
     const row=e.target.closest('[data-account]');
     if(row&&!editing){
       s.setActive(row.dataset.account);
@@ -1988,4 +2376,9 @@
   // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
   // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。
   s.render = render;
+  // 账户层级助手（供 account-tabs / portfolio-tabs / live-estimates 等脚本使用）
+  s.effectiveFunds = effectiveFundsOf;
+  s.rootAccounts = rootAccountsOf;
+  // 供详情页等脚本调用的 Apple 风格提示
+  window.showToast = showToast;
 })();

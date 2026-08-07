@@ -24,16 +24,17 @@
 
   try{
     const saved=JSON.parse(localStorage.getItem(storageKey)||'null');
+    // 只要存在已保存的 accounts（即使为空），就以保存内容为准，
+    // 避免删除默认账户后刷新又出现“主账户”
     if(saved&&saved.accounts&&typeof saved.accounts==='object'){
       const valid=Object.entries(saved.accounts).filter(([,account])=>
         account&&typeof account.name==='string'&&Array.isArray(account.funds)
       );
-      if(valid.length){
-        Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
-        valid.forEach(([name,account])=>{state.accounts[name]=account});
-        const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
-        if(active)originalSetActive(active);
-      }
+      Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
+      valid.forEach(([name,account])=>{state.accounts[name]=account});
+      const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
+      if(active)originalSetActive(active);
+      else originalSetActive('');
     }
   }catch(error){
     console.warn('Saved portfolio data could not be restored.',error);

@@ -12,7 +12,7 @@
       section.before(toolbar);
     }
     const tabs=toolbar.querySelector('.portfolio-account-tabs');
-    const accounts=Object.keys(state.accounts);
+    const accounts=Object.keys(state.accounts).filter(name=>!state.accounts[name]?.parent);
     if(tabs.dataset.accounts!==accounts.join('|')){
       tabs.dataset.accounts=accounts.join('|');
       tabs.innerHTML=accounts.map(n=>'<button class="account-segment" data-portfolio-account="'+n.replace(/"/g,'&quot;')+'">'+n.replace(/（朋友账户）/,'')+'</button>').join('');
