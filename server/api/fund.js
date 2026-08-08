@@ -187,6 +187,13 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  if (url.pathname === '/api/market/indices' && request.method === 'GET') {
+    const { fetchIndexQuotes } = require('../services/marketService');
+    const indices = await fetchIndexQuotes();
+    sendJson(response, 200, { success: true, indices });
+    return true;
+  }
+
   if (url.pathname === '/api/funds') {
     sendJson(response, 200, { success: true, funds: listFunds() });
     return true;

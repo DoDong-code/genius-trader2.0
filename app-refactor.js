@@ -453,6 +453,15 @@
     const selectedTab = window.__accountTabSelected || 'all';
     const showAccountMgmt = selectedTab === 'all';
     const adviceModule = showAccountMgmt ? '' : buildTodayAdviceModule(a);
+    const marketIndicesModule = `
+      <div class="market-indices" id="market-indices">
+        <div class="market-indices-head">
+          <span class="eyebrow">行情</span>
+          <span class="market-indices-sub">上证指数 · 沪深300 · 深证成指 · 科创50 · 创业板指 · 恒生科技 · 纳斯达克 · 标普500</span>
+        </div>
+        <div class="market-indices-grid">加载中…</div>
+      </div>
+    `;
     root.innerHTML = `
       <div class="kpis">
         <div class="kpi"><span class="kpi-label">当前账户总资产</span><strong class="kpi-value">${money(total)}</strong></div>
@@ -461,6 +470,7 @@
         <div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">¥0</strong><span class="kpi-sub">0.00%</span></div>
         <div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−¥9,839</strong><span class="kpi-sub">−19.12%</span></div>
       </div>
+      ${marketIndicesModule}
       ${adviceModule}
       ${showAccountMgmt ? `
       <section class="list-section account-section">
@@ -506,7 +516,58 @@
       ` : ''}
     `;
     if (!showAccountMgmt) scheduleTodayAdviceUpdate();
+    loadMarketIndices();
   }
+
+  let marketIndicesCache = { data: null, at: 0 };
+  async function loadMarketIndices() {
+    const box = document.getElementById('market-indices');
+    if (!box) return;
+    const grid = box.querySelector('.market-indices-grid');
+    const render = (indices, ok) => {
+      if (!grid) return;
+      if (!ok || !indices || !indices.length) {
+        grid.innerHTML = '<span style="color:#86868b;font-size:12px;">行情数据暂不可用</span>';
+        return;
+      }
+      grid.innerHTML = indices.map(item => {
+        const pct = Number(item.changePercent);
+        const okItem = item.ok && Number.isFinite(pct) && Number.isFinite(Number(item.price));
+        const up = pct > 0;
+        const color = okItem ? (up ? '#ff3b30' : '#34a853') : '#86868b';
+        const sign = okItem && up ? '+' : '';
+        const price = okItem
+          ? Number(item.price).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+          : '—';
+        const change = okItem ? `${sign}${pct.toFixed(2)}%` : '—';
+        return `
+          <div class="market-index-item">
+            <span class="market-index-name">${esc(item.name)}</span>
+            <strong class="market-index-price">${price}</strong>
+            <span class="market-index-change" style="color:${color}">${change}</span>
+          </div>`;
+      }).join('');
+    };
+    const now = Date.now();
+    if (marketIndicesCache.data && now - marketIndicesCache.at < 30000) {
+      render(marketIndicesCache.data, true);
+    } else {
+      try {
+        const res = await fetch('/api/market/indices');
+        const data = await res.json();
+        const indices = (data && data.indices) || [];
+        marketIndicesCache = { data: indices, at: Date.now() };
+        render(indices, true);
+      } catch (err) {
+        render(null, false);
+      }
+    }
+    // 60 秒后自动刷新；页面已离开该模块则停止
+    setTimeout(() => {
+      if (document.getElementById('market-indices')) loadMarketIndices();
+    }, 60000);
+  }
+
   function portfolio(){
     title.textContent = s.getActive();
     const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };

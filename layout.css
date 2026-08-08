@@ -1621,3 +1621,91 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 .detail-chart-legend .legend-sell {
   background: #ff9500;
 }
+
+/* 总览页行情模块（Apple 风格） */
+.market-indices {
+  background: #fff;
+  border: 0;
+  border-radius: 26px;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.10);
+  padding: 24px 28px 28px;
+  margin-bottom: 24px;
+}
+.market-indices-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.market-indices-sub {
+  font-size: 11px;
+  color: #86868b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.market-indices-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+.market-index-item {
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  border-radius: 14px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.market-index-name {
+  font-size: 12px;
+  color: #86868b;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.market-index-price {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: #1d1d1f;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.market-index-change {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 760px) {
+  .market-indices {
+    padding: 18px 16px 22px;
+    border-radius: 18px;
+    margin-bottom: 18px;
+  }
+  .market-indices-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  .market-indices-sub {
+    font-size: 10px;
+  }
+  .market-indices-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .market-index-item {
+    padding: 12px 12px;
+    border-radius: 12px;
+  }
+  .market-index-price {
+    font-size: 17px;
+  }
+}

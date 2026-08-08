@@ -443,6 +443,43 @@ async function fetchStockQuote(code) {
   return null;
 }
 
+// 主要指数行情（东方财富 secid）
+const INDEX_SECIDS = {
+  '上证指数': '1.000001',
+  '沪深300': '1.000300',
+  '深证成指': '0.399001',
+  '科创50': '1.000688',
+  '创业板指': '0.399006',
+  '恒生科技': '124.HSTECH',
+  '纳斯达克': '100.NDX',
+  '标普500': '100.SPX'
+};
+
+let indexQuotesCache = { data: null, at: 0 };
+const INDEX_CACHE_MS = 30 * 1000;
+
+async function fetchIndexQuotes() {
+  if (indexQuotesCache.data && Date.now() - indexQuotesCache.at < INDEX_CACHE_MS) {
+    return indexQuotesCache.data;
+  }
+  const entries = await Promise.all(Object.entries(INDEX_SECIDS).map(async ([name, secid]) => {
+    try {
+      const payload = await fetchStockPayload(secid);
+      const data = payload && payload.data;
+      return {
+        name,
+        price: data && Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
+        changePercent: data && Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
+        ok: Boolean(data && Number.isFinite(Number(data.f43)))
+      };
+    } catch (error) {
+      return { name, price: null, changePercent: null, ok: false };
+    }
+  }));
+  indexQuotesCache = { data: entries, at: Date.now() };
+  return entries;
+}
+
 module.exports = {
   fetchText,
   parseEstimate,
@@ -458,5 +495,6 @@ module.exports = {
   fetchHoldings,
   stockSecId,
   stockSecIds,
-  fetchStockQuote
+  fetchStockQuote,
+  fetchIndexQuotes
 };
