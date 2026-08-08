@@ -54,6 +54,31 @@
     return Object.values(s.accounts).filter(a => !a.parent);
   }
 
+  // 把一组基金合并进目标账户（同代码合并金额/收益/份额，流水去重）
+  function mergeFundsInto(target, funds) {
+    (funds || []).forEach(cf => {
+      const existing = (target.funds || []).find(pf => pf.code === cf.code);
+      if (existing) {
+        existing.amount = (Number(existing.amount) || 0) + (Number(cf.amount) || 0);
+        existing.holdingProfit = (Number(existing.holdingProfit ?? existing.profit) || 0) + (Number(cf.holdingProfit ?? cf.profit) || 0);
+        existing.shares = (Number(existing.shares) || 0) + (Number(cf.shares) || 0);
+        const costBasis = (Number(existing.amount) || 0) - (Number(existing.holdingProfit) || 0);
+        existing.holdingRate = costBasis > 0 ? existing.holdingProfit / costBasis : 0;
+        existing.hold = existing.holdingRate;
+        (cf.transactions || []).forEach(t => {
+          const dup = (existing.transactions || []).some(x => x.type === t.type && x.date === t.date && Math.abs((x.amount || 0) - (t.amount || 0)) < 0.01);
+          if (!dup) {
+            existing.transactions = existing.transactions || [];
+            existing.transactions.unshift(t);
+          }
+        });
+      } else {
+        target.funds = target.funds || [];
+        target.funds.push(cf);
+      }
+    });
+  }
+
   function buildAdviceText(diffPct, rules) {
     if (diffPct > 4) {
       let adviceText = '分批止盈 / 适当减仓';
@@ -338,7 +363,6 @@
       <section class="today-advice-section">
         <div class="today-advice-head">
           <div>
-            <p class="eyebrow">TODAY'S ACTIONS</p>
             <h2>今日操作建议</h2>
           </div>
           <div style="display:flex;align-items:center;gap:14px;">
@@ -404,7 +428,7 @@
       <section class="list-section account-section">
         <div class="section-head">
           <div><p class="eyebrow">账户管理</p><h2>选择账户</h2></div>
-          <button class="primary" data-action="toggle-edit">${editing ? '完成编辑' : '编辑'}</button>
+          <button class="primary" data-action="toggle-edit">${editing ? '完成' : '编辑'}</button>
           ${editing ? '<button class="secondary-button" data-action="add-account">新增账户</button>' : ''}
         </div>
         <div class="account-list">
@@ -439,7 +463,7 @@
             `;
           }).join('')}
         </div>
-        ${editing ? `<div class="account-delete-bar"><button class="danger-button" data-action="delete" ${!selected.size ? 'disabled' : ''}>删除所选</button></div>` : ''}
+        ${editing ? `<div class="account-delete-bar"><button class="danger-button" data-action="delete" ${!selected.size ? 'disabled' : ''}>删除所选</button><button class="secondary-button" data-action="move-accounts" ${!selected.size ? 'disabled' : ''}>移动</button></div>` : ''}
       </section>
       ` : ''}
     `;
@@ -637,7 +661,6 @@
         <!-- AI建议 Panel (Full-width, and "今日预估组合收益" removed) -->
         <div class="panel" style="padding: 28px; border-radius: 18px; display: flex; flex-direction: column; gap: 24px; background: linear-gradient(135deg, #ffffff 0%, #f9f9fb 100%); border: 1px solid rgba(0,0,0,0.04); box-sizing: border-box; width: 100%; margin-bottom: 28px;">
           <div>
-            <span style="font-size: 11px; font-weight: 700; color: #0071e3; letter-spacing: 0.1em; text-transform: uppercase;">AI ADVICE</span>
             <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0 6px 0;">
               <h2 style="font-size: 24px; font-weight: 700; color: #1d1d1f; margin: 0;">AI建议</h2>
               <details class="tooltip-details" style="position: relative; display: inline-block;">
@@ -671,7 +694,7 @@
             <div style="display: flex; gap: 10px; align-items: center; width: 100%; flex-wrap: wrap;">
               <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />
               <div style="display: flex; gap: 10px; align-items: center;">
-                <button id="ai-ask-submit-btn" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
+                <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
                 <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
                   <span class="btn-text">诊断</span>
                 </button>
@@ -704,12 +727,12 @@
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
                 <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
                   <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
-                  <strong style="font-size: 50px; line-height: 1.05; color: #1d1d1f; font-weight: 700; letter-spacing: -0.03em;">${healthScore}分</strong>
+                  <strong style="font-size: clamp(30px, 6vw, 50px); line-height: 1.05; color: #1d1d1f; font-weight: 500; letter-spacing: -0.03em;">${healthScore}分</strong>
                   <span style="font-size: 13px; font-weight: 600; color: ${healthColor}; margin-top: 2px;">${healthText}</span>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; border-left: 1px solid rgba(0,0,0,0.06); padding-left: 16px;">
                   <span style="font-size: 11px; color: #86868b; font-weight: 500;">风险评分</span>
-                  <strong style="font-size: 50px; line-height: 1.05; color: #1d1d1f; font-weight: 700; letter-spacing: -0.03em;">${riskScore}分</strong>
+                  <strong style="font-size: clamp(30px, 6vw, 50px); line-height: 1.05; color: #1d1d1f; font-weight: 500; letter-spacing: -0.03em;">${riskScore}分</strong>
                   <span style="font-size: 13px; font-weight: 600; color: ${riskScore >= 70 ? '#ff3b30' : riskScore >= 40 ? '#ff9500' : '#34a853'}; margin-top: 2px;">${riskLevel}风险</span>
                 </div>
               </div>
@@ -734,7 +757,6 @@
 
         <!-- Today's Operations and Recommendations Panel (Full Width Sibling) -->
         <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%; margin-bottom: 28px;">
-          <p class="eyebrow" style="color: #86868b;">REAL-TIME TACTICAL ACTIONS</p>
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px; margin-top: 6px;">
             <h2 style="font-size: 21px; font-weight: 650; margin: 0;">今日具体基金操作建议</h2>
             <details class="tooltip-details" style="position: relative; display: inline-block;">
@@ -843,7 +865,6 @@
         <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 28px; margin-top: 28px; width: 100%;">
           <!-- Allocation Analysis -->
           <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-            <p class="eyebrow" style="color: #86868b;">PORTFOLIO ALLOCATION</p>
             <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">资产配比分析</h2>
             <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">当前账户下的细分大类资产构成比例</p>
             ${allocHtml}
@@ -851,7 +872,6 @@
 
           <!-- Operating Strategy -->
           <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%;">
-            <p class="eyebrow" style="color: #86868b;">INVESTMENT DISCIPLINE</p>
             <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">投资操作策略</h2>
             <p style="font-size: 13px; color: #86868b; margin-bottom: 24px; margin-top: 0;">指导当前账户投资纪律的核心方针</p>
             ${strategyHtml}
@@ -860,7 +880,6 @@
 
         ${closedPositions.length ? `
         <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%; margin-top: 28px;">
-          <p class="eyebrow" style="color: #86868b;">CLOSED POSITIONS</p>
           <h2 style="font-size: 20px; font-weight: 650; margin-bottom: 8px; margin-top: 6px;">已清仓记录</h2>
           <div class="closed-list">
             ${closedPositions.map(c => `
@@ -978,6 +997,46 @@
         if (e.key === 'Enter') submit();
         else if (e.key === 'Escape') close(null);
       });
+    });
+  }
+
+  function showMoveAccountsDialog(sources, targetOptions) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay apple-dialog-overlay';
+      overlay.innerHTML = `
+        <div class="confirm-dialog apple-dialog" role="dialog" aria-modal="true">
+          <h2>移动账户</h2>
+          <p class="apple-dialog-message">将「${esc(sources.join('、'))}」的持仓移动到目标账户。</p>
+          <label style="display: block; margin-top: 16px; font-size: 12px; color: #6e6e73;">目标账户</label>
+          <select class="apple-dialog-input" style="width: 100%; margin-top: 6px;">
+            ${targetOptions.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+          </select>
+          <label style="display: flex; align-items: center; gap: 8px; margin-top: 14px; font-size: 13px; color: #1d1d1f; cursor: pointer;">
+            <input type="checkbox" id="move-keep-account" /> 移动后保留该账户（复制持仓到目标账户，原账户及持仓保留）
+          </label>
+          <div class="confirm-actions apple-dialog-actions">
+            <button type="button" class="apple-dialog-cancel" data-role="cancel">取消</button>
+            <button type="button" class="primary" data-role="ok">移动</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+      const close = result => {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 180);
+        resolve(result);
+      };
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || e.target.closest('[data-role="cancel"]')) close(null);
+        else if (e.target.closest('[data-role="ok"]')) {
+          close({
+            target: overlay.querySelector('select').value,
+            keep: overlay.querySelector('#move-keep-account').checked
+          });
+        }
+      });
+      overlay.querySelector('select').focus();
     });
   }
 
@@ -1257,7 +1316,6 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">DATA SOURCE API</span>
                 <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.datasource ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
@@ -1326,7 +1384,6 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">AI MODEL API</span>
                 <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.aimodel ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
@@ -1423,7 +1480,6 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">PROVIDERS</span>
                 <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.providers ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
@@ -1488,7 +1544,6 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #86868b; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(0,0,0,0.04); padding: 3px 8px; border-radius: 4px;">STRATEGY</span>
                 <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.strategy ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
@@ -1518,7 +1573,6 @@
                 </div>
               </div>
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; color: #ff3b30; font-family: system-ui; text-transform: uppercase; font-weight: 600; letter-spacing: 0.05em; background: rgba(255,59,48,0.05); padding: 3px 8px; border-radius: 4px;">DANGER ZONE</span>
                 <span class="toggle-arrow" style="font-size: 14px; color: #ff3b30; transition: transform 0.2s; transform: ${window.settingsCollapsedState.dangerzone ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
               </div>
             </div>
@@ -2282,27 +2336,7 @@
         const child = s.accounts[childName];
         if (parent && child) {
           // 子账户持仓合并回父账户（同代码合并金额/收益，流水去重），父级总资产不减少
-          (child.funds || []).forEach(cf => {
-            const existing = (parent.funds || []).find(pf => pf.code === cf.code);
-            if (existing) {
-              existing.amount = (Number(existing.amount) || 0) + (Number(cf.amount) || 0);
-              existing.holdingProfit = (Number(existing.holdingProfit ?? existing.profit) || 0) + (Number(cf.holdingProfit ?? cf.profit) || 0);
-              existing.shares = (Number(existing.shares) || 0) + (Number(cf.shares) || 0);
-              const costBasis = (Number(existing.amount) || 0) - (Number(existing.holdingProfit) || 0);
-              existing.holdingRate = costBasis > 0 ? existing.holdingProfit / costBasis : 0;
-              existing.hold = existing.holdingRate;
-              (cf.transactions || []).forEach(t => {
-                const dup = (existing.transactions || []).some(x => x.type === t.type && x.date === t.date && Math.abs((x.amount || 0) - (t.amount || 0)) < 0.01);
-                if (!dup) {
-                  existing.transactions = existing.transactions || [];
-                  existing.transactions.unshift(t);
-                }
-              });
-            } else {
-              parent.funds = parent.funds || [];
-              parent.funds.push(cf);
-            }
-          });
+          mergeFundsInto(parent, child.funds);
           if (Array.isArray(parent.children)) {
             const index = parent.children.indexOf(childName);
             if (index !== -1) parent.children.splice(index, 1);
@@ -2320,6 +2354,53 @@
     if (subAccountCard && !editing) {
       s.setActive(subAccountCard.dataset.subAccount);
       render('portfolio');
+      return;
+    }
+
+    const moveAccountsBtn = e.target.closest('[data-action="move-accounts"]');
+    if (moveAccountsBtn) {
+      const sources = [...selected];
+      if (!sources.length) return;
+      const targetOptions = Object.keys(s.accounts).filter(n => !sources.includes(n));
+      if (!targetOptions.length) {
+        showToast('没有可移动的目标账户', 'warning');
+        return;
+      }
+      showMoveAccountsDialog(sources, targetOptions).then(result => {
+        if (!result || !result.target) return;
+        const target = s.accounts[result.target];
+        if (!target) return;
+        sources.forEach(name => {
+          const src = s.accounts[name];
+          if (!src || name === result.target) return;
+          // 复制持仓（避免源/目标共享同一对象引用）
+          const copiedFunds = (src.funds || []).map(f => ({ ...f, transactions: Array.isArray(f.transactions) ? f.transactions.slice() : [] }));
+          mergeFundsInto(target, copiedFunds);
+          if (!result.keep) {
+            // 从其它账户的 children 引用中移除，子账户提升为根账户
+            Object.values(s.accounts).forEach(a => {
+              if (Array.isArray(a.children)) {
+                const i = a.children.indexOf(name);
+                if (i !== -1) a.children.splice(i, 1);
+              }
+            });
+            if (Array.isArray(src.children)) {
+              src.children.forEach(cn => { if (s.accounts[cn]) s.accounts[cn].parent = undefined; });
+            }
+            if (src.__source) {
+              providerApi('/api/portfolio/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ account_id: name })
+              }).catch(() => {});
+            }
+            delete s.accounts[name];
+          }
+        });
+        window.savePortfolioState?.();
+        render('overview');
+        showToast(`已移动 ${sources.length} 个账户到「${result.target}」`);
+      });
       return;
     }
 
@@ -2348,6 +2429,8 @@
     if(c)c.checked?selected.add(c.dataset.check):selected.delete(c.dataset.check);
     const d=root.querySelector('[data-action="delete"]');
     if(d)d.disabled=!selected.size;
+    const m=root.querySelector('[data-action="move-accounts"]');
+    if(m)m.disabled=!selected.size;
 
     if (e.target.id === 'ai-provider-select') {
       const provider = e.target.value;

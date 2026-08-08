@@ -533,7 +533,7 @@
     rangeButtons.forEach(button => button.addEventListener('click', () => renderRange(button)));
     recordButtons.forEach(button => button.addEventListener('click', () => renderRecord(button)));
     renderRange(rangeButtons.find(button => button.dataset.range === '1y') || rangeButtons[0]);
-    renderRecord(recordButtons.find(button => button.dataset.record === 'performance') || recordButtons[0]);
+    renderRecord(recordButtons.find(button => button.dataset.record === 'nav') || recordButtons[0]);
   }
 
   function holdingsMarkup(fund) {
@@ -895,9 +895,9 @@
           <div class="detail-section detail-record-section">
             <div class="detail-record-tabs" role="tablist" aria-label="历史数据类型">
               <button class="detail-record-tab active" type="button" role="tab"
-                aria-selected="true" data-record="performance">历史业绩</button>
+                aria-selected="true" data-record="nav">历史净值</button>
               <button class="detail-record-tab" type="button" role="tab"
-                aria-selected="false" data-record="nav">历史净值</button>
+                aria-selected="false" data-record="performance">历史业绩</button>
             </div>
             <div class="detail-record-content">
               <div class="detail-loading detail-loading-short" aria-label="加载历史业绩"></div>

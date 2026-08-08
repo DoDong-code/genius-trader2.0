@@ -19,14 +19,14 @@
     const del=root.querySelector('[data-action="delete"]');
     if(!del)return;
     del.disabled=!chosen;
-    const label=chosen?'🗑 删除 '+chosen+' 个账户':'🗑 删除';if(del.textContent!==label)del.textContent=label;
+    const label=chosen?'删除'+chosen:'删除';if(del.textContent!==label)del.textContent=label;
     del.setAttribute('aria-label',chosen?'删除 '+chosen+' 个账户':'未选择账户，删除不可用');
   }
   function arrange(){
     const section=root.querySelector('.account-section');if(!section)return;
     const head=section.querySelector('.section-head'),bar=section.querySelector('.account-delete-bar');
     if(!head)return;
-    if(bar){const del=bar.querySelector('[data-action="delete"]');if(del){del.className='danger-button account-delete-top';head.appendChild(del)}bar.remove()}
+    if(bar){const del=bar.querySelector('[data-action="delete"]');if(del){del.className='danger-button account-delete-top';del.style.order='1';head.appendChild(del)}const move=bar.querySelector('[data-action="move-accounts"]');if(move){move.className='secondary-button account-move-top';move.style.order='2';head.appendChild(move)}bar.remove()}
     const editing=!!section.querySelector('.account-edit-row');
     section.querySelectorAll('.account-add-external').forEach(button=>button.remove());
     const add=section.querySelector('[data-action="add-account"]'),done=head.querySelector('[data-action="toggle-edit"]'),del=head.querySelector('[data-action="delete"]');

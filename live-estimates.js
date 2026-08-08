@@ -80,6 +80,28 @@
     return holidays.indexOf(yyyymmdd) === -1;
   }
 
+  // QDII 类基金：今天结算上一交易日净值（如 8.7 交易，结算 8.6 净值）
+  var QDII_CODES = { '022184': true, '014002': true, '013309': true };
+  function isQdiiFund(fund) {
+    if (!fund) return false;
+    if (QDII_CODES[String(fund.code || '')]) return true;
+    return /QDII|全球|海外|恒生|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|港股|港美|道琼斯|欧洲/i.test(String(fund.name || ''));
+  }
+
+  function getPreviousTradingDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    while (true) {
+      d.setDate(d.getDate() - 1);
+      var yyyy = d.getFullYear();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      if (isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+        return yyyy + '-' + mm + '-' + dd;
+      }
+    }
+  }
+
   function setFundMeta(row, fund) {
     var meta = row && row.querySelector('.fund-info small');
     if (!meta || !fund) return;
@@ -273,7 +295,9 @@
         }
 
         var shanghaiToday = shanghaiDate();
-        var officialUpdated = Boolean(navDate && navDate === shanghaiToday && Number.isFinite(officialChange));
+        // QDII 基金今天结算上一交易日净值；普通基金结算当日净值
+        var expectedNavDate = isQdiiFund(fund) ? getPreviousTradingDay(shanghaiToday) : shanghaiToday;
+        var officialUpdated = Boolean(navDate && navDate === expectedNavDate && Number.isFinite(officialChange));
         var isTrading = isTradingDay(new Date());
 
         if (isTrading) {

@@ -807,7 +807,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-table-header {
     display: grid !important;
     grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
-    column-gap: 3px !important;
+    column-gap: 8px !important;
     align-items: center !important;
     width: 100% !important;
     padding: 6px 0 !important;
@@ -853,7 +853,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     display: grid !important;
     grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
     grid-template-rows: auto !important;
-    column-gap: 3px !important;
+    column-gap: 8px !important;
     padding-block: 10px !important;
     padding-top: 10px !important;
     padding-bottom: 10px !important;
@@ -996,8 +996,8 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-table-header,
   .fund-row,
   .holding-row {
-    grid-template-columns: minmax(0, 1.75fr) 54px 54px 56px !important;
-    column-gap: 2px !important;
+    grid-template-columns: minmax(0, 1.75fr) 62px 62px 64px !important;
+    column-gap: 6px !important;
   }
 
   .fund-info b,
@@ -1049,9 +1049,9 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 @media(max-width: 760px) {
   :root {
     --col-width-fund: minmax(0, 1.75fr);
-    --col-width-holdingProfit: 54px;
-    --col-width-todayProfit: 54px;
-    --col-width-amount: 56px;
+    --col-width-holdingProfit: 62px;
+    --col-width-todayProfit: 62px;
+    --col-width-amount: 64px;
   }
 }
 
@@ -1512,6 +1512,22 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 .fund-sub-tag {
   color: #0071e3;
   font-size: 11px;
+}
+.secondary-button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.account-section .section-head {
+  column-gap: 8px;
+}
+.account-section .section-head > button {
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .fund-row .fund-info,
+  .fund-row .fund-info b {
+    max-width: 33.333vw !important;
+  }
 }
 
 /* 基金详情走势图：成本虚线标签与买卖点图例 */
