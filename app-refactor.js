@@ -212,17 +212,34 @@
       deviationText = aiResult.deviationText || deviationText;
     }
     const aiRisk = aiResult && Number.isFinite(Number(aiResult.riskScore)) ? Number(aiResult.riskScore) : null;
-    const riskScore = aiRisk !== null ? Math.round(aiRisk * 0.6 + localRisk * 0.4) : localRisk;
+    const riskScore = aiRisk !== null ? Math.max(0, Math.min(100, Math.round(aiRisk))) : localRisk;
     const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
 
-    // 如何组合配比降低风险（供“持仓分析”卡片展示）
+    // 如何组合配比降低风险：AI 一句话建议优先，本地自适应规则兜底
+    const topAlloc = allocations[0];
+    const bondPct = (allocations.find(al => al.category === '债券类') || {}).pct || 0;
+    const goldPct = (allocations.find(al => al.category === '黄金类') || {}).pct || 0;
     let rebalanceSuggestion = '组合较为稳健，维持现有配置与纪律定投即可。';
-    if (maxCatPct > 65) {
-      rebalanceSuggestion = `单一板块占比过高（${maxCatPct.toFixed(0)}%），建议分散到 2-3 个行业，并增配债券类资产降低组合波动。`;
+    const aiRebalance = aiResult && typeof aiResult.rebalanceSuggestion === 'string' ? aiResult.rebalanceSuggestion.trim() : '';
+    if (aiRebalance) {
+      rebalanceSuggestion = aiRebalance;
+    } else if (maxCatPct > 65) {
+      if (topAlloc && topAlloc.category === '债券类') {
+        rebalanceSuggestion = `债券类占比过高（${maxCatPct.toFixed(0)}%），组合偏防守；可适度增加权益/海外资产的配置比例，并保持行业分散。`;
+      } else if (topAlloc && topAlloc.category === '权益类') {
+        const bondPart = bondPct > 0
+          ? `当前债券类约占 ${bondPct.toFixed(0)}%，可在现有基础上适度提高稳健资产占比，进一步降低波动`
+          : '建议增配债券/稳健类资产，降低组合波动';
+        rebalanceSuggestion = `权益类占比过高（${maxCatPct.toFixed(0)}%），建议分散到 2-3 个行业，${bondPart}。`;
+      } else {
+        rebalanceSuggestion = `「${topAlloc ? topAlloc.category : '其他'}」占比过高（${maxCatPct.toFixed(0)}%），建议适当分散，降低单一资产集中度。`;
+      }
     } else if (riskScore >= 70) {
-      rebalanceSuggestion = '风险偏高，建议降低权益/行业主题基金仓位，增配债券与稳健资产，并控制单一行业集中度。';
+      rebalanceSuggestion = (bondPct > 0 || goldPct > 0)
+        ? '风险偏高，建议适度降低权益/行业主题基金仓位，在现有稳健资产基础上进一步控制单一行业集中度。'
+        : '风险偏高，建议降低权益/行业主题基金仓位，增配债券与稳健资产，并控制单一行业集中度。';
     } else if (riskScore >= 40) {
-      rebalanceSuggestion = '风险适中，可小幅增加稳健资产（债券/黄金）占比，保持行业分散。';
+      rebalanceSuggestion = '风险适中，可小幅提高稳健资产（债券/黄金）占比，保持行业分散。';
     }
 
     // 逐基金统一决策行（本地规则 + AI 建议合并）

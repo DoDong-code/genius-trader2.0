@@ -24,6 +24,7 @@ export interface AnalysisResponse {
   deviationText: string;
   riskScore: number;
   summary: string;
+  rebalanceSuggestion?: string;
   suggestions: Array<{
     fund: string;
     code: string;
@@ -83,6 +84,7 @@ ${portfolioData.strategies && portfolioData.strategies.length > 0
   "deviationText": "大类资产偏离状态说明 (根据你对该组合各大类偏离情况的专业评价)",
   "riskScore": 评估风险分值 (0-100的数字),
   "summary": "今日操作建议的总结 (结合投资纪律核心策略，用一句话概括今天最应执行的操作与纪律提醒)",
+  "rebalanceSuggestion": "如何组合配比降低风险的一句话建议 (只用一句话，结合当前大类资产构成：若某大类占比过高则指出并给出对应的调仓方向，例如权益类偏高建议适度增配债券/稳健资产并分散行业，债券类偏高则建议组合偏防守、可适度增加权益/海外资产；不要盲目建议增配已有资产)",
   "suggestions": [
     {
       "fund": "基金名称",
