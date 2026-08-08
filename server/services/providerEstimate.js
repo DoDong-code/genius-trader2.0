@@ -47,8 +47,8 @@ function normalizeProviderEstimate(provider, raw, code, amount) {
   return estimate;
 }
 
-async function tryProviderEstimate(sourceName, code, amount) {
-  const credential = getCredential(sourceName);
+async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
+  const credential = await getCredential(sourceName, userId);
   if (!credential || credential.status !== 'connected' || !credential.token) return null;
   const provider = getProvider(sourceName);
   if (!provider || typeof provider.fetch_estimate !== 'function') return null;
@@ -74,8 +74,9 @@ async function fetchProviderEstimate(code, amount, options = {}) {
     if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
   }
 
+  const userId = Number(options.userId) || 0;
   const attempts = PROVIDER_ORDER.map(sourceName =>
-    tryProviderEstimate(sourceName, code, amount).catch(() => null)
+    tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
   );
   const results = await Promise.all(attempts);
   const hit = results.find(value => value) || null;

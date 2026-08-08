@@ -1709,3 +1709,70 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     font-size: 17px;
   }
 }
+
+/* 账号登录按钮与弹窗 */
+.auth-button {
+  margin-left: auto;
+  border: 0;
+  border-radius: 999px;
+  background: #0071e3;
+  color: #fff;
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 160ms ease, transform 160ms ease;
+  white-space: nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.auth-button:hover { background: #0077ed; }
+.auth-button:active { transform: scale(0.97); }
+.auth-dialog { text-align: left; }
+.auth-dialog h2 { text-align: center; }
+.auth-form { display: flex; flex-direction: column; gap: 12px; margin: 14px 0 18px; }
+.auth-form label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #6e6e73; }
+.auth-form input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  border-radius: 10px;
+  background: #f5f5f7;
+  color: #1d1d1f;
+  font: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.auth-form input:focus {
+  border-color: #0071e3;
+  box-shadow: 0 0 0 3px rgba(0, 113, 227, 0.15);
+}
+.auth-error {
+  color: #ff3b30;
+  font-size: 12px;
+  line-height: 1.5;
+  background: rgba(255, 59, 48, 0.06);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.auth-switch {
+  display: block;
+  margin: 14px auto 0;
+  border: 0;
+  background: none;
+  color: #0071e3;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+@media (max-width: 760px) {
+  .auth-button {
+    padding: 6px 12px;
+    font-size: 12px;
+    max-width: 140px;
+  }
+}

@@ -3,32 +3,34 @@
  *
  * 同步账户（养基宝-* / 小倍养基-*）的持仓写入服务端 portfolio 表，
  * 前端只做展示；手动账户仍保存在浏览器 localStorage，互不干扰。
+ *
+ * user_id=0 表示未登录/本地模式；登录用户使用自己的 user_id 隔离数据。
  */
-const { getDatabase, transaction } = require('../database/db');
+const { run, all, transaction } = require('../database/dbAsync');
 
-function upsertFund(fundCode, fundName) {
-  const db = getDatabase();
-  db.prepare(`
+function fundUpsertSql() {
+  return `
     INSERT INTO fund (fund_code, fund_name, created_at, updated_at)
-    VALUES (?, ?, datetime('now'), datetime('now'))
-    ON CONFLICT(fund_code) DO UPDATE SET fund_name = excluded.fund_name, updated_at = datetime('now')
-  `).run(String(fundCode), String(fundName || fundCode));
+    VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(fund_code) DO UPDATE SET fund_name = excluded.fund_name, updated_at = CURRENT_TIMESTAMP
+  `;
+}
+
+async function upsertFund(fundCode, fundName) {
+  await run(fundUpsertSql(), [String(fundCode), String(fundName || fundCode)]);
 }
 
 /**
- * 整账户替换：先清空该同步账户的持仓，再写入最新数据（覆盖重导语义）
- * @param {string} accountName 账户名（如 养基宝-天天基金）
+ * 整账户替换：先清空该用户的同步账户持仓，再写入最新数据（覆盖重同步语义）
+ * @param {string} accountName 账户名称（如 养基宝-天天基金）
  * @param {Array} funds Genius Trader 基金结构
+ * @param {number} userId 用户 ID，默认 0（未登录）
  */
-function replaceSyncedAccount(accountName, funds) {
-  transaction(db => {
-    db.prepare('DELETE FROM portfolio WHERE account_id = ?').run(String(accountName));
-    const insert = db.prepare(`
-      INSERT INTO portfolio (account_id, fund_code, shares, cost, amount, category, transactions, is_synced, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
-    `);
-    (funds || []).forEach(fund => {
-      if (!fund || !fund.code) return;
+async function replaceSyncedAccount(accountName, funds, userId = 0) {
+  await transaction(async ({ run: txRun }) => {
+    await txRun('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(accountName)]);
+    for (const fund of funds || []) {
+      if (!fund || !fund.code) continue;
       const amount = Number(fund.amount) || 0;
       const shares = Number(fund.shares) || 0;
       const costNav = Number(fund.costNav) || 0;
@@ -36,8 +38,12 @@ function replaceSyncedAccount(accountName, funds) {
       const cost = costNav > 0 && shares > 0
         ? costNav * shares
         : Math.max(0, amount - (Number(fund.holdingProfit) || 0));
-      upsertFund(fund.code, fund.name);
-      insert.run(
+      await txRun(fundUpsertSql(), [String(fund.code), String(fund.name || fund.code)]);
+      await txRun(`
+        INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, category, transactions, is_synced, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `, [
+        userId,
         String(accountName),
         String(fund.code),
         shares,
@@ -45,24 +51,23 @@ function replaceSyncedAccount(accountName, funds) {
         amount,
         String(fund.category || '基金'),
         JSON.stringify(Array.isArray(fund.transactions) ? fund.transactions : [])
-      );
-    });
+      ]);
+    }
   });
 }
 
 /**
- * 读取全部同步账户（Genius Trader 账户结构，供前端展示）
+ * 读取某用户的全部同步账户（Genius Trader 账户结构，供前端展示）
  */
-function listSyncedAccounts() {
-  const db = getDatabase();
-  const rows = db.prepare(`
+async function listSyncedAccounts(userId = 0) {
+  const rows = await all(`
     SELECT p.account_id, p.fund_code, p.shares, p.cost, p.amount, p.category, p.transactions,
            f.fund_name
     FROM portfolio p
     JOIN fund f ON f.fund_code = p.fund_code
-    WHERE p.is_synced = 1
+    WHERE p.is_synced = 1 AND p.user_id = ?
     ORDER BY p.account_id, p.created_at
-  `).all();
+  `, [userId]);
 
   const byAccount = new Map();
   rows.forEach(row => {
@@ -98,11 +103,10 @@ function listSyncedAccounts() {
 }
 
 /**
- * 清空某个同步账户
+ * 清空某用户的同步账户
  */
-function clearSyncedAccount(accountName) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM portfolio WHERE account_id = ?').run(String(accountName));
+async function clearSyncedAccount(accountName, userId = 0) {
+  await run('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(accountName)]);
 }
 
 module.exports = {

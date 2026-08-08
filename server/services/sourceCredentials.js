@@ -4,8 +4,9 @@
  * - token / refresh_token / cookie 使用 AES-256-GCM 加密后落库（密钥 SOURCE_SECRET_KEY）
  * - user_info 为 JSON 字符串（同样加密存储）
  * - status: connected / disconnected
+ * - user_id=0 表示未登录/本地模式；登录用户使用自己的 user_id 隔离凭证
  */
-const { getDatabase } = require('../database/db');
+const { run, get, all } = require('../database/dbAsync');
 const { encryptText, decryptText } = require('../utils/crypto');
 
 function rowToCredential(row) {
@@ -26,64 +27,65 @@ function rowToCredential(row) {
 /**
  * 读取凭证（解密后返回）
  */
-function getCredential(sourceName) {
-  const db = getDatabase();
-  const row = db.prepare('SELECT * FROM source_credentials WHERE source_name = ?').get(String(sourceName));
+async function getCredential(sourceName, userId = 0) {
+  const row = await get(
+    'SELECT * FROM source_credentials WHERE user_id = ? AND source_name = ?',
+    [userId, String(sourceName)]
+  );
   return rowToCredential(row);
 }
 
 /**
  * 保存/更新凭证（token 等敏感字段加密）
  */
-function saveCredential({ source_name, token, refresh_token, cookie, user_info, status = 'connected' }) {
-  const db = getDatabase();
-  db.prepare(`
-    INSERT INTO source_credentials (source_name, token, refresh_token, cookie, user_info, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-    ON CONFLICT(source_name) DO UPDATE SET
+async function saveCredential({ source_name, token, refresh_token, cookie, user_info, status = 'connected' }, userId = 0) {
+  await run(`
+    INSERT INTO source_credentials (user_id, source_name, token, refresh_token, cookie, user_info, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    ON CONFLICT(user_id, source_name) DO UPDATE SET
       token = excluded.token,
       refresh_token = excluded.refresh_token,
       cookie = excluded.cookie,
       user_info = excluded.user_info,
       status = excluded.status,
-      updated_at = datetime('now')
-  `).run(
+      updated_at = CURRENT_TIMESTAMP
+  `, [
+    userId,
     String(source_name),
     encryptText(token || ''),
     encryptText(refresh_token || ''),
     encryptText(cookie || ''),
     user_info ? JSON.stringify(user_info) : null,
     status
-  );
+  ]);
 }
 
 /**
  * 标记断开连接（保留记录，token 清空）
  */
-function disconnectCredential(sourceName) {
-  const db = getDatabase();
-  db.prepare(`
+async function disconnectCredential(sourceName, userId = 0) {
+  await run(`
     UPDATE source_credentials
-    SET status = 'disconnected', token = '', refresh_token = '', cookie = '', updated_at = datetime('now')
-    WHERE source_name = ?
-  `).run(String(sourceName));
+    SET status = 'disconnected', token = '', refresh_token = '', cookie = '', updated_at = CURRENT_TIMESTAMP
+    WHERE user_id = ? AND source_name = ?
+  `, [userId, String(sourceName)]);
 }
 
 /**
  * 删除凭证
  */
-function deleteCredential(sourceName) {
-  const db = getDatabase();
-  db.prepare('DELETE FROM source_credentials WHERE source_name = ?').run(String(sourceName));
+async function deleteCredential(sourceName, userId = 0) {
+  await run('DELETE FROM source_credentials WHERE user_id = ? AND source_name = ?', [userId, String(sourceName)]);
 }
 
 /**
  * 轻量状态（不返回敏感字段）
  */
-function listCredentialStatus() {
-  const db = getDatabase();
-  const rows = db.prepare('SELECT source_name, status, created_at, updated_at FROM source_credentials').all();
-  return rows;
+async function listCredentialStatus(userId = 0) {
+  return all(
+    'SELECT source_name, status, created_at, updated_at FROM source_credentials WHERE user_id = ?',
+    [userId]
+  );
 }
 
 module.exports = {

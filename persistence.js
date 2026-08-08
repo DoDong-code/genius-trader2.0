@@ -4,19 +4,34 @@
   const storageKey='genius-trader-portfolio-v2';
   const originalSetActive=state.setActive.bind(state);
 
+  function buildPersisted(){
+    // 同步账户由服务端权威存储，不写入本地/云端 JSON
+    const persisted={};
+    Object.keys(state.accounts).forEach(name=>{
+      const account=state.accounts[name];
+      if(account&&account.__source)return;
+      persisted[name]=account;
+    });
+    return { accounts:persisted, active:state.getActive() };
+  }
+
+  let cloudTimer=null;
+  function scheduleCloudSave(){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return;
+    clearTimeout(cloudTimer);
+    cloudTimer=setTimeout(()=>{
+      fetch('/api/account/state',{
+        method:'PUT',
+        headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
+        body:JSON.stringify({state:buildPersisted()})
+      }).catch(()=>{});
+    },400);
+  }
+
   function save(){
     try{
-      // 同步账户由服务端权威存储，不写入 localStorage
-      const persisted={};
-      Object.keys(state.accounts).forEach(name=>{
-        const account=state.accounts[name];
-        if(account&&account.__source)return;
-        persisted[name]=account;
-      });
-      localStorage.setItem(storageKey,JSON.stringify({
-        accounts:persisted,
-        active:state.getActive()
-      }));
+      localStorage.setItem(storageKey,JSON.stringify(buildPersisted()));
+      scheduleCloudSave();
     }catch(error){
       console.warn('Portfolio data could not be saved.',error);
     }
@@ -87,6 +102,49 @@
   if(corrected||migrated){
     save();
   }
+
+  function applyAccounts(saved){
+    if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
+    const valid=Object.entries(saved.accounts).filter(([,account])=>
+      account&&typeof account.name==='string'&&Array.isArray(account.funds)
+    );
+    Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
+    valid.forEach(([name,account])=>{state.accounts[name]=account});
+    const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
+    if(active)originalSetActive(active);
+    else originalSetActive('');
+    return true;
+  }
+
+  // 云端恢复：已登录时优先使用云端数据（首次登录时若云端为空则上传本地数据）
+  function restoreCloud(){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return;
+    window.auth.api('/api/account/state').then(data=>{
+      if(data&&data.state&&data.state.accounts&&Object.keys(data.state.accounts).length>0){
+        applyAccounts(data.state);
+        save();
+        rerender();
+      } else if(data&&data.state&&data.state.accounts){
+        // 云端为空：把本地数据作为首次迁移上传
+        scheduleCloudSave();
+      }
+    }).catch(()=>{});
+  }
+
+  function rerender(){
+    const tab=document.querySelector('.nav-tab.active');
+    if(tab)tab.click();
+  }
+
+  window.addEventListener('auth-changed',()=>{
+    if(window.auth&&window.auth.state&&window.auth.state.token){
+      restoreCloud();
+    }else{
+      save();
+      rerender();
+    }
+  });
+  restoreCloud();
 
   state.setActive=function(name){
     originalSetActive(name);

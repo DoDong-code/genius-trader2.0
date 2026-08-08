@@ -93,6 +93,7 @@ function initialize(db) {
 
     CREATE TABLE IF NOT EXISTS portfolio (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 0,
       account_id TEXT NOT NULL,
       fund_code TEXT NOT NULL,
       shares REAL NOT NULL DEFAULT 0,
@@ -100,7 +101,7 @@ function initialize(db) {
       amount REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE (account_id, fund_code),
+      UNIQUE (user_id, account_id, fund_code),
       FOREIGN KEY (fund_code) REFERENCES fund(fund_code) ON DELETE CASCADE
     );
 
@@ -122,13 +123,35 @@ function initialize(db) {
 
     CREATE TABLE IF NOT EXISTS source_credentials (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source_name TEXT NOT NULL UNIQUE,
+      user_id INTEGER NOT NULL DEFAULT 0,
+      source_name TEXT NOT NULL,
       token TEXT NOT NULL DEFAULT '',
       refresh_token TEXT NOT NULL DEFAULT '',
       cookie TEXT NOT NULL DEFAULT '',
       user_info TEXT,
       status TEXT NOT NULL DEFAULT 'disconnected',
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE (user_id, source_name)
+    );
+
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_data (
+      user_id INTEGER PRIMARY KEY,
+      data TEXT NOT NULL,
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
@@ -149,6 +172,69 @@ function initialize(db) {
   if (!portfolioColumns.some(column => column.name === 'is_synced')) {
     db.exec("ALTER TABLE portfolio ADD COLUMN is_synced INTEGER NOT NULL DEFAULT 0");
     db.exec("UPDATE portfolio SET is_synced = 1 WHERE account_id LIKE '养基宝-%' OR account_id LIKE '小倍养基-%'");
+  }
+
+  // 账号功能：同步账户 / 凭证按用户隔离（user_id=0 表示未登录/本地模式）
+  const credColumns = db.prepare('PRAGMA table_info(source_credentials)').all();
+  if (!credColumns.some(column => column.name === 'user_id')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN');
+    db.exec('ALTER TABLE source_credentials RENAME TO source_credentials_legacy');
+    db.exec(`
+      CREATE TABLE source_credentials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        source_name TEXT NOT NULL,
+        token TEXT NOT NULL DEFAULT '',
+        refresh_token TEXT NOT NULL DEFAULT '',
+        cookie TEXT NOT NULL DEFAULT '',
+        user_info TEXT,
+        status TEXT NOT NULL DEFAULT 'disconnected',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        UNIQUE (user_id, source_name)
+      )
+    `);
+    db.exec(`
+      INSERT INTO source_credentials (user_id, source_name, token, refresh_token, cookie, user_info, status, created_at, updated_at)
+      SELECT 0, source_name, token, refresh_token, cookie, user_info, status, created_at, updated_at FROM source_credentials_legacy
+    `);
+    db.exec('DROP TABLE source_credentials_legacy');
+    db.exec('COMMIT');
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+
+  const portfolioColumnsAfter = db.prepare('PRAGMA table_info(portfolio)').all();
+  if (!portfolioColumnsAfter.some(column => column.name === 'user_id')) {
+    db.exec('PRAGMA foreign_keys = OFF');
+    db.exec('BEGIN');
+    db.exec('ALTER TABLE portfolio RENAME TO portfolio_legacy');
+    db.exec(`
+      CREATE TABLE portfolio (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL DEFAULT 0,
+        account_id TEXT NOT NULL,
+        fund_code TEXT NOT NULL,
+        shares REAL NOT NULL DEFAULT 0,
+        cost REAL NOT NULL DEFAULT 0,
+        amount REAL NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        category TEXT NOT NULL DEFAULT '基金',
+        transactions TEXT NOT NULL DEFAULT '[]',
+        is_synced INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (user_id, account_id, fund_code),
+        FOREIGN KEY (fund_code) REFERENCES fund(fund_code) ON DELETE CASCADE
+      )
+    `);
+    db.exec(`
+      INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, created_at, updated_at, category, transactions, is_synced)
+      SELECT 0, account_id, fund_code, shares, cost, amount, created_at, updated_at, category, transactions, is_synced FROM portfolio_legacy
+    `);
+    db.exec('DROP TABLE portfolio_legacy');
+    db.exec('COMMIT');
+    db.exec('PRAGMA foreign_keys = ON');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_portfolio_account ON portfolio (account_id)');
   }
 }
 

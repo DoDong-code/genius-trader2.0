@@ -51,28 +51,97 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // ---- 账号认证 ----
+  if (url.pathname === '/api/auth/register' && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const { register } = require('../services/authService');
+    const result = await register(body.email, body.password);
+    sendJson(response, 200, { success: true, ...result });
+    return true;
+  }
+
+  if (url.pathname === '/api/auth/login' && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const { login } = require('../services/authService');
+    const result = await login(body.email, body.password);
+    sendJson(response, 200, { success: true, ...result });
+    return true;
+  }
+
+  if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
+    const { logout, tokenFromRequest } = require('../services/authService');
+    await logout(tokenFromRequest(request));
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
+  if (url.pathname === '/api/auth/me' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    sendJson(response, 200, { success: true, user });
+    return true;
+  }
+
+  // ---- 云端账户状态（登录后手动账户/策略持久化）----
+  if (url.pathname === '/api/account/state' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const { getUserState } = require('../services/accountStateService');
+    const user = await userFromRequest(request);
+    if (!user) {
+      sendJson(response, 401, { success: false, error: '请先登录' });
+      return true;
+    }
+    const state = await getUserState(Number(user.id));
+    sendJson(response, 200, { success: true, state });
+    return true;
+  }
+
+  if (url.pathname === '/api/account/state' && request.method === 'PUT') {
+    const { userFromRequest } = require('../services/authService');
+    const { saveUserState } = require('../services/accountStateService');
+    const user = await userFromRequest(request);
+    if (!user) {
+      sendJson(response, 401, { success: false, error: '请先登录' });
+      return true;
+    }
+    const body = await readJsonBody(request);
+    if (!body.state) {
+      sendJson(response, 400, { success: false, error: '缺少 state' });
+      return true;
+    }
+    await saveUserState(Number(user.id), body.state);
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
   if (url.pathname === '/api/portfolio/delete' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const { clearSyncedAccount } = require('../services/portfolioService');
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
     if (!body.account_id) {
       sendJson(response, 400, { success: false, error: '缺少 account_id' });
       return true;
     }
-    clearSyncedAccount(body.account_id);
+    await clearSyncedAccount(body.account_id, userId);
     sendJson(response, 200, { success: true });
     return true;
   }
 
   if (url.pathname === '/api/portfolio/rename' && request.method === 'POST') {
     const body = await readJsonBody(request);
-    const { transaction } = require('../database/db');
+    const { transaction } = require('../database/dbAsync');
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
     if (!body.from || !body.to) {
       sendJson(response, 400, { success: false, error: '缺少 from/to' });
       return true;
     }
-    transaction(db => {
-      db.prepare('DELETE FROM portfolio WHERE account_id = ?').run(String(body.to));
-      db.prepare('UPDATE portfolio SET account_id = ? WHERE account_id = ?').run(String(body.to), String(body.from));
+    await transaction(async ({ run }) => {
+      await run('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(body.to)]);
+      await run('UPDATE portfolio SET account_id = ? WHERE user_id = ? AND account_id = ?', [String(body.to), userId, String(body.from)]);
     });
     sendJson(response, 200, { success: true });
     return true;
@@ -81,11 +150,14 @@ async function handleFundApi(request, response, url) {
   if (url.pathname === '/api/portfolio/update' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const { replaceSyncedAccount } = require('../services/portfolioService');
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
     if (!body.account_id || !Array.isArray(body.funds)) {
       sendJson(response, 400, { success: false, error: '缺少 account_id 或 funds' });
       return true;
     }
-    replaceSyncedAccount(body.account_id, body.funds);
+    await replaceSyncedAccount(body.account_id, body.funds, userId);
     sendJson(response, 200, { success: true });
     return true;
   }
@@ -93,7 +165,9 @@ async function handleFundApi(request, response, url) {
   // 第三方 Provider API（养基宝 / 小倍养基）
   if (url.pathname.startsWith('/api/provider/')) {
     const { handleProviderApi } = require('./provider');
-    await handleProviderApi(request, response, url);
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    await handleProviderApi(request, response, url, user ? Number(user.id) : 0);
     return true;
   }
 
@@ -201,7 +275,10 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/portfolio/accounts' && request.method === 'GET') {
     const { listSyncedAccounts } = require('../services/portfolioService');
-    sendJson(response, 200, { success: true, accounts: listSyncedAccounts() });
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    sendJson(response, 200, { success: true, accounts: await listSyncedAccounts(userId) });
     return true;
   }
 
@@ -238,9 +315,11 @@ async function handleFundApi(request, response, url) {
     const amount = url.searchParams.has('amount')
       ? Number(url.searchParams.get('amount')) : undefined;
     const force = url.searchParams.get('force') === '1';
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
     // 估值优先级：小倍养基 / 养基宝（已登录）→ 本地引擎测算（兜底）
     const { fetchProviderEstimate } = require('../services/providerEstimate');
-    const estimate = (await fetchProviderEstimate(match[0], amount, { force }))
+    const estimate = (await fetchProviderEstimate(match[0], amount, { force, userId: user ? Number(user.id) : 0 }))
       || await calculateFundEstimate(match[0], { amount, force });
     sendJson(response, 200, { success: true, ...estimate });
     return true;

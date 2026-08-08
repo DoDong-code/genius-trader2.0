@@ -174,7 +174,7 @@ test('calculates self-derived fund and account estimates from holdings and secto
 });
 
 test('serves health, fund, history and portfolio estimate APIs', async () => {
-  const server = createServer();
+  const server = await createServer();
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const { port } = server.address();
   try {

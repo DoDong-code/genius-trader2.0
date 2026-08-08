@@ -46,26 +46,26 @@ test('Provider 注册表自动加载', () => {
 });
 
 test('凭证加密落库', async () => {
-  deleteCredential('yangjibao');
-  saveCredential({
+  await deleteCredential('yangjibao');
+  await saveCredential({
     source_name: 'yangjibao',
     token: 'secret-token-abc',
     refresh_token: 'refresh-xyz',
     user_info: { name: '测试' },
     status: 'connected'
   });
-  const cred = getCredential('yangjibao');
+  const cred = await getCredential('yangjibao');
   assert.equal(cred.token, 'secret-token-abc');
   assert.equal(cred.refresh_token, 'refresh-xyz');
   assert.deepEqual(cred.user_info, { name: '测试' });
   assert.equal(cred.status, 'connected');
 
-  disconnectCredential('yangjibao');
-  const after = getCredential('yangjibao');
+  await disconnectCredential('yangjibao');
+  const after = await getCredential('yangjibao');
   assert.equal(after.status, 'disconnected');
   assert.equal(after.token, '');
-  deleteCredential('yangjibao');
-  assert.equal(getCredential('yangjibao'), null);
+  await deleteCredential('yangjibao');
+  assert.equal(await getCredential('yangjibao'), null);
 });
 
 class StubProvider extends BaseProvider {
@@ -148,7 +148,7 @@ function apiUrl(route) {
 
 test('Provider API：登录→导入→退出 全链路（stub）', async () => {
   registry.registerProvider('stub', StubProvider);
-  deleteCredential('stub');
+  await deleteCredential('stub');
 
   // 未登录导入 → 401
   const resNoLogin = mockResponse();
@@ -167,7 +167,7 @@ test('Provider API：登录→导入→退出 全链路（stub）', async () => 
   await handleProviderApi(mockRequest('GET'), resStatus, apiUrl('/api/provider/stub/status?qr_id=qr-1'));
   assert.equal(resStatus.statusCode, 200);
   assert.equal(JSON.parse(resStatus.body).state, 'confirmed');
-  assert.equal(getCredential('stub').token, 'stub-token-1');
+  assert.equal((await getCredential('stub')).token, 'stub-token-1');
 
   // 查询凭证状态
   const resCred = mockResponse();
@@ -182,15 +182,15 @@ test('Provider API：登录→导入→退出 全链路（stub）', async () => 
   assert.equal(importData.accounts.length, 1);
   assert.equal(importData.accounts[0].funds[0].code, '000001');
   // 阶段1：导入结果已持久化到服务端权威库
-  const persisted = listSyncedAccounts();
+  const persisted = await listSyncedAccounts();
   assert.ok(persisted.some(a => a.name === '养基宝-测试账户'));
 
   // 退出登录
   const resLogout = mockResponse();
   await handleProviderApi(mockRequest('POST', {}), resLogout, apiUrl('/api/provider/stub/logout'));
   assert.equal(JSON.parse(resLogout.body).success, true);
-  assert.equal(getCredential('stub').status, 'disconnected');
-  clearSyncedAccount('养基宝-测试账户');
+  assert.equal((await getCredential('stub')).status, 'disconnected');
+  await clearSyncedAccount('养基宝-测试账户');
 
   registry.unregisterProvider('stub');
 });
@@ -201,8 +201,8 @@ test('未知数据源返回 404', async () => {
   assert.equal(res.statusCode, 404);
 });
 
-test('同步账户持久化与读取（portfolio 表）', () => {
-  replaceSyncedAccount('养基宝-测试', [{
+test('同步账户持久化与读取（portfolio 表）', async () => {
+  await replaceSyncedAccount('养基宝-测试', [{
     code: '000001',
     name: '测试基金',
     amount: 110,
@@ -213,7 +213,7 @@ test('同步账户持久化与读取（portfolio 表）', () => {
     category: '基金',
     transactions: [{ type: 'buy', amount: 100, date: '2026-08-01' }]
   }]);
-  const accounts = listSyncedAccounts();
+  const accounts = await listSyncedAccounts();
   const account = accounts.find(a => a.name === '养基宝-测试');
   assert.ok(account);
   assert.equal(account.funds.length, 1);
@@ -226,12 +226,12 @@ test('同步账户持久化与读取（portfolio 表）', () => {
   assert.equal(fund.transactions.length, 1);
   assert.equal(fund.transactions[0].type, 'buy');
 
-  clearSyncedAccount('养基宝-测试');
-  assert.equal(listSyncedAccounts().find(a => a.name === '养基宝-测试'), undefined);
+  await clearSyncedAccount('养基宝-测试');
+  assert.equal((await listSyncedAccounts()).find(a => a.name === '养基宝-测试'), undefined);
 });
 
 test('同步账户重命名 / 删除接口', async () => {
-  replaceSyncedAccount('养基宝-测试', [{
+  await replaceSyncedAccount('养基宝-测试', [{
     code: '000001',
     name: '测试基金',
     amount: 110,
@@ -246,8 +246,8 @@ test('同步账户重命名 / 删除接口', async () => {
     apiUrl('/api/portfolio/rename')
   );
   assert.equal(resRename.statusCode, 200);
-  assert.ok(listSyncedAccounts().some(a => a.name === '养基宝-测试2'));
-  assert.ok(!listSyncedAccounts().some(a => a.name === '养基宝-测试'));
+  assert.ok((await listSyncedAccounts()).some(a => a.name === '养基宝-测试2'));
+  assert.ok(!(await listSyncedAccounts()).some(a => a.name === '养基宝-测试'));
 
   const resDelete = mockResponse();
   await handleFundApi(
@@ -256,7 +256,7 @@ test('同步账户重命名 / 删除接口', async () => {
     apiUrl('/api/portfolio/delete')
   );
   assert.equal(resDelete.statusCode, 200);
-  assert.ok(!listSyncedAccounts().some(a => a.name === '养基宝-测试2'));
+  assert.ok(!(await listSyncedAccounts()).some(a => a.name === '养基宝-测试2'));
 });
 
 test('估值归一化：百分比 → GT 内部比率结构', () => {
@@ -295,19 +295,19 @@ class EstimateStubProvider extends BaseProvider {
 test('估值优先级：Provider 有凭证时优先返回', async () => {
   const realXbyj = require('../providers/xiaobeiyangji');
   registry.registerProvider('xiaobeiyangji', EstimateStubProvider);
-  deleteCredential('xiaobeiyangji');
+  await deleteCredential('xiaobeiyangji');
 
   // 无凭证 → 返回 null（走本地引擎兜底）
   const withoutLogin = await fetchProviderEstimate('000001', 1000, { force: true });
   assert.equal(withoutLogin, null);
 
   // 有凭证 → 返回 Provider 估值
-  saveCredential({ source_name: 'xiaobeiyangji', token: 'stub-token', status: 'connected' });
+  await saveCredential({ source_name: 'xiaobeiyangji', token: 'stub-token', status: 'connected' });
   const withLogin = await fetchProviderEstimate('000001', 1000, { force: true });
   assert.ok(withLogin);
   assert.equal(withLogin.estimate_source, 'xiaobeiyangji');
   assert.equal(withLogin.estimate_change, 0.0123);
 
-  deleteCredential('xiaobeiyangji');
+  await deleteCredential('xiaobeiyangji');
   registry.registerProvider('xiaobeiyangji', realXbyj);
 });

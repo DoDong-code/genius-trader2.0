@@ -34,8 +34,8 @@ function readJsonBody(request) {
   });
 }
 
-function credentialStatus(sourceName) {
-  const credential = getCredential(sourceName);
+async function credentialStatus(sourceName, userId) {
+  const credential = await getCredential(sourceName, userId);
   const loggedIn = Boolean(credential && credential.status === 'connected' && credential.token);
   return {
     logged_in: loggedIn,
@@ -45,7 +45,7 @@ function credentialStatus(sourceName) {
   };
 }
 
-async function handleProviderApi(request, response, url) {
+async function handleProviderApi(request, response, url, userId = 0) {
   const match = url.pathname.match(/^\/api\/provider\/([^/]+)\/([^/]+)\/?$/);
   if (!match) return false;
 
@@ -69,11 +69,11 @@ async function handleProviderApi(request, response, url) {
       if (qrId) {
         const state = await provider.checkQRCode(qrId);
         if (state.state === 'confirmed' && state.token) {
-          saveCredential({ source_name: sourceName, token: state.token, status: 'connected' });
+          await saveCredential({ source_name: sourceName, token: state.token, status: 'connected' }, userId);
         }
         return sendJson(response, 200, { success: true, ...state });
       }
-      return sendJson(response, 200, { success: true, ...credentialStatus(sourceName) });
+      return sendJson(response, 200, { success: true, ...(await credentialStatus(sourceName, userId)) });
     }
 
     if (action === 'sendSMS' && method === 'POST') {
@@ -91,17 +91,17 @@ async function handleProviderApi(request, response, url) {
         return sendJson(response, 400, { success: false, error: '缺少 phone 或 code 参数' });
       }
       const result = await provider.verifySMS(body.phone, body.code);
-      saveCredential({
+      await saveCredential({
         source_name: sourceName,
         token: result.token,
         user_info: result.user_info,
         status: 'connected'
-      });
+      }, userId);
       return sendJson(response, 200, { success: true, message: '登录成功' });
     }
 
     if (action === 'import' && method === 'POST') {
-      const credential = getCredential(sourceName);
+      const credential = await getCredential(sourceName, userId);
       if (!credential || credential.status !== 'connected' || !credential.token) {
         return sendJson(response, 401, { success: false, error: `未登录${provider.displayName}，请先登录` });
       }
@@ -110,17 +110,17 @@ async function handleProviderApi(request, response, url) {
         const payload = await normalizeProviderAccounts(provider);
         // 阶段1：同步账户持仓写入服务端权威库
         for (const account of payload.accounts || []) {
-          replaceSyncedAccount(account.name, account.funds);
+          await replaceSyncedAccount(account.name, account.funds, userId);
         }
         // 导入成功即刷新最后同步时间
-        saveCredential({
+        await saveCredential({
           source_name: sourceName,
           token: credential.token,
           refresh_token: credential.refresh_token,
           cookie: credential.cookie,
           user_info: credential.user_info,
           status: 'connected'
-        });
+        }, userId);
         return sendJson(response, 200, {
           success: true,
           provider: payload.provider,
@@ -130,7 +130,7 @@ async function handleProviderApi(request, response, url) {
         });
       } catch (importErr) {
         if (importErr.statusCode === 401 || /未登录|登录已过期|401/i.test(importErr.message || '')) {
-          disconnectCredential(sourceName);
+          await disconnectCredential(sourceName, userId);
           return sendJson(response, 401, {
             success: false,
             error: '登录已过期，请重新登录',
@@ -142,7 +142,7 @@ async function handleProviderApi(request, response, url) {
     }
 
     if (action === 'logout' && method === 'POST') {
-      disconnectCredential(sourceName);
+      await disconnectCredential(sourceName, userId);
       provider.logout();
       return sendJson(response, 200, { success: true });
     }
@@ -151,7 +151,7 @@ async function handleProviderApi(request, response, url) {
   } catch (err) {
     const statusCode = err.statusCode || 500;
     if (statusCode === 401) {
-      disconnectCredential(sourceName);
+      await disconnectCredential(sourceName, userId);
       return sendJson(response, 401, {
         success: false,
         error: '登录已过期，请重新登录',

@@ -108,18 +108,21 @@ function serveStatic(request, response, url) {
   });
 }
 
-function createServer() {
+async function createServer() {
   getDatabase();
   ensureInitialSeed();
+  const { ensureCloudSchema } = require('./database/dbAsync');
+  await ensureCloudSchema();
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
     try {
       if (url.pathname === '/api/health') {
+        const { isCloud } = require('./database/dbAsync');
         sendJson(response, 200, {
           success: true,
           service: 'fund-data',
-          database: databasePath(),
+          database: isCloud() ? 'postgres' : databasePath(),
           time: new Date().toISOString()
         });
         return;
@@ -150,11 +153,11 @@ function createServer() {
   });
 }
 
-function startServer(port = Number(process.env.PORT || process.env.FUND_API_PORT || 3000), host = '0.0.0.0') {
-  const server = createServer();
+async function startServer(port = Number(process.env.PORT || process.env.FUND_API_PORT || 3000), host = '0.0.0.0') {
+  const server = await createServer();
   server.listen(port, host, () => {
     console.log(`[genius-trader] Server running on http://${host}:${port}`);
-    console.log(`[genius-trader] SQLite database: ${databasePath()}`);
+    console.log(`[genius-trader] Database: ${require('./database/dbAsync').isCloud() ? 'PostgreSQL (cloud)' : databasePath()}`);
   });
   const shutdown = () => {
     server.close(() => {
@@ -168,7 +171,10 @@ function startServer(port = Number(process.env.PORT || process.env.FUND_API_PORT
 }
 
 if (require.main === module) {
-  startServer();
+  startServer().catch(error => {
+    console.error('[genius-trader] Failed to start server:', error);
+    process.exit(1);
+  });
 }
 
 module.exports = {

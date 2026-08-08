@@ -1,0 +1,24 @@
+# Render Blueprint：账号 + 云端 PostgreSQL 一键部署
+# 用法：Render 控制台 → New → Blueprint → 选择本仓库
+# 若已手动创建数据库，也可只部署 Web Service，并把 DATABASE_URL 配成现有数据库连接串
+services:
+  - type: web
+    name: genius-trader
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: SOURCE_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: genius-trader-db
+          property: connectionString
+
+databases:
+  - name: genius-trader-db
+    plan: free

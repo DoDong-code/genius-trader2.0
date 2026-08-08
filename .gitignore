@@ -12,3 +12,12 @@ server/data/cache/*
 design-implementation.png
 design-qa-comparison.png
 design-qa.md
+
+# Local secrets: never commit real API keys
+.env
+.env.*
+!.env.example
+
+# Runtime logs
+*.log
+server.out.log

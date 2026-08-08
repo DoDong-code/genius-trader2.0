@@ -1003,7 +1003,8 @@
   let providerQrTimer = null;
 
   function providerApi(path, options) {
-    return fetch(path, options).then(async res => {
+    const headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
+    return fetch(path, Object.assign({}, options, { headers })).then(async res => {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const err = new Error(data.error || `HTTP ${res.status}`);

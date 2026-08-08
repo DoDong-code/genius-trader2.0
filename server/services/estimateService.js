@@ -78,9 +78,9 @@ function upsertPosition(position) {
     throw new Error('持仓必须包含 account_id 和六位 fund_code');
   }
   getDatabase().prepare(`
-    INSERT INTO portfolio (account_id, fund_code, shares, cost, amount)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(account_id, fund_code) DO UPDATE SET
+    INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount)
+    VALUES (0, ?, ?, ?, ?, ?)
+    ON CONFLICT(user_id, account_id, fund_code) DO UPDATE SET
       shares = excluded.shares,
       cost = excluded.cost,
       amount = excluded.amount,
