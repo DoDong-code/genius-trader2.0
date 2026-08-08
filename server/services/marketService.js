@@ -458,8 +458,8 @@ const INDEX_SECIDS = {
 let indexQuotesCache = { data: null, at: 0 };
 const INDEX_CACHE_MS = 30 * 1000;
 
-async function fetchIndexQuotes() {
-  if (indexQuotesCache.data && Date.now() - indexQuotesCache.at < INDEX_CACHE_MS) {
+async function fetchIndexQuotes(force = false) {
+  if (!force && indexQuotesCache.data && Date.now() - indexQuotesCache.at < INDEX_CACHE_MS) {
     return indexQuotesCache.data;
   }
   const entries = await Promise.all(Object.entries(INDEX_SECIDS).map(async ([name, secid]) => {

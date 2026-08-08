@@ -520,7 +520,8 @@
   }
 
   let marketIndicesCache = { data: null, at: 0 };
-  async function loadMarketIndices() {
+  let marketIndicesTimer = null;
+  async function loadMarketIndices(force) {
     const box = document.getElementById('market-indices');
     if (!box) return;
     const grid = box.querySelector('.market-indices-grid');
@@ -549,11 +550,11 @@
       }).join('');
     };
     const now = Date.now();
-    if (marketIndicesCache.data && now - marketIndicesCache.at < 30000) {
+    if (!force && marketIndicesCache.data && now - marketIndicesCache.at < 30000) {
       render(marketIndicesCache.data, true);
     } else {
       try {
-        const res = await fetch('/api/market/indices');
+        const res = await fetch('/api/market/indices' + (force ? '?refresh=1' : ''));
         const data = await res.json();
         const indices = (data && data.indices) || [];
         marketIndicesCache = { data: indices, at: Date.now() };
@@ -563,10 +564,13 @@
       }
     }
     // 60 秒后自动刷新；页面已离开该模块则停止
-    setTimeout(() => {
+    if (marketIndicesTimer) clearTimeout(marketIndicesTimer);
+    marketIndicesTimer = setTimeout(() => {
       if (document.getElementById('market-indices')) loadMarketIndices();
     }, 60000);
   }
+
+  window.refreshMarketIndices = function () { return loadMarketIndices(true); };
 
   function portfolio(){
     title.textContent = s.getActive();
@@ -705,7 +709,7 @@
 
 
     root.innerHTML = `
-      <section class="analysis-page" style="max-width: 1200px !important; margin: 0 auto !important; padding: 24px 16px !important; box-sizing: border-box !important;">
+      <section class="analysis-page" style="width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;">
         <!-- Injected Custom Styles for Animation and Responsiveness -->
         <style>
           @keyframes rotate {
@@ -1434,7 +1438,7 @@
     }
 
     root.innerHTML = `
-      <section class="settings-page" style="max-width: 1200px !important; margin: 0 auto !important; padding: 24px 16px !important; box-sizing: border-box !important;">
+      <section class="settings-page" style="width: 100% !important; max-width: none !important; margin: 0 !important; padding: 0 !important; box-sizing: border-box !important;">
         <!-- Injected Custom Styles for Responsiveness and Accordion Animations -->
         <style>
           .settings-toggle-header:hover {

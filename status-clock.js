@@ -90,7 +90,14 @@
     button.classList.add('is-refreshing');
     button.querySelector('span').textContent = '刷新中…';
 
-    Promise.resolve(typeof window.refreshFundEstimates === 'function' ? window.refreshFundEstimates() : null)
+    var refreshTasks = [];
+    if (typeof window.refreshFundEstimates === 'function') {
+      refreshTasks.push(Promise.resolve(window.refreshFundEstimates()));
+    }
+    if (typeof window.refreshMarketIndices === 'function') {
+      refreshTasks.push(Promise.resolve(window.refreshMarketIndices()));
+    }
+    Promise.all(refreshTasks)
       .finally(function () {
         refresh();
         window.setTimeout(function () {

@@ -263,7 +263,8 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/market/indices' && request.method === 'GET') {
     const { fetchIndexQuotes } = require('../services/marketService');
-    const indices = await fetchIndexQuotes();
+    const force = url.searchParams.get('refresh') === '1';
+    const indices = await fetchIndexQuotes(force);
     sendJson(response, 200, { success: true, indices });
     return true;
   }
