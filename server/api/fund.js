@@ -78,6 +78,18 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  if (url.pathname === '/api/portfolio/update' && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const { replaceSyncedAccount } = require('../services/portfolioService');
+    if (!body.account_id || !Array.isArray(body.funds)) {
+      sendJson(response, 400, { success: false, error: '缺少 account_id 或 funds' });
+      return true;
+    }
+    replaceSyncedAccount(body.account_id, body.funds);
+    sendJson(response, 200, { success: true });
+    return true;
+  }
+
   // 第三方 Provider API（养基宝 / 小倍养基）
   if (url.pathname.startsWith('/api/provider/')) {
     const { handleProviderApi } = require('./provider');

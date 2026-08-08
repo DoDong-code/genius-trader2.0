@@ -146,6 +146,10 @@ function initialize(db) {
   if (!portfolioColumns.some(column => column.name === 'transactions')) {
     db.exec("ALTER TABLE portfolio ADD COLUMN transactions TEXT NOT NULL DEFAULT '[]'");
   }
+  if (!portfolioColumns.some(column => column.name === 'is_synced')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN is_synced INTEGER NOT NULL DEFAULT 0");
+    db.exec("UPDATE portfolio SET is_synced = 1 WHERE account_id LIKE '养基宝-%' OR account_id LIKE '小倍养基-%'");
+  }
 }
 
 function getDatabase() {

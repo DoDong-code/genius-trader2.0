@@ -5,9 +5,6 @@
  * 前端只做展示；手动账户仍保存在浏览器 localStorage，互不干扰。
  */
 const { getDatabase, transaction } = require('../database/db');
-const { PARENT_PREFIX } = require('./importProvider');
-
-const SYNC_PREFIXES = Object.values(PARENT_PREFIX); // ['养基宝', '小倍养基']
 
 function upsertFund(fundCode, fundName) {
   const db = getDatabase();
@@ -27,8 +24,8 @@ function replaceSyncedAccount(accountName, funds) {
   transaction(db => {
     db.prepare('DELETE FROM portfolio WHERE account_id = ?').run(String(accountName));
     const insert = db.prepare(`
-      INSERT INTO portfolio (account_id, fund_code, shares, cost, amount, category, transactions, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      INSERT INTO portfolio (account_id, fund_code, shares, cost, amount, category, transactions, is_synced, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
     `);
     (funds || []).forEach(fund => {
       if (!fund || !fund.code) return;
@@ -63,14 +60,13 @@ function listSyncedAccounts() {
            f.fund_name
     FROM portfolio p
     JOIN fund f ON f.fund_code = p.fund_code
+    WHERE p.is_synced = 1
     ORDER BY p.account_id, p.created_at
   `).all();
 
   const byAccount = new Map();
   rows.forEach(row => {
     const accountName = String(row.account_id);
-    // 只返回同步账户（按前缀识别），排除历史种子数据等非同步账户
-    if (!SYNC_PREFIXES.some(prefix => accountName.startsWith(prefix))) return;
     if (!byAccount.has(accountName)) {
       byAccount.set(accountName, { name: accountName, funds: [], strategy: [], closedPositions: [] });
     }

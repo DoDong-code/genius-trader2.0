@@ -32,7 +32,27 @@
   };
 
   function sectorNameOf(f) {
-    return (f && (FUND_SECTORS_BY_CODE[f.code] || f.category)) || '其他';
+    return (f && (FUND_SECTORS_BY_CODE[f.code] || f.sector || f.category)) || '其他';
+  }
+
+  // 板块 → 大类资产（资产配比分析用，与持仓页板块口径一致）
+  const ASSET_CLASS_BY_SECTOR = {
+    '半导体设备': '权益类', '产业趋势': '权益类', '数字经济': '权益类',
+    '灵活配置': '权益类', '混合': '权益类', '沪深300': '权益类',
+    '黄金': '黄金类', '黄金矿业': '黄金类',
+    '债券': '债券类', '纯债': '债券类',
+    '全球科技': '海外类', '全球智能科技': '海外类', '恒生科技': '海外类'
+  };
+  function assetClassOf(f) {
+    const sector = sectorNameOf(f);
+    if (ASSET_CLASS_BY_SECTOR[sector]) return ASSET_CLASS_BY_SECTOR[sector];
+    const raw = (f && f.category) || '';
+    if (['权益类', '黄金类', '债券类', '海外类'].includes(raw)) return raw;
+    const name = (f && f.name) || '';
+    if (/黄金|贵金属|金矿/.test(name)) return '黄金类';
+    if (/债|货币/.test(name)) return '债券类';
+    if (/全球|海外|恒生|纳指|标普|QDII|美股/.test(name)) return '海外类';
+    return '其他';
   }
 
   // 父账户有效持仓 = 自身持仓 + 全部子账户持仓（子账户带 subAccount 标记）
@@ -117,7 +137,7 @@
 
     const categoryTotals = {};
     funds.forEach(f => {
-      const cat = f.category || '其他';
+      const cat = assetClassOf(f);
       categoryTotals[cat] = (categoryTotals[cat] || 0) + (Number(f.amount) || 0);
     });
 
@@ -142,7 +162,7 @@
     }).sort((x, y) => y.amount - x.amount);
 
     const categoryTargets = buildCategoryTargets(strategyList);
-    const activeCategories = new Set(funds.map(f => f.category || '其他'));
+    const activeCategories = new Set(funds.map(f => assetClassOf(f)));
     let activeTargetsSum = 0;
     activeCategories.forEach(cat => { activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10; });
 
@@ -207,9 +227,10 @@
 
     // 逐基金统一决策行（本地规则 + AI 建议合并）
     const rows = funds.map(f => {
-      const cat = f.category || '其他';
-      const countInCat = funds.filter(x => (x.category || '其他') === cat).length;
-      const targetCategoryPct = categoryTargets[cat] !== undefined ? categoryTargets[cat] : (categoryTargets['其他'] || 10);
+      const cat = sectorNameOf(f);
+      const classCat = assetClassOf(f);
+      const countInCat = funds.filter(x => assetClassOf(x) === classCat).length;
+      const targetCategoryPct = categoryTargets[classCat] !== undefined ? categoryTargets[classCat] : (categoryTargets['其他'] || 10);
       const normalizedCategoryTarget = activeTargetsSum > 0 ? (targetCategoryPct / activeTargetsSum) * 100 : targetCategoryPct;
       const targetPct = countInCat > 0 ? (normalizedCategoryTarget / countInCat) : 0;
       const currentPct = totalAssets > 0 ? ((Number(f.amount) || 0) / totalAssets) * 100 : 0;
@@ -501,6 +522,7 @@
           <div><p class="eyebrow holdings-count"><span class="desktop-label">持仓 / ${funds.length} 项</span><span class="mobile-label">${funds.length} 项</span></p><h2 class="holdings-title">持仓列表</h2></div>
           <div class="section-head-actions">
             <button class="secondary-button column-customizer-btn" data-action="customize-columns"><span class="desktop-label">自定义表头</span><span class="mobile-label">自定义</span></button>
+            ${a.parent ? `<button class="secondary-button add-from-parent-btn" data-action="add-from-parent" title="从父账户添加基金">＋ 父账户基金</button>` : ''}
             <button class="primary add-fund-button" data-action="add-fund">增加基金</button>
           </div>
         </div>
@@ -1037,6 +1059,47 @@
         }
       });
       overlay.querySelector('select').focus();
+    });
+  }
+
+  function showAddFromParentDialog(parentFunds, parentName) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay apple-dialog-overlay';
+      overlay.innerHTML = `
+        <div class="confirm-dialog apple-dialog" role="dialog" aria-modal="true">
+          <h2>从父账户添加基金</h2>
+          <p class="apple-dialog-message">选择「${esc(parentName)}」中的基金添加到当前子账户。</p>
+          <div class="parent-fund-picker">
+            ${parentFunds.length ? parentFunds.map(f => `
+              <label class="parent-fund-item">
+                <input type="checkbox" value="${esc(f.code)}" />
+                <span><b>${esc(f.name)}</b><small>${f.code} · ${money(Number(f.amount) || 0)}</small></span>
+              </label>`).join('') : '<div style="color:#86868b;font-size:13px;">父账户暂无持仓</div>'}
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:#1d1d1f;cursor:pointer;">
+            <input type="checkbox" id="add-keep-parent" /> 父账户保留该基金（复制，不移出）
+          </label>
+          <div class="confirm-actions apple-dialog-actions">
+            <button type="button" class="apple-dialog-cancel" data-role="cancel">取消</button>
+            <button type="button" class="primary" data-role="ok">添加</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+      const close = result => {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 180);
+        resolve(result);
+      };
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay || e.target.closest('[data-role="cancel"]')) close(null);
+        else if (e.target.closest('[data-role="ok"]')) {
+          const codes = Array.from(overlay.querySelectorAll('.parent-fund-item input:checked')).map(i => i.value);
+          if (!codes.length) return;
+          close({ codes, copy: overlay.querySelector('#add-keep-parent').checked });
+        }
+      });
     });
   }
 
@@ -2366,7 +2429,7 @@
         showToast('没有可移动的目标账户', 'warning');
         return;
       }
-      showMoveAccountsDialog(sources, targetOptions).then(result => {
+      showMoveAccountsDialog(sources, targetOptions).then(async result => {
         if (!result || !result.target) return;
         const target = s.accounts[result.target];
         if (!target) return;
@@ -2398,8 +2461,61 @@
           }
         });
         window.savePortfolioState?.();
+        // 同步账户：把合并结果写回服务端，避免刷新后丢失
+        const syncedToUpdate = [];
+        if (target.__source) syncedToUpdate.push(result.target);
+        const updateResults = await Promise.all(syncedToUpdate.map(name => {
+          const acc = s.accounts[name];
+          if (!acc) return Promise.resolve(true);
+          return providerApi('/api/portfolio/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_id: name, funds: acc.funds })
+          }).then(() => true).catch(() => false);
+        }));
         render('overview');
         showToast(`已移动 ${sources.length} 个账户到「${result.target}」`);
+        if (updateResults.includes(false)) {
+          showToast('同步账户更新失败，刷新后可能丢失，请重试', 'warning');
+        }
+      });
+      return;
+    }
+
+    const addFromParentBtn = e.target.closest('[data-action="add-from-parent"]');
+    if (addFromParentBtn) {
+      const child = acct();
+      if (!child || !child.parent) return;
+      const parent = s.accounts[child.parent];
+      if (!parent || !(parent.funds || []).length) {
+        showToast('父账户暂无持仓可添加', 'warning');
+        return;
+      }
+      showAddFromParentDialog(parent.funds, parent.name).then(async result => {
+        if (!result || !result.codes.length) return;
+        let moved = 0;
+        result.codes.forEach(code => {
+          const index = (parent.funds || []).findIndex(f => f.code === code);
+          if (index === -1) return;
+          const fund = parent.funds[index];
+          const fundToAdd = result.copy
+            ? { ...fund, transactions: Array.isArray(fund.transactions) ? fund.transactions.slice() : [] }
+            : fund;
+          mergeFundsInto(child, [fundToAdd]);
+          if (!result.copy) parent.funds.splice(index, 1);
+          moved += 1;
+        });
+        window.savePortfolioState?.();
+        // 同步父账户移出后写回服务端，避免刷新后恢复
+        if (!result.copy && parent.__source) {
+          await providerApi('/api/portfolio/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ account_id: parent.name, funds: parent.funds })
+          }).catch(() => showToast('父账户同步更新失败，刷新后可能恢复', 'warning'));
+        }
+        render('portfolio');
+        showToast(`已添加 ${moved} 个基金到子账户「${child.name}」`);
       });
       return;
     }

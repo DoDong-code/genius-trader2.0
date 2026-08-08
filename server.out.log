@@ -1,50 +1,9 @@
 
   server\services\ai\index.js  18.8kb
 
-Done in 15ms
+Done in 14ms
 [genius-trader] Server running on http://0.0.0.0:3000
 [genius-trader] SQLite database: C:\Users\Administrator\Desktop\Codex3 基金\天才交易员\server\data\portfolio.sqlite
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
-[source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
 [source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
 [source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）
 [source-credentials] 未设置环境变量 SOURCE_SECRET_KEY，正在使用开发默认密钥（生产环境请务必配置）

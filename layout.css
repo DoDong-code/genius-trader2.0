@@ -1529,6 +1529,48 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     max-width: 33.333vw !important;
   }
 }
+.parent-fund-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.parent-fund-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 10px;
+  background: #f5f5f7;
+  cursor: pointer;
+}
+.parent-fund-item input {
+  width: 16px;
+  height: 16px;
+  accent-color: #0071e3;
+  flex: none;
+}
+.parent-fund-item span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.parent-fund-item b {
+  font-size: 13px;
+  color: #1d1d1f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.parent-fund-item small {
+  font-size: 11px;
+  color: #86868b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 
 /* 基金详情走势图：成本虚线标签与买卖点图例 */
 .detail-chart-cost-label {
