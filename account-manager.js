@@ -2,7 +2,7 @@
   var state=window.portfolioState;if(!state)return;
   var editing=false,selected=new Set(),root=document.querySelector('#view-root');
   var esc=function(s){return String(s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})};
-  var money=function(n){return '¥'+Math.round(n).toLocaleString('zh-CN')};
+  var money=function(n){return ''+Math.round(n).toLocaleString('zh-CN')};
   function refresh(){if(typeof state.persist==='function')state.persist();state.render('overview')}
   function decorate(){
     if(!document.querySelector('.account-section'))return;

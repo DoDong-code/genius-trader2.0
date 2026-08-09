@@ -6,7 +6,8 @@
   const root=document.querySelector('#view-root'),title=document.querySelector('#page-title');
   let view='portfolio',editing=false,selected=new Set();
   const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const money=n=>'¥'+Math.round(n).toLocaleString('zh-CN'), acct=()=>s.accounts[s.getActive()];
+  const money=n=>Math.round(n).toLocaleString('zh-CN'), acct=()=>s.accounts[s.getActive()];
+  const money2=n=>{const v=Number(n)||0;return (v<0?'−':'')+Math.abs(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});};
 
   function buildCategoryTargets(strategyList) {
     const t = { '权益类': 35, '黄金类': 20, '债券类': 25, '海外类': 20, '其他': 10 };
@@ -465,9 +466,9 @@
       <div class="kpis">
         <div class="kpi"><span class="kpi-label">当前账户总资产</span><strong class="kpi-value">${money(total)}</strong></div>
         <div class="kpi"><span class="kpi-label">昨日收益</span><strong class="kpi-value">${money(day)}</strong><span class="kpi-sub">${total ? (day / total * 100).toFixed(2) : '0.00'}%</span></div>
-        <div class="kpi"><span class="kpi-label">今日收益</span><strong class="kpi-value">¥0.00</strong><span class="kpi-sub"><span class="estimate-state">估算</span><span>0.00%</span></span></div>
-        <div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">¥0</strong><span class="kpi-sub">0.00%</span></div>
-        <div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−¥9,839</strong><span class="kpi-sub">−19.12%</span></div>
+        <div class="kpi"><span class="kpi-label">今日收益</span><strong class="kpi-value">0.00</strong><span class="kpi-sub"><span class="estimate-state">估算</span><span>0.00%</span></span></div>
+        <div class="kpi"><span class="kpi-label">持有收益</span><strong class="kpi-value">0</strong><span class="kpi-sub">0.00%</span></div>
+        <div class="kpi"><span class="kpi-label">累计收益</span><strong class="kpi-value">−9,839</strong><span class="kpi-sub">−19.12%</span></div>
       </div>
       ${marketIndicesModule}
       ${adviceModule}
@@ -626,9 +627,9 @@
           ${funds.map(f => `
             <button class="fund-row" data-code="${f.code}" title="${esc(f.name)}">
               <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${esc(f.category)}</span>${f.subAccount ? `<span class="fund-meta-sep"> · </span><span class="fund-sub-tag">${esc(f.subAccount)}</span>` : ''}</small></div>
-              <div class="fund-est" data-col-key="holdingProfit"><strong>${money(f.amount * f.hold)}</strong><span>${((f.hold * 100).toFixed(2))}%</span></div>
-              <div class="fund-today" data-col-key="todayProfit"><strong>${money(f.amount * f.today)}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
-              <div class="fund-amount" data-col-key="amount"><strong>${money(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
+              <div class="fund-est" data-col-key="holdingProfit"><strong>${(f.amount * f.hold > 0 ? '+' : '')}${money2(f.amount * f.hold)}</strong><span>${(f.hold > 0 ? '+' : '')}${((f.hold * 100).toFixed(2))}%</span></div>
+              <div class="fund-today" data-col-key="todayProfit"><strong>${money2(f.amount * f.today)}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
+              <div class="fund-amount" data-col-key="amount"><strong>${money2(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
             </button>
           `).join('')}
         </div>
@@ -1756,14 +1757,14 @@
             const oldAmt = f.amount;
             f.amount = Number((f.amount * 0.5).toFixed(2));
             acted = true;
-            actionMsg += `\n- 【减仓一半】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 调整为 ¥${f.amount.toLocaleString()}。`;
+            actionMsg += `\n- 【减仓一半】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 调整为 ${f.amount.toLocaleString()}。`;
           }
           // Check for "清仓" / "全部卖出" / "卖出全部" / "减仓100%" / "全部减掉"
           else if (/(清仓|全部卖出|卖出全部|减仓100%|全部减掉)/.test(userQuery)) {
             const oldAmt = f.amount;
             f.amount = 0;
             acted = true;
-            actionMsg += `\n- 【清仓退出】已将【${f.name}】（原金额 ¥${oldAmt.toLocaleString()}）清空（设为 ¥0）。`;
+            actionMsg += `\n- 【清仓退出】已将【${f.name}】（原金额 ${oldAmt.toLocaleString()}）清空（设为 0）。`;
           }
           // Check for specific percentage reduction like "减仓30%" or "减持20%"
           else if (/(减仓|减持|卖出|减持占比|减仓占比)(\d+)%/.test(userQuery)) {
@@ -1774,7 +1775,7 @@
               const ratio = (100 - pct) / 100;
               f.amount = Number((f.amount * ratio).toFixed(2));
               acted = true;
-              actionMsg += `\n- 【减仓 ${pct}%】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 减少至 ¥${f.amount.toLocaleString()}。`;
+              actionMsg += `\n- 【减仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
             }
           }
           // Check for specific percentage increase like "加仓30%" or "增持20%"
@@ -1786,7 +1787,7 @@
               const ratio = (100 + pct) / 100;
               f.amount = Number((f.amount * ratio).toFixed(2));
               acted = true;
-              actionMsg += `\n- 【加仓 ${pct}%】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 增加至 ¥${f.amount.toLocaleString()}。`;
+              actionMsg += `\n- 【加仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
             }
           }
           // Check for specific value reduction like "减仓1000元" or "卖出5000"
@@ -1798,7 +1799,7 @@
               const oldAmt = f.amount;
               f.amount = Math.max(0, Number((f.amount - val).toFixed(2)));
               acted = true;
-              actionMsg += `\n- 【减仓 ¥${val.toLocaleString()}】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 减少至 ¥${f.amount.toLocaleString()}。`;
+              actionMsg += `\n- 【减仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
             }
           }
           // Check for specific value increase like "加仓1000元" or "买入5000"
@@ -1810,7 +1811,7 @@
               const oldAmt = f.amount;
               f.amount = Number((f.amount + val).toFixed(2));
               acted = true;
-              actionMsg += `\n- 【加仓 ¥${val.toLocaleString()}】已将【${f.name}】持仓金额由 ¥${oldAmt.toLocaleString()} 增加至 ¥${f.amount.toLocaleString()}。`;
+              actionMsg += `\n- 【加仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
             }
           }
         }
@@ -2009,7 +2010,7 @@
           if (!isNaN(amt) && amt >= 0) {
             fund.amount = amt;
             window.savePortfolioState?.();
-            alert('持仓金额已成功修改为 ¥' + amt.toLocaleString());
+            alert('持仓金额已成功修改为 ' + amt.toLocaleString());
             render('analysis');
           } else {
             alert('请输入有效的正数金额！');

@@ -503,7 +503,7 @@
       if (fund && Number.isFinite(fund.holdingProfit)) {
         const strong = colEst?.querySelector('strong');
         const span = colEst?.querySelector('span');
-        const profit = `${fund.holdingProfit < 0 ? '−' : ''}¥${Math.abs(fund.holdingProfit).toLocaleString('zh-CN', {
+        const profit = `${fund.holdingProfit < 0 ? '−' : fund.holdingProfit > 0 ? '+' : ''}${Math.abs(fund.holdingProfit).toLocaleString('zh-CN', {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2
         })}`;

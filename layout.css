@@ -806,7 +806,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-head,
   .holding-table-header {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(62px, 0.74fr) minmax(56px, 0.62fr) minmax(62px, 0.74fr) !important;
     column-gap: 8px !important;
     align-items: center !important;
     width: 100% !important;
@@ -851,7 +851,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .fund-row,
   .holding-row {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(62px, 0.74fr) minmax(56px, 0.62fr) minmax(62px, 0.74fr) !important;
     grid-template-rows: auto !important;
     column-gap: 8px !important;
     padding-block: 10px !important;
@@ -996,7 +996,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-table-header,
   .fund-row,
   .holding-row {
-    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(62px, 0.74fr) minmax(56px, 0.62fr) minmax(62px, 0.74fr) !important;
     column-gap: 6px !important;
   }
 
@@ -1049,9 +1049,9 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 @media(max-width: 760px) {
   :root {
     --col-width-fund: minmax(0, 1fr);
-    --col-width-holdingProfit: minmax(64px, 0.62fr);
-    --col-width-todayProfit: minmax(64px, 0.62fr);
-    --col-width-amount: minmax(66px, 0.62fr);
+    --col-width-holdingProfit: minmax(62px, 0.74fr);
+    --col-width-todayProfit: minmax(56px, 0.62fr);
+    --col-width-amount: minmax(62px, 0.74fr);
   }
 }
 

@@ -28,7 +28,7 @@
   function formatMoney(value) {
     var amount = Number(value) || 0;
     var sign = amount < 0 ? '−' : amount > 0 ? '+' : '';
-    return sign + '¥' + Math.abs(amount).toLocaleString('zh-CN', {
+    return sign + '' + Math.abs(amount).toLocaleString('zh-CN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });

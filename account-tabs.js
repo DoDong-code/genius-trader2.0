@@ -9,7 +9,7 @@
   function money(value) {
     var amount = Number(value) || 0;
     var sign = amount < 0 ? '−' : '';
-    return sign + '¥' + Math.abs(amount).toLocaleString('zh-CN', {
+    return sign + '' + Math.abs(amount).toLocaleString('zh-CN', {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2
     });
@@ -103,7 +103,7 @@
     setText(items[0].querySelector('.kpi-label'), '总资产');
     setText(items[0].querySelector('.kpi-value'), money(data.total));
 
-    setText(items[1].querySelector('.kpi-value'), '¥0.00');
+    setText(items[1].querySelector('.kpi-value'), '0.00');
     setText(items[1].querySelector('.kpi-sub'), '0.00%');
 
     function formatMMDD(dateStr) {

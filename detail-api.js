@@ -34,7 +34,7 @@
   const money = value => {
     const number = Number(value) || 0;
     const prefix = number < 0 ? '−' : '';
-    return `${prefix}¥${Math.abs(number).toLocaleString('zh-CN', {
+    return `${prefix}${Math.abs(number).toLocaleString('zh-CN', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2
     })}`;
