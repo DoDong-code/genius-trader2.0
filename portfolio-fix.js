@@ -322,6 +322,9 @@
 
     const columnListContainer = overlay.querySelector('.column-list');
 
+    // HTML5 拖拽在触屏设备上不可用，触屏改用指针事件拖拽
+    const isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints || 0) > 0;
+
     function renderList() {
       columnListContainer.innerHTML = currentColumnOrder.map((key) => {
         const lbl = columnLabels[key];
@@ -334,7 +337,7 @@
           `;
         }
         return `
-          <div class="column-item" data-key="${key}" draggable="true">
+          <div class="column-item" data-key="${key}" draggable="${isTouchDevice ? 'false' : 'true'}">
             <span class="column-item-name">${lbl.desktop}</span>
           </div>
         `;
@@ -394,6 +397,60 @@
       columnListContainer.querySelectorAll('.column-item').forEach(el => el.style.opacity = '');
       modalDraggedKey = null;
     });
+
+    // 触屏设备：指针拖拽排序（替代不可用的 HTML5 拖拽）
+    if (isTouchDevice) {
+      let touchDragKey = null;
+      let touchPointerId = null;
+
+      columnListContainer.addEventListener('pointerdown', e => {
+        const item = e.target.closest('.column-item');
+        if (!item || item.dataset.key === 'fund') return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        touchDragKey = item.dataset.key;
+        touchPointerId = e.pointerId;
+        item.style.opacity = '0.5';
+        item.setPointerCapture(e.pointerId);
+        e.preventDefault();
+      });
+
+      columnListContainer.addEventListener('pointermove', e => {
+        if (!touchDragKey || e.pointerId !== touchPointerId) return;
+        e.preventDefault();
+        const targetEl = document.elementFromPoint(e.clientX, e.clientY);
+        const targetItem = targetEl && targetEl.closest('.column-item');
+        if (!targetItem || targetItem.dataset.key === 'fund' || targetItem.dataset.key === touchDragKey) return;
+        const draggedEl = columnListContainer.querySelector('.column-item[data-key="' + touchDragKey + '"]');
+        if (!draggedEl) return;
+        const order = [...currentColumnOrder];
+        const from = order.indexOf(touchDragKey);
+        const to = order.indexOf(targetItem.dataset.key);
+        if (from === -1 || to === -1) return;
+        order.splice(from, 1);
+        order.splice(to, 0, touchDragKey);
+        currentColumnOrder = order;
+        if (from < to) targetItem.after(draggedEl);
+        else targetItem.before(draggedEl);
+      });
+
+      const finishTouchDrag = () => {
+        touchDragKey = null;
+        touchPointerId = null;
+        columnListContainer.querySelectorAll('.column-item').forEach(el => { el.style.opacity = ''; });
+        saveColumnOrder(currentColumnOrder);
+        applyColumnOrder(currentColumnOrder);
+        enhance();
+      };
+
+      columnListContainer.addEventListener('pointerup', e => {
+        if (e.pointerId !== touchPointerId) return;
+        finishTouchDrag();
+      });
+      columnListContainer.addEventListener('pointercancel', e => {
+        if (e.pointerId !== touchPointerId) return;
+        finishTouchDrag();
+      });
+    }
   }
 
   function enhance() {

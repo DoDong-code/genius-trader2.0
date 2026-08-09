@@ -806,7 +806,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-head,
   .holding-table-header {
     display: grid !important;
-    grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
     column-gap: 8px !important;
     align-items: center !important;
     width: 100% !important;
@@ -851,7 +851,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .fund-row,
   .holding-row {
     display: grid !important;
-    grid-template-columns: minmax(0, 1.9fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) minmax(58px, 0.85fr) !important;
+    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
     grid-template-rows: auto !important;
     column-gap: 8px !important;
     padding-block: 10px !important;
@@ -996,7 +996,7 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .holding-table-header,
   .fund-row,
   .holding-row {
-    grid-template-columns: minmax(0, 1.75fr) 62px 62px 64px !important;
+    grid-template-columns: minmax(0, 1fr) minmax(64px, 0.62fr) minmax(64px, 0.62fr) minmax(66px, 0.62fr) !important;
     column-gap: 6px !important;
   }
 
@@ -1048,10 +1048,10 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 
 @media(max-width: 760px) {
   :root {
-    --col-width-fund: minmax(0, 1.75fr);
-    --col-width-holdingProfit: 62px;
-    --col-width-todayProfit: 62px;
-    --col-width-amount: 64px;
+    --col-width-fund: minmax(0, 1fr);
+    --col-width-holdingProfit: minmax(64px, 0.62fr);
+    --col-width-todayProfit: minmax(64px, 0.62fr);
+    --col-width-amount: minmax(66px, 0.62fr);
   }
 }
 
@@ -1122,22 +1122,31 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 }
 
 @media(max-width: 760px) {
-  .section-head-actions {
+  .section-head .section-head-actions {
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
     gap: 6px !important;
     margin-right: 0px !important;
     padding-left: 1px !important;
   }
+  .column-customizer-btn,
+  .section-head .add-fund-button {
+    align-self: center !important;
+  }
   .column-customizer-btn {
     padding-left: 12px !important;
     padding-right: 12px !important;
-    margin-right: 85px !important;
-    margin-bottom: -43px !important;
-    margin-top: 0px !important;
-    margin-left: -28px !important;
-    width: 61.1886px !important;
+    margin: 0 !important;
     height: 34.9933px !important;
     min-height: 34.9933px !important;
     font-size: 12px !important;
+  }
+  .section-head .add-fund-button {
+    height: 34px !important;
+    min-height: 34px !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
   }
 }
 
@@ -1146,6 +1155,9 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   flex-direction: column;
   gap: 10px;
   margin: 18px 0;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 .column-item {
   display: flex;
@@ -1156,9 +1168,68 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   border-radius: 10px;
   background: #f5f5f7;
   transition: background-color 150ms ease;
+  touch-action: none;
 }
 .column-item:hover {
   background: #e8e8ed;
+}
+
+@media (max-width: 760px) {
+  #ai-question-input {
+    min-height: 46px !important;
+    padding: 12px 14px !important;
+  }
+  .ai-ask-actions {
+    margin-left: auto !important;
+  }
+}
+
+/* 全局按钮统一：桌面 40px / 14px，移动端 34px / 12px */
+.primary,
+.secondary-button,
+.danger-button,
+.add-fund-button,
+.column-customizer-btn,
+.data-refresh-button,
+[data-action="add-fund"],
+[data-action="customize-columns"],
+.settings-page button[id$="-btn"],
+.apple-dialog-actions button,
+.confirm-actions button {
+  height: 40px !important;
+  min-height: 40px !important;
+  font-size: 14px !important;
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+}
+
+@media (max-width: 760px) {
+  .primary,
+  .secondary-button,
+  .danger-button,
+  .add-fund-button,
+  .column-customizer-btn,
+  .data-refresh-button,
+  [data-action="add-fund"],
+  [data-action="customize-columns"],
+  .settings-page button[id$="-btn"],
+  .apple-dialog-actions button,
+  .confirm-actions button {
+    height: 34px !important;
+    min-height: 34px !important;
+    font-size: 12px !important;
+  }
+  .settings-page [class^="panel-body-"] {
+    padding: 16px !important;
+  }
+  .settings-page [class^="panel-body-"] {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
 }
 .column-item-fixed {
   background: rgba(0,0,0,0.03);

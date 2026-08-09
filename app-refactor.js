@@ -457,7 +457,6 @@
       <div class="market-indices" id="market-indices">
         <div class="market-indices-head">
           <span class="eyebrow">行情</span>
-          <span class="market-indices-sub">上证指数 · 沪深300 · 深证成指 · 科创50 · 创业板指 · 恒生科技 · 纳斯达克 · 标普500</span>
         </div>
         <div class="market-indices-grid">加载中…</div>
       </div>
@@ -608,12 +607,14 @@
             <button class="primary add-fund-button" data-action="add-fund">增加基金</button>
           </div>
         </div>
+        ${childTabs.length ? `
         <div class="account-totals-row">
           <span>总资产 <b>${money(totalAssets)}</b></span>
           <span>持有收益 <b class="${totalProfit >= 0 ? 'positive' : 'negative'}">${money(totalProfit)}</b></span>
           <span>今日收益 <b class="${totalToday >= 0 ? 'positive' : 'negative'}">${money(totalToday)}</b></span>
           <span>收益率 <b class="${totalProfit >= 0 ? 'positive' : 'negative'}">${(profitRate * 100).toFixed(2)}%</b></span>
         </div>
+        ` : ''}
         ${subTabsHtml}
         <div class="holding-head">
           <span data-col-key="fund">基金</span>
@@ -767,15 +768,6 @@
           <div>
             <div style="display: flex; align-items: center; gap: 8px; margin: 4px 0 6px 0;">
               <h2 style="font-size: 24px; font-weight: 700; color: #1d1d1f; margin: 0;">AI建议</h2>
-              <details class="tooltip-details" style="position: relative; display: inline-block;">
-                <summary style="list-style: none; outline: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 11px; font-weight: 700; border: none; user-select: none; transition: all 0.2s;">
-                  ?
-                </summary>
-                <div class="tooltip-bubble" style="position: absolute; left: 0; top: 24px; z-index: 1000; width: 280px; padding: 14px 18px; border-radius: 12px; background: #ffffff; color: #1d1d1f; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.06); font-size: 13px; line-height: 1.6; font-weight: normal; text-align: left; white-space: normal;">
-                  <div style="position: absolute; top: -6px; left: 12px; transform: rotate(45deg); width: 10px; height: 10px; background: #ffffff; border-left: 1px solid rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06);"></div>
-                  点击诊断按钮重新诊断持仓配比，刷新各基金估算净值涨幅，并根据偏离度与投资策略约束生成智能调仓操作建议。
-                </div>
-              </details>
             </div>
           </div>
 
@@ -796,8 +788,10 @@
               </details>
             </div>
             <div style="display: flex; gap: 10px; align-items: center; width: 100%; flex-wrap: wrap;">
-              <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />
-              <div style="display: flex; gap: 10px; align-items: center;">
+              ${window.innerWidth <= 760 ? `
+              <textarea id="ai-question-input" rows="2" placeholder="向 AI 提问，或输入调仓指令，如：大成产业趋势混合C 减仓一半" style="flex: 1 1 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; line-height: 1.5; outline: none; transition: border-color 0.2s; resize: none; font-family: inherit; box-sizing: border-box; min-height: 46px;">${esc(window.lastAIUserQuestion || '')}</textarea>` : `
+              <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />`}
+              <div class="ai-ask-actions" style="display: flex; gap: 10px; align-items: center;">
                 <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
                 <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
                   <span class="btn-text">诊断</span>
@@ -863,15 +857,6 @@
         <div class="panel" style="padding: 28px; border-radius: 18px; box-sizing: border-box; width: 100%; margin-bottom: 28px;">
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 24px; margin-top: 6px;">
             <h2 style="font-size: 21px; font-weight: 650; margin: 0;">今日具体基金操作建议</h2>
-            <details class="tooltip-details" style="position: relative; display: inline-block;">
-              <summary style="list-style: none; outline: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 11px; font-weight: 700; border: none; user-select: none; transition: all 0.2s;">
-                ?
-              </summary>
-              <div class="tooltip-bubble" style="position: absolute; left: 0; top: 24px; z-index: 1000; width: 280px; padding: 14px 18px; border-radius: 12px; background: #ffffff; color: #1d1d1f; box-shadow: 0 8px 32px rgba(0,0,0,0.12); border: 1px solid rgba(0,0,0,0.06); font-size: 13px; line-height: 1.6; font-weight: normal; text-align: left; white-space: normal;">
-                <div style="position: absolute; top: -6px; left: 12px; transform: rotate(45deg); width: 10px; height: 10px; background: #ffffff; border-left: 1px solid rgba(0,0,0,0.06); border-top: 1px solid rgba(0,0,0,0.06);"></div>
-                通过科学测算当前仓位占比与标准化目标偏离度，结合投资策略方针对其进行校正限制，输出最严谨的基金申赎策略建议。
-              </div>
-            </details>
           </div>
 
           ${funds.length === 0 ? `
@@ -1425,7 +1410,7 @@
     if (strategyList.length > 0) {
       strategyItemsHtml = strategyList.map((st, idx) => `
         <div class="strategy-edit-item" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(0,0,0,0.06);">
-          <span style="font-size: 14px; color: #1d1d1f; padding-right: 12px; line-height: 1.4;">${esc(st)}</span>
+          <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; color: #1d1d1f; padding-right: 12px; line-height: 1.4;">${esc(st)}</span>
           <button class="delete-strategy-btn" data-strategy-idx="${idx}" style="background: none; border: 0; color: #ff3b30; font-size: 13px; cursor: pointer; padding: 4px 8px; font-weight: 500;">删除</button>
         </div>
       `).join('');
@@ -1473,7 +1458,7 @@
                   <input type="text" id="api-base-url-input" placeholder="留空默认使用当前服务器地址，例如: http://localhost:3000" 
                          value="${esc(window.FUND_API_BASE || '')}"
                          style="flex: 1; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box;" />
-                  <button class="primary" id="save-api-btn" style="padding: 8px 16px; border-radius: 8px; font-size: 13px; height: 38px; line-height: 1; white-space: nowrap; background: #34a853; font-weight: 600;">保存并应用</button>
+                  <button class="primary" id="save-api-btn" style="padding: 8px 16px; border-radius: 8px; font-size: 13px; height: 38px; line-height: 1; white-space: nowrap; background: #34a853; font-weight: 600;">保存</button>
                 </div>
               </div>
 
@@ -1511,7 +1496,7 @@
                 <div style="display: flex; gap: 8px; margin-bottom: 10px;">
                   <input type="text" id="test-fund-code-input" placeholder="000001" maxlength="6" value="000001"
                          style="width: 100px; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 12px; background: #fff; text-align: center; font-family: monospace; outline: none; box-sizing: border-box;" />
-                  <button class="primary" id="test-api-btn" style="flex: 1; padding: 8px 12px; border-radius: 6px; font-size: 12px; height: 32px; line-height: 1; white-space: nowrap; background: #0071e3; font-weight: 600;">一键测试接口调用</button>
+                  <button class="primary" id="test-api-btn" style="flex: 1; padding: 8px 12px; border-radius: 6px; font-size: 12px; height: 32px; line-height: 1; white-space: nowrap; background: #0071e3; font-weight: 600;">一键测试</button>
                 </div>
                 <div id="test-api-result" style="display: none; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid rgba(0,0,0,0.06); font-size: 12px; line-height: 1.5; color: #1d1d1f; overflow-x: auto;">
                 </div>
@@ -1572,7 +1557,7 @@
                 </div>
 
                 <div style="display: flex; justify-content: flex-end;">
-                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存并应用</button>
+                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
                 </div>
               </div>
 
@@ -1607,7 +1592,7 @@
                 </div>
 
                 <div style="display: flex; gap: 8px;">
-                  <button class="primary" id="test-ai-btn" style="flex: 1; padding: 8px 12px; border-radius: 6px; font-size: 12px; height: 32px; line-height: 1; white-space: nowrap; background: #34a853; border: 0; color: #fff; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center;">一键测试 AI 调用</button>
+                  <button class="primary" id="test-ai-btn" style="flex: 1; padding: 8px 12px; border-radius: 6px; font-size: 12px; height: 32px; line-height: 1; white-space: nowrap; background: #34a853; border: 0; color: #fff; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center;">一键测试</button>
                 </div>
                 <div id="test-ai-result" style="display: none; padding: 12px; border-radius: 8px; background: #fff; border: 1px solid rgba(0,0,0,0.06); font-size: 12px; line-height: 1.5; color: #1d1d1f; overflow-x: auto; width: 100%; box-sizing: border-box;">
                 </div>
@@ -1659,7 +1644,7 @@
                 <div id="xbyj-login-area" style="display: none;">
                   <div style="display: flex; gap: 8px; margin-bottom: 8px;">
                     <input type="tel" id="xbyj-phone" placeholder="手机号" style="flex: 1; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 13px; background: #fff; outline: none;" />
-                    <button class="secondary-button" id="xbyj-sms-btn" style="padding: 8px 12px; border-radius: 6px; font-size: 13px; white-space: nowrap;">发送验证码</button>
+                    <button class="secondary-button" id="xbyj-sms-btn" style="padding: 8px 12px; border-radius: 6px; font-size: 13px; white-space: nowrap;">验证码</button>
                   </div>
                   <div style="display: flex; gap: 8px;">
                     <input type="text" id="xbyj-code" placeholder="短信验证码" style="flex: 1; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 13px; background: #fff; outline: none;" />
@@ -1670,7 +1655,7 @@
                 <div id="xbyj-connected-area" style="display: none;">
                   <div style="font-size: 12px; color: #6e6e73; margin-bottom: 10px;">最后同步：<b id="xbyj-last-sync" style="color: #1d1d1f;">—</b></div>
                   <div style="display: flex; gap: 8px;">
-                    <button class="primary" id="xbyj-import-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">同步全部账户</button>
+                    <button class="primary" id="xbyj-import-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">同步全部</button>
                     <button class="secondary-button" id="xbyj-overwrite-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">覆盖重导</button>
                     <button id="xbyj-logout-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600;">退出登录</button>
                   </div>
@@ -1932,6 +1917,8 @@
   // Handle Enter key on AI Q&A Input
   root.addEventListener('keydown', e => {
     if (e.target.id === 'ai-question-input' && e.key === 'Enter') {
+      if (e.shiftKey) return;
+      e.preventDefault();
       const btn = document.querySelector('#ai-ask-submit-btn');
       if (btn) btn.click();
     }
@@ -1945,6 +1932,32 @@
         d.removeAttribute('open');
       }
     });
+
+    // 移动端：气泡展开后居中显示，避免超出屏幕
+    if (clickedDetails && window.innerWidth <= 760) {
+      const positionBubble = () => {
+        if (!clickedDetails.hasAttribute('open')) return;
+        const bubble = clickedDetails.querySelector('.tooltip-bubble');
+        const summary = clickedDetails.querySelector('summary');
+        if (!bubble || !summary) return;
+        const rect = summary.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const bubbleWidth = Math.min(320, vw - 32);
+        bubble.style.position = 'fixed';
+        bubble.style.left = '50%';
+        bubble.style.top = (rect.bottom + 8) + 'px';
+        bubble.style.transform = 'translateX(-50%)';
+        bubble.style.width = bubbleWidth + 'px';
+        bubble.style.maxWidth = (vw - 32) + 'px';
+        bubble.style.zIndex = '2000';
+        const arrow = bubble.firstElementChild;
+        if (arrow) {
+          const arrowLeft = Math.max(10, Math.min(bubbleWidth - 22, rect.left + rect.width / 2 - vw / 2 - 5));
+          arrow.style.left = arrowLeft + 'px';
+        }
+      };
+      clickedDetails.addEventListener('toggle', positionBubble, { once: true });
+    }
 
     const runAnalysisBtn = e.target.closest('#run-ai-analysis-btn');
     if (runAnalysisBtn) {
