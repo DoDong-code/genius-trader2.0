@@ -106,7 +106,8 @@
     menu.className = 'data-menu';
     var isLoggedIn = !!(window.auth && window.auth.state && window.auth.state.user);
     var authLabel = isLoggedIn ? escapeHtml(window.auth.state.user.email) : '登录 / 注册';
-    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>';
+    var logoutHtml = isLoggedIn ? '<button type="button" data-data-menu="logout"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(2px);" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="15 6 21 12 15 18"/></svg></span>退出登录</button>' : '';
+    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + logoutHtml;
     document.body.appendChild(menu);
     var rect = moreButton.getBoundingClientRect();
     menu.style.top = (rect.bottom + 10) + 'px'; menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
@@ -129,6 +130,9 @@
       if (type === 'export') downloadData();
       if (type === 'import') fileInput.click();
       if (type === 'restore') restoreDefaults();
+      if (type === 'logout') {
+        if (window.auth && window.auth.logout) window.auth.logout();
+      }
       return;
     }
     if (!event.target.closest('.data-menu') && !event.target.closest('.more-button')) closeMenu();

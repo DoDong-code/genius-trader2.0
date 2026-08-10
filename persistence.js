@@ -117,11 +117,14 @@
 
   function applyAccounts(saved){
     if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
+    // 保留当前同步账户（服务端权威），仅用云端数据覆盖本地账户
+    const syncAccounts=Object.entries(state.accounts).filter(([,a])=>a&&(a.accountType==='sync'||(!a.accountType&&a.__source)));
     const valid=Object.entries(saved.accounts).filter(([,account])=>
       account&&typeof account.name==='string'&&Array.isArray(account.funds)
     );
     Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
     valid.forEach(([name,account])=>{normalizeAccount(account);state.accounts[name]=account});
+    syncAccounts.forEach(([name,account])=>{state.accounts[name]=account});
     const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
     if(active)originalSetActive(active);
     else originalSetActive('');
@@ -164,4 +167,27 @@
   };
   state.persist=save;
   window.savePortfolioState=save;
+  // 手动操作：备份云端 / 恢复本地
+  async function backupToCloud(){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
+    const response=await fetch('/api/account/state',{
+      method:'PUT',
+      headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
+      body:JSON.stringify({state:buildPersisted()})
+    });
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    return true;
+  }
+  async function restoreFromCloud(){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
+    const data=await window.auth.api('/api/account/state');
+    const applied=applyAccounts(data&&data.state);
+    if(applied){
+      save();
+      rerender();
+    }
+    return applied;
+  }
+  window.backupToCloud=backupToCloud;
+  window.restoreFromCloud=restoreFromCloud;
 })();

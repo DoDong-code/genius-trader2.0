@@ -176,20 +176,53 @@
 
   function openAccountMenu() {
     const { layer, close } = overlay(`
-      <div class="confirm-dialog apple-dialog auth-dialog" role="dialog" aria-modal="true">
+      <div class="confirm-dialog apple-dialog auth-dialog" role="dialog" aria-modal="true" style="position: relative;">
+        <button type="button" data-role="cancel" aria-label="关闭" style="position: absolute; right: 14px; top: 14px; width: 30px; height: 30px; border: 0; border-radius: 50%; background: #f0f0f2; color: #6e6e73; font-size: 17px; line-height: 1; cursor: pointer;">×</button>
         <h2>已登录</h2>
         <p class="apple-dialog-message">${escapeHtml(state.user ? state.user.email : '')}，数据已同步到云端。</p>
-        <div class="confirm-actions apple-dialog-actions">
-          <button type="button" class="apple-dialog-cancel" data-role="cancel">取消</button>
-          <button type="button" class="apple-dialog-danger" id="auth-logout-btn">退出登录</button>
+        <div style="display: flex; gap: 10px; margin: 4px 0 0;">
+          <button type="button" class="secondary-button" id="auth-backup-btn" style="flex: 1;">备份云端</button>
+          <button type="button" class="secondary-button" id="auth-restore-btn" style="flex: 1;">恢复本地</button>
         </div>
       </div>
     `);
-    layer.querySelector('#auth-logout-btn').addEventListener('click', async () => {
-      close();
-      await logout();
-      const activeTab = document.querySelector('.nav-tab.active');
-      if (activeTab) activeTab.click();
+    const backupBtn = layer.querySelector('#auth-backup-btn');
+    const restoreBtn = layer.querySelector('#auth-restore-btn');
+    backupBtn.addEventListener('click', async () => {
+      backupBtn.disabled = true;
+      backupBtn.textContent = '备份中…';
+      try {
+        const ok = await window.backupToCloud();
+        if (ok) window.showToast('已备份到云端');
+        else window.showToast('请先登录账号', 'warning');
+      } catch (error) {
+        window.showToast('备份失败：' + (error.message || '网络错误'), 'error');
+      } finally {
+        backupBtn.disabled = false;
+        backupBtn.textContent = '备份云端';
+      }
+    });
+    restoreBtn.addEventListener('click', async () => {
+      const confirmRestore = await window.showAppleDialog({
+        title: '恢复本地',
+        message: '将用云端数据覆盖当前本地账户数据（同步账户不受影响）。是否继续？',
+        okText: '恢复',
+        cancelText: '取消',
+        danger: true
+      });
+      if (!confirmRestore) return;
+      restoreBtn.disabled = true;
+      restoreBtn.textContent = '恢复中…';
+      try {
+        const ok = await window.restoreFromCloud();
+        if (ok) window.showToast('已从云端恢复');
+        else window.showToast('云端暂无数据，或请先登录账号', 'warning');
+      } catch (error) {
+        window.showToast('恢复失败：' + (error.message || '网络错误'), 'error');
+      } finally {
+        restoreBtn.disabled = false;
+        restoreBtn.textContent = '恢复本地';
+      }
     });
   }
 
