@@ -91,6 +91,12 @@
     return /QDII|全球|海外|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|道琼斯|欧洲/i.test(fundName);
   }
 
+  function providerDisplayName(source) {
+    if (source === 'xiaobeiyangji') return '小倍';
+    if (source === 'yangjibao') return '养基宝';
+    return null;
+  }
+
   function getPreviousTradingDay(dateStr) {
     var parts = dateStr.split('-');
     var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -178,7 +184,30 @@
     }
   }
 
-  function markEstimateBadge(row, fund) {
+  function markProviderUpdated(row, date, fund, label) {
+    var meta = row.querySelector('.fund-info small');
+    if (!meta) return;
+    setFundMeta(row, fund || currentFund(row.dataset.code));
+
+    // Remove estimate badge if present
+    var estBadge = meta.querySelector('.nav-estimate-badge');
+    if (estBadge) estBadge.remove();
+
+    var mmddHyphen = formatMMDD(date);
+    var mmddNoHyphen = mmddHyphen.replace('-', '');
+    var badge = meta.querySelector('.nav-updated-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-updated-badge';
+    }
+    badge.innerHTML = '<span class="desktop-tag-text">' + label + mmddNoHyphen + '</span><span class="mobile-tag-text">' + mmddHyphen + '</span>';
+    badge.title = label + '净值更新至 ' + date;
+    if (meta.firstChild !== badge) {
+      meta.insertBefore(badge, meta.firstChild);
+    }
+  }
+
+  function markEstimateBadge(row, fund, label) {
     var meta = row.querySelector('.fund-info small');
     if (!meta) return;
     setFundMeta(row, fund || currentFund(row.dataset.code));
@@ -192,8 +221,9 @@
       badge = document.createElement('span');
       badge.className = 'nav-estimate-badge';
     }
-    badge.innerHTML = '<span class="desktop-tag-text">估算</span><span class="mobile-tag-text">估算</span>';
-    badge.title = '今日估算数据';
+    var text = label || '估算';
+    badge.innerHTML = '<span class="desktop-tag-text">' + text + '</span><span class="mobile-tag-text">' + text + '</span>';
+    badge.title = label ? label + '实时估值' : '今日估算数据';
     if (meta.firstChild !== badge) {
       meta.insertBefore(badge, meta.firstChild);
     }
@@ -302,13 +332,19 @@
         var expectedNavDate = isQdiiFund(fund) ? getPreviousTradingDay(shanghaiToday) : shanghaiToday;
         var officialUpdated = Boolean(navDate && navDate === expectedNavDate && Number.isFinite(officialChange));
         var isTrading = isTradingDay(new Date());
+        var estimateSource = estimate && (estimate.source || estimate.estimate_source);
+        var providerLabel = providerDisplayName(estimateSource);
+        var providerDataToday = providerLabel && estimate && String(estimate.estimate_time || '').slice(0, 10) === shanghaiToday;
 
         if (isTrading) {
           if (officialUpdated) {
             fund.navUpdatedAt = navDate;
             markNavUpdated(row, navDate, fund);
+          } else if (providerLabel && providerDataToday) {
+            fund.navUpdatedAt = shanghaiToday;
+            markProviderUpdated(row, shanghaiToday, fund, providerLabel);
           } else {
-            markEstimateBadge(row, fund);
+            markEstimateBadge(row, fund, providerLabel);
           }
         } else {
           if (navDate) {

@@ -8,6 +8,34 @@
   const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=n=>Math.round(n).toLocaleString('zh-CN'), acct=()=>s.accounts[s.getActive()];
   const money2=n=>{const v=Number(n)||0;return (v<0?'−':'')+Math.abs(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});};
+  // 账户类型：sync（同步账户）/ local（本地账户）。兼容旧 __source 数据。
+  function ensureAccountType(acc) {
+    if (!acc || typeof acc !== 'object') return;
+    if (acc.accountType === 'sync' || acc.accountType === 'local') return;
+    if (acc.__source) {
+      acc.accountType = 'sync';
+      acc.syncSource = acc.syncSource || acc.__source;
+    } else {
+      acc.accountType = 'local';
+    }
+    if (acc.accountType === 'local') acc.syncSource = acc.syncSource || null;
+  }
+  function isSyncAccount(acc) {
+    return Boolean(acc && (acc.accountType === 'sync' || (!acc.accountType && acc.__source)));
+  }
+  // 同步账户 → 本地账户（解除同步，保留数据与来源记录）
+  function convertAccountToLocal(acc) {
+    if (!acc || !isSyncAccount(acc)) return;
+    acc.originalSource = acc.syncSource || acc.__source || 'sync';
+    acc.accountType = 'local';
+    acc.syncSource = null;
+    acc.convertedFromSync = true;
+    acc.convertedTime = new Date().toISOString();
+    delete acc.__source;
+  }
+  window.ensureAccountType = ensureAccountType;
+  window.isSyncAccount = isSyncAccount;
+  window.convertAccountToLocal = convertAccountToLocal;
 
   function buildCategoryTargets(strategyList) {
     const t = { '权益类': 35, '黄金类': 20, '债券类': 25, '海外类': 20, '其他': 10 };
@@ -481,7 +509,7 @@
         </div>
         <div class="account-list">
           ${rootAccountsOf().map(a => {
-            const synced = Boolean(a.__source);
+            const synced = isSyncAccount(a);
             const effFunds = effectiveFundsOf(a);
             const effTotal = effFunds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
             const effDay = effFunds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
@@ -1051,6 +1079,7 @@
       });
     });
   }
+  window.showAppleDialog = showAppleDialog;
 
   function showAppleInputDialog({ title, message = '', placeholder = '', okText = '确定', cancelText = '取消' }) {
     return new Promise(resolve => {
@@ -1181,7 +1210,7 @@
     providerStatusCache.xiaobeiyangji = xbyj;
   }
 
-  // 同步账户权威数据：从服务端加载并合并进本地状态（标记 __source，不持久化到 localStorage）
+  // 同步账户权威数据：从服务端加载并合并进本地状态（标记 accountType=sync，不持久化到 localStorage）
   async function refreshSyncedAccounts() {
     try {
       const data = await providerApi('/api/portfolio/accounts');
@@ -1189,10 +1218,12 @@
       const serverNames = new Set(serverAccounts.map(a => a.name));
       Object.keys(s.accounts).forEach(name => {
         const account = s.accounts[name];
-        if (account && account.__source && !serverNames.has(name)) delete s.accounts[name];
+        if (account && isSyncAccount(account) && !serverNames.has(name)) delete s.accounts[name];
       });
       serverAccounts.forEach(acc => {
-        acc.__source = acc.name.startsWith('养基宝-') ? 'yangjibao' : acc.name.startsWith('小倍养基-') ? 'xiaobeiyangji' : 'sync';
+        acc.accountType = 'sync';
+        acc.syncSource = acc.source_name || 'sync';
+        delete acc.__source;
         s.accounts[acc.name] = acc;
       });
       // 若当前活动账户已不存在（例如默认账户被删除），回退到第一个可用账户
@@ -2030,7 +2061,7 @@
     if(action==='add-account'){
       const n=prompt('输入账户名称');
       if(n&&!s.accounts[n]){
-        s.accounts[n]={name:n,funds:[],strategy:[],closedPositions:[]};
+        s.accounts[n]={name:n,accountType:'local',syncSource:null,funds:[],strategy:[],closedPositions:[]};
         render('overview');
       }
       return;
@@ -2038,7 +2069,7 @@
     if(action==='delete'){
       if(confirm('确定删除选中的账户吗？')){
         selected.forEach(n=>{
-          const wasSynced = Boolean(s.accounts[n] && s.accounts[n].__source);
+          const wasSynced = isSyncAccount(s.accounts[n]);
           Object.values(s.accounts).forEach(a => {
             if (Array.isArray(a.children)) {
               const i = a.children.indexOf(n);
@@ -2433,7 +2464,7 @@
       }).then(childName => {
         if (!childName) return;
         if (s.accounts[childName]) { showToast('该账户名称已存在', 'warning'); return; }
-        s.accounts[childName] = { name: childName, parent: parentName, funds: [], strategy: [], closedPositions: [] };
+        s.accounts[childName] = { name: childName, accountType: 'local', syncSource: null, parent: parentName, funds: [], strategy: [], closedPositions: [] };
         const parent = s.accounts[parentName];
         if (parent) {
           parent.children = parent.children || [];
@@ -2467,7 +2498,7 @@
           Object.keys(groups).forEach(sector => {
             const childName = `${parentName}-${sector}`;
             if (!s.accounts[childName]) {
-              s.accounts[childName] = { name: childName, parent: parentName, funds: [], strategy: [], closedPositions: [] };
+              s.accounts[childName] = { name: childName, accountType: 'local', syncSource: null, parent: parentName, funds: [], strategy: [], closedPositions: [] };
             }
             s.accounts[childName].funds = groups[sector];
             if (!parent.children.includes(childName)) parent.children.push(childName);
@@ -2530,6 +2561,28 @@
         if (!result || !result.target) return;
         const target = s.accounts[result.target];
         if (!target) return;
+        // 涉及同步账户：先转为本地账户（解除同步），提示用户后不再调用任何同步接口
+        const involved = sources.map(name => s.accounts[name]).concat([target]).filter(Boolean);
+        const hasSync = involved.some(isSyncAccount);
+        if (hasSync) {
+          const ok = await showAppleDialog({
+            title: '移动账户',
+            message: '修改同步账户持仓后，该账户将解除同步，转换为本地管理账户。',
+            okText: '继续',
+            cancelText: '取消'
+          });
+          if (!ok) return;
+          involved.forEach(acc => {
+            if (!isSyncAccount(acc)) return;
+            const oldName = acc.name;
+            convertAccountToLocal(acc);
+            providerApi('/api/portfolio/rename', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ from: oldName, to: acc.name })
+            }).catch(() => {});
+          });
+        }
         sources.forEach(name => {
           const src = s.accounts[name];
           if (!src || name === result.target) return;
@@ -2547,34 +2600,12 @@
             if (Array.isArray(src.children)) {
               src.children.forEach(cn => { if (s.accounts[cn]) s.accounts[cn].parent = undefined; });
             }
-            if (src.__source) {
-              providerApi('/api/portfolio/delete', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_id: name })
-              }).catch(() => {});
-            }
             delete s.accounts[name];
           }
         });
         window.savePortfolioState?.();
-        // 同步账户：把合并结果写回服务端，避免刷新后丢失
-        const syncedToUpdate = [];
-        if (target.__source) syncedToUpdate.push(result.target);
-        const updateResults = await Promise.all(syncedToUpdate.map(name => {
-          const acc = s.accounts[name];
-          if (!acc) return Promise.resolve(true);
-          return providerApi('/api/portfolio/update', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account_id: name, funds: acc.funds })
-          }).then(() => true).catch(() => false);
-        }));
         render('overview');
         showToast(`已移动 ${sources.length} 个账户到「${result.target}」`);
-        if (updateResults.includes(false)) {
-          showToast('同步账户更新失败，刷新后可能丢失，请重试', 'warning');
-        }
       });
       return;
     }
@@ -2603,13 +2634,15 @@
           moved += 1;
         });
         window.savePortfolioState?.();
-        // 同步父账户移出后写回服务端，避免刷新后恢复
-        if (!result.copy && parent.__source) {
-          await providerApi('/api/portfolio/update', {
+        // 从同步父账户移出基金 = 用户主动修改：父账户转为本地账户（解除同步），不再写回服务端
+        if (!result.copy && isSyncAccount(parent)) {
+          const oldName = parent.name;
+          convertAccountToLocal(parent);
+          providerApi('/api/portfolio/rename', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ account_id: parent.name, funds: parent.funds })
-          }).catch(() => showToast('父账户同步更新失败，刷新后可能恢复', 'warning'));
+            body: JSON.stringify({ from: oldName, to: parent.name })
+          }).catch(() => showToast('父账户同步关系解除失败，请重试', 'warning'));
         }
         render('portfolio');
         showToast(`已添加 ${moved} 个基金到子账户「${child.name}」`);

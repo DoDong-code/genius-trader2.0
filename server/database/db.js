@@ -99,6 +99,8 @@ function initialize(db) {
       shares REAL NOT NULL DEFAULT 0,
       cost REAL NOT NULL DEFAULT 0,
       amount REAL NOT NULL DEFAULT 0,
+      source_name TEXT NOT NULL DEFAULT '',
+      converted_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE (user_id, account_id, fund_code),
@@ -172,6 +174,13 @@ function initialize(db) {
   if (!portfolioColumns.some(column => column.name === 'is_synced')) {
     db.exec("ALTER TABLE portfolio ADD COLUMN is_synced INTEGER NOT NULL DEFAULT 0");
     db.exec("UPDATE portfolio SET is_synced = 1 WHERE account_id LIKE '养基宝-%' OR account_id LIKE '小倍养基-%'");
+  }
+  if (!portfolioColumns.some(column => column.name === 'source_name')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN source_name TEXT NOT NULL DEFAULT ''");
+    db.exec("UPDATE portfolio SET source_name = CASE WHEN account_id LIKE '养基宝-%' THEN 'yangjibao' WHEN account_id LIKE '小倍养基-%' THEN 'xiaobeiyangji' ELSE '' END WHERE source_name = ''");
+  }
+  if (!portfolioColumns.some(column => column.name === 'converted_at')) {
+    db.exec('ALTER TABLE portfolio ADD COLUMN converted_at TEXT');
   }
 
   // 账号功能：同步账户 / 凭证按用户隔离（user_id=0 表示未登录/本地模式）

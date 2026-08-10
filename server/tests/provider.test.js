@@ -230,24 +230,49 @@ test('同步账户持久化与读取（portfolio 表）', async () => {
   assert.equal((await listSyncedAccounts()).find(a => a.name === '养基宝-测试'), undefined);
 });
 
-test('同步账户重命名 / 删除接口', async () => {
+test('同步账户重命名 = 转换为本地（服务端休眠保留，不自动恢复）', async () => {
   await replaceSyncedAccount('养基宝-测试', [{
     code: '000001',
     name: '测试基金',
     amount: 110,
     shares: 100,
     costNav: 1.0
-  }]);
+  }], 0, 'yangjibao');
+  assert.ok((await listSyncedAccounts()).some(a => a.name === '养基宝-测试'));
 
   const resRename = mockResponse();
   await handleFundApi(
-    mockRequest('POST', { from: '养基宝-测试', to: '养基宝-测试2' }),
+    mockRequest('POST', { from: '养基宝-测试', to: '我的账户' }),
     resRename,
     apiUrl('/api/portfolio/rename')
   );
   assert.equal(resRename.statusCode, 200);
-  assert.ok((await listSyncedAccounts()).some(a => a.name === '养基宝-测试2'));
+  // 转换后不再出现在同步列表，也不会以新名出现在同步列表
   assert.ok(!(await listSyncedAccounts()).some(a => a.name === '养基宝-测试'));
+  assert.ok(!(await listSyncedAccounts()).some(a => a.name === '我的账户'));
+
+  // 手动重新同步可重新激活，并记录来源
+  await replaceSyncedAccount('养基宝-测试', [{
+    code: '000001',
+    name: '测试基金',
+    amount: 120,
+    shares: 100,
+    costNav: 1.0
+  }], 0, 'yangjibao');
+  const reactivated = (await listSyncedAccounts()).find(a => a.name === '养基宝-测试');
+  assert.ok(reactivated);
+  assert.equal(reactivated.source_name, 'yangjibao');
+  await clearSyncedAccount('养基宝-测试');
+});
+
+test('同步账户删除接口', async () => {
+  await replaceSyncedAccount('养基宝-测试2', [{
+    code: '000001',
+    name: '测试基金',
+    amount: 110,
+    shares: 100,
+    costNav: 1.0
+  }], 0, 'yangjibao');
 
   const resDelete = mockResponse();
   await handleFundApi(
@@ -309,5 +334,23 @@ test('估值优先级：Provider 有凭证时优先返回', async () => {
   assert.equal(withLogin.estimate_change, 0.0123);
 
   await deleteCredential('xiaobeiyangji');
+  registry.registerProvider('xiaobeiyangji', realXbyj);
+});
+
+test('跨用户凭证兜底：本地登录后任意用户均可复用估值', async () => {
+  const realXbyj = require('../providers/xiaobeiyangji');
+  registry.registerProvider('xiaobeiyangji', EstimateStubProvider);
+  await deleteCredential('xiaobeiyangji', 0);
+  await deleteCredential('xiaobeiyangji', 5);
+
+  // 凭证保存在本地用户(user_id=0)，云账号(user_id=5)请求估值时也能命中
+  await saveCredential({ source_name: 'xiaobeiyangji', token: 'stub-token', status: 'connected' }, 0);
+  const crossUser = await fetchProviderEstimate('000001', 1000, { force: true, userId: 5 });
+  assert.ok(crossUser);
+  assert.equal(crossUser.estimate_source, 'xiaobeiyangji');
+  assert.equal(crossUser.estimate_change, 0.0123);
+
+  await deleteCredential('xiaobeiyangji', 0);
+  await deleteCredential('xiaobeiyangji', 5);
   registry.registerProvider('xiaobeiyangji', realXbyj);
 });

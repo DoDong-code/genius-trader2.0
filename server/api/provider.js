@@ -12,7 +12,7 @@
 const { getProvider } = require('../providers/registry');
 const { sendJson } = require('./fund');
 const {
-  getCredential,
+  getConnectedCredential,
   saveCredential,
   disconnectCredential
 } = require('../services/sourceCredentials');
@@ -35,7 +35,7 @@ function readJsonBody(request) {
 }
 
 async function credentialStatus(sourceName, userId) {
-  const credential = await getCredential(sourceName, userId);
+  const credential = await getConnectedCredential(sourceName, userId);
   const loggedIn = Boolean(credential && credential.status === 'connected' && credential.token);
   return {
     logged_in: loggedIn,
@@ -101,7 +101,7 @@ async function handleProviderApi(request, response, url, userId = 0) {
     }
 
     if (action === 'import' && method === 'POST') {
-      const credential = await getCredential(sourceName, userId);
+      const credential = await getConnectedCredential(sourceName, userId);
       if (!credential || credential.status !== 'connected' || !credential.token) {
         return sendJson(response, 401, { success: false, error: `未登录${provider.displayName}，请先登录` });
       }
@@ -110,7 +110,7 @@ async function handleProviderApi(request, response, url, userId = 0) {
         const payload = await normalizeProviderAccounts(provider);
         // 阶段1：同步账户持仓写入服务端权威库
         for (const account of payload.accounts || []) {
-          await replaceSyncedAccount(account.name, account.funds, userId);
+          await replaceSyncedAccount(account.name, account.funds, userId, sourceName);
         }
         // 导入成功即刷新最后同步时间
         await saveCredential({

@@ -5,14 +5,26 @@
   const originalSetActive=state.setActive.bind(state);
 
   function buildPersisted(){
-    // 同步账户由服务端权威存储，不写入本地/云端 JSON
+    // 同步账户由服务端权威存储，不写入本地/云端 JSON；本地账户（含由同步转换的）正常持久化
     const persisted={};
     Object.keys(state.accounts).forEach(name=>{
       const account=state.accounts[name];
-      if(account&&account.__source)return;
+      if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source)))return;
       persisted[name]=account;
     });
     return { accounts:persisted, active:state.getActive() };
+  }
+
+  function normalizeAccount(account){
+    if(!account||typeof account!=='object')return;
+    if(account.accountType==='sync'||account.accountType==='local')return;
+    if(account.__source){
+      account.accountType='sync';
+      account.syncSource=account.syncSource||account.__source;
+    }else{
+      account.accountType='local';
+    }
+    if(account.accountType==='local')account.syncSource=account.syncSource||null;
   }
 
   let cloudTimer=null;
@@ -46,7 +58,7 @@
         account&&typeof account.name==='string'&&Array.isArray(account.funds)
       );
       Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
-      valid.forEach(([name,account])=>{state.accounts[name]=account});
+      valid.forEach(([name,account])=>{normalizeAccount(account);state.accounts[name]=account});
       const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
       if(active)originalSetActive(active);
       else originalSetActive('');
@@ -109,7 +121,7 @@
       account&&typeof account.name==='string'&&Array.isArray(account.funds)
     );
     Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
-    valid.forEach(([name,account])=>{state.accounts[name]=account});
+    valid.forEach(([name,account])=>{normalizeAccount(account);state.accounts[name]=account});
     const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
     if(active)originalSetActive(active);
     else originalSetActive('');

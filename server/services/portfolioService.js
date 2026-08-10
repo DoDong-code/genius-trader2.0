@@ -26,7 +26,7 @@ async function upsertFund(fundCode, fundName) {
  * @param {Array} funds Genius Trader 基金结构
  * @param {number} userId 用户 ID，默认 0（未登录）
  */
-async function replaceSyncedAccount(accountName, funds, userId = 0) {
+async function replaceSyncedAccount(accountName, funds, userId = 0, sourceName = '') {
   await transaction(async ({ run: txRun }) => {
     await txRun('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(accountName)]);
     for (const fund of funds || []) {
@@ -40,8 +40,8 @@ async function replaceSyncedAccount(accountName, funds, userId = 0) {
         : Math.max(0, amount - (Number(fund.holdingProfit) || 0));
       await txRun(fundUpsertSql(), [String(fund.code), String(fund.name || fund.code)]);
       await txRun(`
-        INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, category, transactions, is_synced, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, category, transactions, is_synced, source_name, converted_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
       `, [
         userId,
         String(accountName),
@@ -50,7 +50,8 @@ async function replaceSyncedAccount(accountName, funds, userId = 0) {
         cost,
         amount,
         String(fund.category || '基金'),
-        JSON.stringify(Array.isArray(fund.transactions) ? fund.transactions : [])
+        JSON.stringify(Array.isArray(fund.transactions) ? fund.transactions : []),
+        String(sourceName || '')
       ]);
     }
   });
@@ -62,10 +63,10 @@ async function replaceSyncedAccount(accountName, funds, userId = 0) {
 async function listSyncedAccounts(userId = 0) {
   const rows = await all(`
     SELECT p.account_id, p.fund_code, p.shares, p.cost, p.amount, p.category, p.transactions,
-           f.fund_name
+           p.source_name, f.fund_name
     FROM portfolio p
     JOIN fund f ON f.fund_code = p.fund_code
-    WHERE p.is_synced = 1 AND p.user_id = ?
+    WHERE p.is_synced = 1 AND p.converted_at IS NULL AND p.user_id = ?
     ORDER BY p.account_id, p.created_at
   `, [userId]);
 
@@ -73,7 +74,13 @@ async function listSyncedAccounts(userId = 0) {
   rows.forEach(row => {
     const accountName = String(row.account_id);
     if (!byAccount.has(accountName)) {
-      byAccount.set(accountName, { name: accountName, funds: [], strategy: [], closedPositions: [] });
+      byAccount.set(accountName, {
+        name: accountName,
+        source_name: String(row.source_name || ''),
+        funds: [],
+        strategy: [],
+        closedPositions: []
+      });
     }
     const account = byAccount.get(accountName);
     const amount = Number(row.amount) || 0;
@@ -109,9 +116,21 @@ async function clearSyncedAccount(accountName, userId = 0) {
   await run('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(accountName)]);
 }
 
+/**
+ * 用户主动修改同步账户（改名/移动）后，将其标记为“已转换”，
+ * 原记录保留（休眠），不再参与同步列表，也不会被自动恢复。
+ */
+async function markSyncedAccountConverted(accountName, userId = 0) {
+  await run(
+    'UPDATE portfolio SET converted_at = COALESCE(converted_at, CURRENT_TIMESTAMP) WHERE user_id = ? AND account_id = ?',
+    [userId, String(accountName)]
+  );
+}
+
 module.exports = {
   replaceSyncedAccount,
   listSyncedAccounts,
   clearSyncedAccount,
+  markSyncedAccountConverted,
   upsertFund
 };

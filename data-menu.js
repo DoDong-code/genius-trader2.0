@@ -36,7 +36,15 @@
   function restore(payload) {
     var state = window.portfolioState;
     Object.keys(state.accounts).forEach(function (name) { delete state.accounts[name]; });
-    Object.entries(payload.accounts).forEach(function (entry) { state.accounts[entry[0]] = entry[1]; });
+    Object.entries(payload.accounts).forEach(function (entry) {
+      var acc = entry[1];
+      if (acc && typeof acc === 'object' && acc.accountType !== 'sync' && acc.accountType !== 'local') {
+        acc.accountType = acc.__source ? 'sync' : 'local';
+        if (acc.accountType === 'sync') acc.syncSource = acc.syncSource || acc.__source;
+        else acc.syncSource = acc.syncSource || null;
+      }
+      state.accounts[entry[0]] = acc;
+    });
     var active = state.accounts[payload.active] ? payload.active : Object.keys(state.accounts)[0];
     if (active) state.setActive(active);
     window.savePortfolioState?.();

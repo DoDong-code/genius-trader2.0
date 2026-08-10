@@ -36,6 +36,30 @@ async function getCredential(sourceName, userId = 0) {
 }
 
 /**
+ * 读取已连接凭证（含跨用户兜底）
+ *
+ * 个人应用场景：只要任意一个入口登录过第三方，估值 / 状态 / 同步即可复用该凭证。
+ * 查找顺序：当前用户 → 本地用户(user_id=0) → 最近更新的任意已连接凭证。
+ */
+async function getConnectedCredential(sourceName, userId = 0) {
+  const candidates = [];
+  const primary = await getCredential(sourceName, userId);
+  if (primary) candidates.push(primary);
+  if (Number(userId) !== 0) {
+    const guest = await getCredential(sourceName, 0);
+    if (guest) candidates.push(guest);
+  }
+  const rows = await all(
+    `SELECT * FROM source_credentials
+     WHERE source_name = ? AND status = 'connected' AND token != ''
+     ORDER BY updated_at DESC LIMIT 1`,
+    [String(sourceName)]
+  );
+  if (rows && rows.length) candidates.push(rowToCredential(rows[0]));
+  return candidates.find(c => c && c.status === 'connected' && c.token) || null;
+}
+
+/**
  * 保存/更新凭证（token 等敏感字段加密）
  */
 async function saveCredential({ source_name, token, refresh_token, cookie, user_info, status = 'connected' }, userId = 0) {
@@ -90,6 +114,7 @@ async function listCredentialStatus(userId = 0) {
 
 module.exports = {
   getCredential,
+  getConnectedCredential,
   saveCredential,
   disconnectCredential,
   deleteCredential,

@@ -131,7 +131,7 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/portfolio/rename' && request.method === 'POST') {
     const body = await readJsonBody(request);
-    const { transaction } = require('../database/dbAsync');
+    const { markSyncedAccountConverted } = require('../services/portfolioService');
     const { userFromRequest } = require('../services/authService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0;
@@ -139,10 +139,8 @@ async function handleFundApi(request, response, url) {
       sendJson(response, 400, { success: false, error: '缺少 from/to' });
       return true;
     }
-    await transaction(async ({ run }) => {
-      await run('DELETE FROM portfolio WHERE user_id = ? AND account_id = ?', [userId, String(body.to)]);
-      await run('UPDATE portfolio SET account_id = ? WHERE user_id = ? AND account_id = ?', [String(body.to), userId, String(body.from)]);
-    });
+    // 同步账户改名 = 用户主动修改：原同步账户转为休眠记录（保留数据、不再自动恢复）
+    await markSyncedAccountConverted(body.from, userId);
     sendJson(response, 200, { success: true });
     return true;
   }

@@ -145,6 +145,8 @@ async function ensureCloudSchema() {
       shares REAL NOT NULL DEFAULT 0,
       cost REAL NOT NULL DEFAULT 0,
       amount REAL NOT NULL DEFAULT 0,
+      source_name TEXT NOT NULL DEFAULT '',
+      converted_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       category TEXT NOT NULL DEFAULT '基金',
@@ -153,6 +155,9 @@ async function ensureCloudSchema() {
       UNIQUE (user_id, account_id, fund_code)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_cloud_portfolio_user ON portfolio (user_id, account_id)`,
+    `ALTER TABLE portfolio ADD COLUMN IF NOT EXISTS source_name TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE portfolio ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ`,
+    `UPDATE portfolio SET source_name = CASE WHEN account_id LIKE '养基宝-%' THEN 'yangjibao' WHEN account_id LIKE '小倍养基-%' THEN 'xiaobeiyangji' ELSE source_name END WHERE source_name = ''`,
     `CREATE TABLE IF NOT EXISTS source_credentials (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL DEFAULT 0,
