@@ -201,6 +201,24 @@ test('未知数据源返回 404', async () => {
   assert.equal(res.statusCode, 404);
 });
 
+test('退出登录：断开该数据源的全部凭证（跨用户）', async () => {
+  registry.registerProvider('stub', StubProvider);
+  await deleteCredential('stub', 0);
+  await deleteCredential('stub', 5);
+  await saveCredential({ source_name: 'stub', token: 't0', status: 'connected' }, 0);
+  await saveCredential({ source_name: 'stub', token: 't5', status: 'connected' }, 5);
+
+  const res = mockResponse();
+  await handleProviderApi(mockRequest('POST', {}), res, apiUrl('/api/provider/stub/logout'), 5);
+  assert.equal(res.statusCode, 200);
+  assert.equal((await getCredential('stub', 0)).status, 'disconnected');
+  assert.equal((await getCredential('stub', 5)).status, 'disconnected');
+
+  await deleteCredential('stub', 0);
+  await deleteCredential('stub', 5);
+  registry.unregisterProvider('stub');
+});
+
 test('同步账户持久化与读取（portfolio 表）', async () => {
   await replaceSyncedAccount('养基宝-测试', [{
     code: '000001',

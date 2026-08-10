@@ -14,7 +14,8 @@ const { sendJson } = require('./fund');
 const {
   getConnectedCredential,
   saveCredential,
-  disconnectCredential
+  disconnectCredential,
+  disconnectAllCredentials
 } = require('../services/sourceCredentials');
 const { normalizeProviderAccounts } = require('../services/importProvider');
 const { replaceSyncedAccount } = require('../services/portfolioService');
@@ -142,7 +143,7 @@ async function handleProviderApi(request, response, url, userId = 0) {
     }
 
     if (action === 'logout' && method === 'POST') {
-      await disconnectCredential(sourceName, userId);
+      await disconnectAllCredentials(sourceName);
       provider.logout();
       return sendJson(response, 200, { success: true });
     }

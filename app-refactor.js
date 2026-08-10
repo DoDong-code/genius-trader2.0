@@ -1225,6 +1225,10 @@
         acc.accountType = 'sync';
         acc.syncSource = acc.source_name || 'sync';
         delete acc.__source;
+        // 同步账户的持仓以服务端为准，但投资策略等本地元数据从备份中恢复
+        const meta = (typeof window.getSyncAccountMeta === 'function') ? window.getSyncAccountMeta(acc.name) : null;
+        if (meta && Array.isArray(meta.strategy)) acc.strategy = meta.strategy.slice();
+        else if (!Array.isArray(acc.strategy)) acc.strategy = [];
         s.accounts[acc.name] = acc;
       });
       // 若当前活动账户已不存在（例如默认账户被删除），回退到第一个可用账户

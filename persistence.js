@@ -3,16 +3,25 @@
   if(!state)return;
   const storageKey='genius-trader-portfolio-v2';
   const originalSetActive=state.setActive.bind(state);
+  // 同步账户的服务端数据只存持仓；策略等本地元数据随本地/云端 JSON 一并备份
+  let syncMetaStore={};
 
   function buildPersisted(){
-    // 同步账户由服务端权威存储，不写入本地/云端 JSON；本地账户（含由同步转换的）正常持久化
+    // 同步账户的持仓由服务端权威存储，不写入本地/云端 JSON；本地账户（含由同步转换的）正常持久化
     const persisted={};
     Object.keys(state.accounts).forEach(name=>{
       const account=state.accounts[name];
       if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source)))return;
       persisted[name]=account;
     });
-    return { accounts:persisted, active:state.getActive() };
+    const syncMeta={};
+    Object.keys(state.accounts).forEach(name=>{
+      const account=state.accounts[name];
+      if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))&&Array.isArray(account.strategy)&&account.strategy.length){
+        syncMeta[name]={ strategy: account.strategy.slice() };
+      }
+    });
+    return { accounts:persisted, active:state.getActive(), syncMeta };
   }
 
   function normalizeAccount(account){
@@ -42,7 +51,9 @@
 
   function save(){
     try{
-      localStorage.setItem(storageKey,JSON.stringify(buildPersisted()));
+      const payload=buildPersisted();
+      localStorage.setItem(storageKey,JSON.stringify(payload));
+      syncMetaStore=payload.syncMeta||{};
       scheduleCloudSave();
     }catch(error){
       console.warn('Portfolio data could not be saved.',error);
@@ -51,6 +62,7 @@
 
   try{
     const saved=JSON.parse(localStorage.getItem(storageKey)||'null');
+    if(saved&&saved.syncMeta&&typeof saved.syncMeta==='object')syncMetaStore=saved.syncMeta;
     // 只要存在已保存的 accounts（即使为空），就以保存内容为准，
     // 避免删除默认账户后刷新又出现“主账户”
     if(saved&&saved.accounts&&typeof saved.accounts==='object'){
@@ -117,6 +129,7 @@
 
   function applyAccounts(saved){
     if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
+    if(saved.syncMeta&&typeof saved.syncMeta==='object')syncMetaStore=saved.syncMeta;
     // 保留当前同步账户（服务端权威），仅用云端数据覆盖本地账户
     const syncAccounts=Object.entries(state.accounts).filter(([,a])=>a&&(a.accountType==='sync'||(!a.accountType&&a.__source)));
     const valid=Object.entries(saved.accounts).filter(([,account])=>
@@ -125,6 +138,12 @@
     Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
     valid.forEach(([name,account])=>{normalizeAccount(account);state.accounts[name]=account});
     syncAccounts.forEach(([name,account])=>{state.accounts[name]=account});
+    // 把备份中的同步账户策略合并回保留的同步账户
+    Object.keys(syncMetaStore).forEach(name=>{
+      const account=state.accounts[name];
+      const meta=syncMetaStore[name];
+      if(account&&meta&&Array.isArray(meta.strategy))account.strategy=meta.strategy.slice();
+    });
     const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
     if(active)originalSetActive(active);
     else originalSetActive('');
@@ -167,6 +186,8 @@
   };
   state.persist=save;
   window.savePortfolioState=save;
+  // 供 app-refactor 在刷新同步账户时合并其本地策略元数据
+  window.getSyncAccountMeta=function(name){return syncMetaStore[name]||null;};
   // 手动操作：备份云端 / 恢复本地
   async function backupToCloud(){
     if(!window.auth||!window.auth.state||!window.auth.state.token)return false;

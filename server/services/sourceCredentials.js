@@ -96,6 +96,17 @@ async function disconnectCredential(sourceName, userId = 0) {
 }
 
 /**
+ * 断开某数据源的全部凭证（个人应用：一份登录全局生效，退出也应全局生效）
+ */
+async function disconnectAllCredentials(sourceName) {
+  await run(`
+    UPDATE source_credentials
+    SET status = 'disconnected', token = '', refresh_token = '', cookie = '', updated_at = CURRENT_TIMESTAMP
+    WHERE source_name = ?
+  `, [String(sourceName)]);
+}
+
+/**
  * 删除凭证
  */
 async function deleteCredential(sourceName, userId = 0) {
@@ -117,6 +128,7 @@ module.exports = {
   getConnectedCredential,
   saveCredential,
   disconnectCredential,
+  disconnectAllCredentials,
   deleteCredential,
   listCredentialStatus
 };
