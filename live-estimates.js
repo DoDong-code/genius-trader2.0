@@ -81,11 +81,14 @@
   }
 
   // QDII 类基金：今天结算上一交易日净值（如 8.7 交易，结算 8.6 净值）
-  var QDII_CODES = { '022184': true, '014002': true, '013309': true };
+  // 仅美股/全球类基金延迟；港股（恒生/港股/港美）基金按当日结算，交易日正常显示当日估算
+  var QDII_CODES = { '022184': true, '014002': true };
   function isQdiiFund(fund) {
     if (!fund) return false;
+    var fundName = String(fund.name || '');
+    if (/恒生|港股|港美/.test(fundName)) return false;
     if (QDII_CODES[String(fund.code || '')]) return true;
-    return /QDII|全球|海外|恒生|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|港股|港美|道琼斯|欧洲/i.test(String(fund.name || ''));
+    return /QDII|全球|海外|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|道琼斯|欧洲/i.test(fundName);
   }
 
   function getPreviousTradingDay(dateStr) {
