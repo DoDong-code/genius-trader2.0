@@ -821,6 +821,7 @@
               <textarea id="ai-question-input" rows="2" placeholder="向 AI 提问，或输入调仓指令，如：大成产业趋势混合C 减仓一半" style="flex: 1 1 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; line-height: 1.5; outline: none; transition: border-color 0.2s; resize: none; font-family: inherit; box-sizing: border-box; min-height: 46px;">${esc(window.lastAIUserQuestion || '')}</textarea>` : `
               <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />`}
               <div class="ai-ask-actions" style="display: flex; gap: 10px; align-items: center;">
+                <button id="ai-trade-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #34a853; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">调仓</button>
                 <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
                 <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
                   <span class="btn-text">诊断</span>
@@ -1768,102 +1769,85 @@
     }
   }
 
+  // 匹配调仓指令中的基金（支持简称/部分名称，如“易方达加仓2000”）
+  function matchesFundQuery(f, query) {
+    if (!f || !f.name || !query) return false;
+    if (query.includes(f.name)) return true;
+    const cleanName = String(f.name).replace(/(混合|A|C|债券|股票|基金|指数|ETF|联接|QDII|LOF)/gi, '').trim();
+    if (cleanName.length >= 2 && query.includes(cleanName)) return true;
+    const keywords = (String(query).replace(/(加仓|增持|买入|减仓|减持|卖出|清仓|全部|一半|半仓|定投|元|万|块|日|号|今天|昨天|明天|调整|操作|调仓|改为|至|由|从|到|后|前|和|的|在|把|将|第|个|只|次|基金|账户|组合)/g, '').match(/[\u4e00-\u9fa5]{2,}/g) || []);
+    return keywords.some(kw => String(f.name).includes(kw) || cleanName.includes(kw));
+  }
+
+  // 解析并执行调仓指令（加仓/减仓/清仓）。仅由“调仓”按钮触发，不调用 AI。
+  function applyTradeInstruction(userQuery) {
+    const a = acct();
+    if (!a || !userQuery || !a.funds || !a.funds.length) return { acted: false, actionMsg: '' };
+    let acted = false;
+    let actionMsg = '';
+    a.funds.forEach(f => {
+      const matchedByName = matchesFundQuery(f, userQuery);
+      const matchedByCode = f.code && userQuery.includes(String(f.code));
+      if (!matchedByName && !matchedByCode) return;
+      if (/(减仓一半|卖出一半|减半|减持一半|减仓50%|减持50%|卖出50%)/.test(userQuery)) {
+        const oldAmt = f.amount;
+        f.amount = Number((f.amount * 0.5).toFixed(2));
+        acted = true;
+        actionMsg += `\n- 【减仓一半】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 调整为 ${f.amount.toLocaleString()}。`;
+      } else if (/(清仓|全部卖出|卖出全部|减仓100%|全部减掉)/.test(userQuery)) {
+        const oldAmt = f.amount;
+        f.amount = 0;
+        acted = true;
+        actionMsg += `\n- 【清仓退出】已将【${f.name}】（原金额 ${oldAmt.toLocaleString()}）清空（设为 0）。`;
+      } else if (/(减仓|减持|卖出|减仓占比|减仓比例)(\d+)%/.test(userQuery)) {
+        const match = userQuery.match(/(减仓|减持|卖出|减仓占比|减仓比例)(\d+)%/);
+        const pct = parseFloat(match[2]);
+        if (pct > 0 && pct <= 100) {
+          const oldAmt = f.amount;
+          const ratio = (100 - pct) / 100;
+          f.amount = Number((f.amount * ratio).toFixed(2));
+          acted = true;
+          actionMsg += `\n- 【减仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
+        }
+      } else if (/(加仓|增持|买入)(\d+)%/.test(userQuery)) {
+        const match = userQuery.match(/(加仓|增持|买入)(\d+)%/);
+        const pct = parseFloat(match[2]);
+        if (pct > 0) {
+          const oldAmt = f.amount;
+          const ratio = (100 + pct) / 100;
+          f.amount = Number((f.amount * ratio).toFixed(2));
+          acted = true;
+          actionMsg += `\n- 【加仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
+        }
+      } else if (/(减仓|减持|卖出)(\d+)(元|万)?/.test(userQuery)) {
+        const match = userQuery.match(/(减仓|减持|卖出)(\d+)(元|万)?/);
+        let val = parseFloat(match[2]);
+        if (match[3] === '万') val *= 10000;
+        if (val > 0) {
+          const oldAmt = f.amount;
+          f.amount = Math.max(0, Number((f.amount - val).toFixed(2)));
+          acted = true;
+          actionMsg += `\n- 【减仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
+        }
+      } else if (/(加仓|增持|买入)(\d+)(元|万)?/.test(userQuery)) {
+        const match = userQuery.match(/(加仓|增持|买入)(\d+)(元|万)?/);
+        let val = parseFloat(match[2]);
+        if (match[3] === '万') val *= 10000;
+        if (val > 0) {
+          const oldAmt = f.amount;
+          f.amount = Number((f.amount + val).toFixed(2));
+          acted = true;
+          actionMsg += `\n- 【加仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
+        }
+      }
+    });
+    if (acted) window.savePortfolioState?.();
+    return { acted, actionMsg };
+  }
+
   function runAiDiagnostics(userQuery) {
     const a = acct();
     if (!a) return;
-
-    // Check if the query contains commands to alter holdings, e.g. "大成产业趋势混合C 昨天减仓一半"
-    if (userQuery && a.funds && a.funds.length > 0) {
-      let acted = false;
-      let actionMsg = '';
-      
-      a.funds.forEach(f => {
-        const cleanName = f.name ? f.name.replace(/(混合|A|C|债券|股票|基金|指数)/g, '').trim() : '';
-        const matchedByName = f.name && (userQuery.includes(f.name) || (cleanName.length >= 2 && userQuery.includes(cleanName)));
-        const matchedByCode = f.code && userQuery.includes(f.code);
-        
-        if (matchedByName || matchedByCode) {
-          // Check for "减仓一半" / "卖出一半" / "减半" / "减持一半" / "减仓50%" / "减持50%" / "卖出50%"
-          if (/(减仓一半|卖出一半|减半|减持一半|减仓50%|减持50%|卖出50%)/.test(userQuery)) {
-            const oldAmt = f.amount;
-            f.amount = Number((f.amount * 0.5).toFixed(2));
-            acted = true;
-            actionMsg += `\n- 【减仓一半】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 调整为 ${f.amount.toLocaleString()}。`;
-          }
-          // Check for "清仓" / "全部卖出" / "卖出全部" / "减仓100%" / "全部减掉"
-          else if (/(清仓|全部卖出|卖出全部|减仓100%|全部减掉)/.test(userQuery)) {
-            const oldAmt = f.amount;
-            f.amount = 0;
-            acted = true;
-            actionMsg += `\n- 【清仓退出】已将【${f.name}】（原金额 ${oldAmt.toLocaleString()}）清空（设为 0）。`;
-          }
-          // Check for specific percentage reduction like "减仓30%" or "减持20%"
-          else if (/(减仓|减持|卖出|减持占比|减仓占比)(\d+)%/.test(userQuery)) {
-            const match = userQuery.match(/(减仓|减持|卖出|减持占比|减仓占比)(\d+)%/);
-            const pct = parseFloat(match[2]);
-            if (pct > 0 && pct <= 100) {
-              const oldAmt = f.amount;
-              const ratio = (100 - pct) / 100;
-              f.amount = Number((f.amount * ratio).toFixed(2));
-              acted = true;
-              actionMsg += `\n- 【减仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
-            }
-          }
-          // Check for specific percentage increase like "加仓30%" or "增持20%"
-          else if (/(加仓|增持|买入)(\d+)%/.test(userQuery)) {
-            const match = userQuery.match(/(加仓|增持|买入)(\d+)%/);
-            const pct = parseFloat(match[2]);
-            if (pct > 0) {
-              const oldAmt = f.amount;
-              const ratio = (100 + pct) / 100;
-              f.amount = Number((f.amount * ratio).toFixed(2));
-              acted = true;
-              actionMsg += `\n- 【加仓 ${pct}%】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
-            }
-          }
-          // Check for specific value reduction like "减仓1000元" or "卖出5000"
-          else if (/(减仓|减持|卖出)(\d+)(元|万)?/.test(userQuery)) {
-            const match = userQuery.match(/(减仓|减持|卖出)(\d+)(元|万)?/);
-            let val = parseFloat(match[2]);
-            if (match[3] === '万') val *= 10000;
-            if (val > 0) {
-              const oldAmt = f.amount;
-              f.amount = Math.max(0, Number((f.amount - val).toFixed(2)));
-              acted = true;
-              actionMsg += `\n- 【减仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 减少至 ${f.amount.toLocaleString()}。`;
-            }
-          }
-          // Check for specific value increase like "加仓1000元" or "买入5000"
-          else if (/(加仓|增持|买入)(\d+)(元|万)?/.test(userQuery)) {
-            const match = userQuery.match(/(加仓|增持|买入)(\d+)(元|万)?/);
-            let val = parseFloat(match[2]);
-            if (match[3] === '万') val *= 10000;
-            if (val > 0) {
-              const oldAmt = f.amount;
-              f.amount = Number((f.amount + val).toFixed(2));
-              acted = true;
-              actionMsg += `\n- 【加仓 ${val.toLocaleString()}】已将【${f.name}】持仓金额由 ${oldAmt.toLocaleString()} 增加至 ${f.amount.toLocaleString()}。`;
-            }
-          }
-        }
-      });
-      
-      if (acted) {
-        window.savePortfolioState?.();
-        alert(`智能 AI 指令识别成功！${actionMsg}\n\n系统已实时更新持仓，并正在向 AI 引擎发送最新数据以重构未来策略与诊断建议报告！`);
-      }
-    }
-
-    // 1. If no query, update valuation estimates as usual
-    if (!userQuery && a.funds && a.funds.length > 0) {
-      a.funds.forEach(f => {
-        const fluctuation = (Math.random() * 0.024 - 0.012);
-        f.today = Number((f.today + fluctuation).toFixed(4));
-        if (f.today < -0.08) f.today = -0.08;
-        if (f.today > 0.08) f.today = 0.08;
-      });
-      window.savePortfolioState?.();
-    }
 
     // 2. Build the portfolio payload to send to the real AI engine
     const portfolioData = {
@@ -1997,6 +1981,29 @@
       return;
     }
 
+    const aiTradeBtn = e.target.closest('#ai-trade-btn');
+    if (aiTradeBtn) {
+      const input = document.querySelector('#ai-question-input');
+      const val = input ? input.value.trim() : '';
+      if (!val) {
+        showToast('请输入调仓指令，例如：易方达加仓2000', 'warning');
+        return;
+      }
+      const result = applyTradeInstruction(val);
+      if (result.acted) {
+        showAppleDialog({
+          title: '调仓已执行',
+          message: result.actionMsg.trim(),
+          okText: '知道了',
+          cancelText: ''
+        });
+        render('analysis');
+      } else {
+        showToast('未识别到调仓指令，请包含基金名称和操作（加仓/减仓/清仓）及金额', 'warning');
+      }
+      return;
+    }
+
     const aiAskSubmitBtn = e.target.closest('#ai-ask-submit-btn');
     if (aiAskSubmitBtn) {
       const input = document.querySelector('#ai-question-input');
@@ -2006,7 +2013,6 @@
         return;
       }
       window.lastAIUserQuestion = val;
-      runAiDiagnostics(val);
       askAiQuestion(val);
       return;
     }

@@ -97,6 +97,9 @@
     return null;
   }
 
+  // 已更新净值的缓存：code -> { day, navDate }，切换 tab 不重复请求，仅手动刷新时更新
+  var updatedNavDates = {};
+
   function getPreviousTradingDay(dateStr) {
     var parts = dateStr.split('-');
     var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -309,6 +312,18 @@
     var fund = currentFund(code);
     if (!code || !fund) return;
     setFundMeta(row, fund);
+    // 已更新净值的基金：切换 tab 直接复用缓存，不重复请求（除非手动刷新数据）
+    var cachedNav = updatedNavDates[String(code)];
+    if (!force && cachedNav && cachedNav.day === shanghaiDate()) {
+      if (Number.isFinite(Number(fund.today))) {
+        updateTodayCell(row, Number(fund.today), Number(fund.todayEstimate) || (Number(fund.amount) || 0) * Number(fund.today));
+      } else {
+        showEstimateUnavailable(row);
+      }
+      markNavUpdated(row, cachedNav.navDate, fund);
+      row.dataset.estimateState = 'ready';
+      return;
+    }
     row.dataset.estimateState = 'loading';
 
     enqueue(function () {
@@ -339,6 +354,7 @@
         if (isTrading) {
           if (officialUpdated) {
             fund.navUpdatedAt = navDate;
+            updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
             markNavUpdated(row, navDate, fund);
           } else if (providerLabel && providerDataToday) {
             fund.navUpdatedAt = shanghaiToday;
@@ -349,6 +365,7 @@
         } else {
           if (navDate) {
             fund.navUpdatedAt = navDate;
+            updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
             markNavUpdated(row, navDate, fund);
           } else {
             delete fund.navUpdatedAt;

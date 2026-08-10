@@ -60,6 +60,7 @@ export async function chat(message: string, config: AIConfig): Promise<string> {
 
 export async function analyzePortfolio(portfolioData: PortfolioData, config: AIConfig): Promise<AnalysisResponse> {
   const prompt = `你是一个专业的基金投资顾问。请分析以下持仓基金数据，评估整体风险，并给出具体的投资建议、目标仓位及操作行动。
+重要要求：评估理由中的任何数字（涨跌幅、金额、收益率等）必须直接引用上方持仓数据中提供的数值，严禁自行编造或推断未提供的数字；如果数据中没有相关数值，请写“未提供”。
 持仓基金数据：
 ${JSON.stringify(portfolioData, null, 2)}
 
