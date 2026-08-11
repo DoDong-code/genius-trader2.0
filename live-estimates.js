@@ -109,6 +109,14 @@
   // 已更新净值的缓存：code -> { day, navDate }，切换 tab 不重复请求，仅手动刷新时更新
   var updatedNavDates = {};
 
+  // 记录某账户最近一次成功刷新估值的时间（按账户），供 AI 诊断判断是否需要重新刷新
+  function markEstimatesRefreshed() {
+    var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
+    window.lastEstimatesRefreshAtByAccount = window.lastEstimatesRefreshAtByAccount || {};
+    window.lastEstimatesRefreshAtByAccount[accountName] = Date.now();
+  }
+  window.markEstimatesRefreshed = markEstimatesRefreshed;
+
   function getPreviousTradingDay(dateStr) {
     var parts = dateStr.split('-');
     var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
@@ -332,6 +340,7 @@
       }
       markNavUpdated(row, cachedNav.navDate, fund);
       row.dataset.estimateState = 'ready';
+      markEstimatesRefreshed();
       return;
     }
     row.dataset.estimateState = 'loading';
@@ -433,6 +442,7 @@
         updateTodayCell(row, change, profit);
 
         row.dataset.estimateState = 'ready';
+        markEstimatesRefreshed();
         if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
         window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code } }));
       }).catch(function () {

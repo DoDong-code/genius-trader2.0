@@ -1965,6 +1965,12 @@
   async function runAiDiagnosticsFresh(userQuery) {
     const a = acct();
     if (!a) return;
+    // 若该账户 5 分钟内已在持仓页刷新过估值数据，直接使用，不再重复强制刷新
+    const lastRefresh = (window.lastEstimatesRefreshAtByAccount || {})[a.name] || 0;
+    if (Date.now() - lastRefresh < 5 * 60 * 1000) {
+      runAiDiagnostics(userQuery);
+      return;
+    }
     const runBtn = document.querySelector('#run-ai-analysis-btn');
     if (runBtn) {
       runBtn.disabled = true;
@@ -1972,6 +1978,7 @@
       if (text) text.textContent = '正在刷新最新数据…';
     }
     await refreshAccountDataBeforeAi().catch(() => {});
+    if (typeof window.markEstimatesRefreshed === 'function') window.markEstimatesRefreshed();
     runAiDiagnostics(userQuery);
   }
 
