@@ -8,7 +8,7 @@
  * - 单个 Provider 有超时保护，失败不影响兜底
  * - 结果带 30 秒内存缓存，避免前端轮询频繁请求第三方
  */
-const { getConnectedCredential } = require('./sourceCredentials');
+const { getCredential } = require('./sourceCredentials');
 const { getProvider } = require('../providers/registry');
 
 const PROVIDER_ORDER = ['xiaobeiyangji', 'yangjibao'];
@@ -48,7 +48,8 @@ function normalizeProviderEstimate(provider, raw, code, amount) {
 }
 
 async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
-  const credential = await getConnectedCredential(sourceName, userId);
+  // 凭证严格按登录账户隔离：每个账号只使用自己登录的第三方
+  const credential = await getCredential(sourceName, userId);
   if (!credential || credential.status !== 'connected' || !credential.token) return null;
   const provider = getProvider(sourceName);
   if (!provider || typeof provider.fetch_estimate !== 'function') return null;

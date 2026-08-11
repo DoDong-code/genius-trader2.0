@@ -119,8 +119,8 @@ async function clearSyncedAccount(accountName, userId = 0) {
 /**
  * 退出第三方数据源时，删除该数据源的全部同步账户（个人应用：一份登录全局生效）
  */
-async function clearSyncedAccountsBySource(sourceName) {
-  await run('DELETE FROM portfolio WHERE source_name = ?', [String(sourceName)]);
+async function clearSyncedAccountsBySource(sourceName, userId = 0) {
+  await run('DELETE FROM portfolio WHERE source_name = ? AND user_id = ?', [String(sourceName), userId]);
 }
 
 /**

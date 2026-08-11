@@ -12,10 +12,9 @@
 const { getProvider } = require('../providers/registry');
 const { sendJson } = require('./fund');
 const {
-  getConnectedCredential,
+  getCredential,
   saveCredential,
-  disconnectCredential,
-  disconnectAllCredentials
+  disconnectCredential
 } = require('../services/sourceCredentials');
 const { normalizeProviderAccounts } = require('../services/importProvider');
 const { replaceSyncedAccount, clearSyncedAccountsBySource } = require('../services/portfolioService');
@@ -36,7 +35,7 @@ function readJsonBody(request) {
 }
 
 async function credentialStatus(sourceName, userId) {
-  const credential = await getConnectedCredential(sourceName, userId);
+  const credential = await getCredential(sourceName, userId);
   const loggedIn = Boolean(credential && credential.status === 'connected' && credential.token);
   return {
     logged_in: loggedIn,
@@ -102,7 +101,7 @@ async function handleProviderApi(request, response, url, userId = 0) {
     }
 
     if (action === 'import' && method === 'POST') {
-      const credential = await getConnectedCredential(sourceName, userId);
+      const credential = await getCredential(sourceName, userId);
       if (!credential || credential.status !== 'connected' || !credential.token) {
         return sendJson(response, 401, { success: false, error: `未登录${provider.displayName}，请先登录` });
       }
@@ -143,8 +142,9 @@ async function handleProviderApi(request, response, url, userId = 0) {
     }
 
     if (action === 'logout' && method === 'POST') {
-      await disconnectAllCredentials(sourceName);
-      await clearSyncedAccountsBySource(sourceName);
+      // 仅断开当前登录账户的第三方凭证与同步账户，不影响其他账号
+      await disconnectCredential(sourceName, userId);
+      await clearSyncedAccountsBySource(sourceName, userId);
       provider.logout();
       return sendJson(response, 200, { success: true });
     }

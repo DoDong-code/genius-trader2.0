@@ -203,7 +203,7 @@ test('未知数据源返回 404', async () => {
   assert.equal(res.statusCode, 404);
 });
 
-test('退出登录：断开该数据源的全部凭证（跨用户）', async () => {
+test('退出登录：仅断开当前账户的凭证（账户隔离）', async () => {
   registry.registerProvider('stub', StubProvider);
   await deleteCredential('stub', 0);
   await deleteCredential('stub', 5);
@@ -213,8 +213,9 @@ test('退出登录：断开该数据源的全部凭证（跨用户）', async ()
   const res = mockResponse();
   await handleProviderApi(mockRequest('POST', {}), res, apiUrl('/api/provider/stub/logout'), 5);
   assert.equal(res.statusCode, 200);
-  assert.equal((await getCredential('stub', 0)).status, 'disconnected');
   assert.equal((await getCredential('stub', 5)).status, 'disconnected');
+  // 其他账户（user 0）的凭证不受影响
+  assert.equal((await getCredential('stub', 0)).status, 'connected');
 
   await deleteCredential('stub', 0);
   await deleteCredential('stub', 5);
@@ -357,18 +358,21 @@ test('估值优先级：Provider 有凭证时优先返回', async () => {
   registry.registerProvider('xiaobeiyangji', realXbyj);
 });
 
-test('跨用户凭证兜底：本地登录后任意用户均可复用估值', async () => {
+test('凭证按账户隔离：估值仅使用当前账户的凭证', async () => {
   const realXbyj = require('../providers/xiaobeiyangji');
   registry.registerProvider('xiaobeiyangji', EstimateStubProvider);
   await deleteCredential('xiaobeiyangji', 0);
   await deleteCredential('xiaobeiyangji', 5);
 
-  // 凭证保存在本地用户(user_id=0)，云账号(user_id=5)请求估值时也能命中
+  // user 0 有凭证，user 5 无 → user 5 拿不到估值（不再跨用户兜底）
   await saveCredential({ source_name: 'xiaobeiyangji', token: 'stub-token', status: 'connected' }, 0);
-  const crossUser = await fetchProviderEstimate('000001', 1000, { force: true, userId: 5 });
-  assert.ok(crossUser);
-  assert.equal(crossUser.estimate_source, 'xiaobeiyangji');
-  assert.equal(crossUser.estimate_change, 0.0123);
+  const forUser5 = await fetchProviderEstimate('000001', 1000, { force: true, userId: 5 });
+  assert.equal(forUser5, null);
+
+  // user 0 自己可用
+  const forUser0 = await fetchProviderEstimate('000001', 1000, { force: true, userId: 0 });
+  assert.ok(forUser0);
+  assert.equal(forUser0.estimate_source, 'xiaobeiyangji');
 
   await deleteCredential('xiaobeiyangji', 0);
   await deleteCredential('xiaobeiyangji', 5);

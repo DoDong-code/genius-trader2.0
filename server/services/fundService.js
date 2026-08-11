@@ -233,30 +233,78 @@ async function collectFund(code, options = {}) {
     if (cached) return { ...cached, fromCache: true };
   }
 
-  const scriptUrl = `${EASTMONEY_FUND_URL}/pingzhongdata/${fundCode}.js?v=${Date.now()}`;
-  const profileUrl = `${EASTMONEY_FUND_URL}/${fundCode}.html`;
-  const useStoredHoldings = !options.force && freshSyncState(fundCode, 'holdings');
-  const [scriptResult, profileResult, historyResult, holdingsResult] = await Promise.allSettled([
-    fetchText(scriptUrl),
-    fetchText(profileUrl),
-    fetchHistory(fundCode, { withMeta: true }),
-    useStoredHoldings ? Promise.resolve(getFundHoldings(fundCode)) : fetchHoldings(fundCode)
-  ]);
-  const profileSource = profileResult.status === 'fulfilled' ? profileResult.value : '';
-  const profile = parseFundProfile(profileSource);
+  const db = getDatabase();
+  // 详情/历史缓存：持仓 90 天、历史 24 小时内已同步则复用，净值只做增量刷新
+  const useStoredHoldings = freshSyncState(fundCode, 'holdings');
+  const useStoredHistory = freshSyncState(fundCode, 'history');
+  const storedFund = db.prepare('SELECT fund_name, fund_type, company FROM fund WHERE fund_code = ?').get(fundCode);
+
+  let profileSource = '';
+  let profile = null;
   let parsed = null;
-  if (scriptResult.status === 'fulfilled') {
+  let historyFetch = null;
+
+  if (useStoredHistory) {
+    // 净值增量刷新：只取最近几个交易日净值，其余数据走缓存/数据库
     try {
-      parsed = parseFundScript(fundCode, scriptResult.value);
-    } catch {
-      parsed = null;
+      historyFetch = await fetchHistory(fundCode, { pageSize: 5, maxPages: 1, withMeta: true });
+    } catch (e) {
+      historyFetch = { history: [], source: null };
+    }
+    profile = storedFund
+      ? { fundType: storedFund.fund_type, company: storedFund.company, latestNav: null }
+      : null;
+  } else {
+    const scriptUrl = `${EASTMONEY_FUND_URL}/pingzhongdata/${fundCode}.js?v=${Date.now()}`;
+    const profileUrl = `${EASTMONEY_FUND_URL}/${fundCode}.html`;
+    const [scriptResult, profileResult, historyResult] = await Promise.allSettled([
+      fetchText(scriptUrl),
+      fetchText(profileUrl),
+      fetchHistory(fundCode, { withMeta: true })
+    ]);
+    profileSource = profileResult.status === 'fulfilled' ? profileResult.value : '';
+    profile = parseFundProfile(profileSource);
+    if (scriptResult.status === 'fulfilled') {
+      try {
+        parsed = parseFundScript(fundCode, scriptResult.value);
+      } catch {
+        parsed = null;
+      }
+    }
+    historyFetch = historyResult.status === 'fulfilled'
+      ? historyResult.value
+      : { history: [], source: null };
+  }
+
+  let holdings = [];
+  if (useStoredHoldings) {
+    holdings = getFundHoldings(fundCode);
+  } else {
+    try {
+      holdings = await fetchHoldings(fundCode);
+    } catch (e) {
+      holdings = [];
     }
   }
-  const historyFetch = historyResult.status === 'fulfilled'
-    ? historyResult.value
-    : { history: [], source: null };
+
   const apiHistory = Array.isArray(historyFetch) ? historyFetch : historyFetch.history;
-  const historyByDate = new Map((parsed?.history || []).map(item => [item.date, item]));
+  const historyByDate = new Map();
+  // 增量刷新时以数据库已有历史为基底，合并最新净值
+  if (useStoredHistory) {
+    db.prepare('SELECT date, nav, acc_nav FROM fund_nav WHERE fund_code = ?')
+      .all(fundCode)
+      .forEach(row => {
+        const nav = Number(row.nav);
+        if (row.date && Number.isFinite(nav)) {
+          historyByDate.set(String(row.date), {
+            date: String(row.date),
+            nav,
+            accNav: Number(row.acc_nav) || nav
+          });
+        }
+      });
+  }
+  (parsed?.history || []).forEach(item => historyByDate.set(item.date, item));
   apiHistory.forEach(item => historyByDate.set(item.date, item));
   const history = [...historyByDate.values()]
     .sort((left, right) => left.date.localeCompare(right.date));
@@ -265,7 +313,7 @@ async function collectFund(code, options = {}) {
     error.statusCode = 502;
     throw error;
   }
-  if (profile.latestNav) {
+  if (profile && profile.latestNav) {
     const existing = history.findIndex(item => item.date === profile.latestNav.date);
     if (existing >= 0) history[existing] = profile.latestNav;
     else history.push(profile.latestNav);
@@ -273,15 +321,18 @@ async function collectFund(code, options = {}) {
   }
   const data = {
     fundCode,
-    fundName: parsed?.fundName || parseFundNameFromProfile(profileSource, fundCode) || `基金 ${fundCode}`,
+    fundName: parsed?.fundName
+      || parseFundNameFromProfile(profileSource, fundCode)
+      || (storedFund && storedFund.fund_name)
+      || `基金 ${fundCode}`,
     history,
-    holdings: holdingsResult.status === 'fulfilled' ? holdingsResult.value : [],
-    fundType: profile.fundType,
-    company: profile.company,
+    holdings,
+    fundType: (profile && profile.fundType) || (storedFund && storedFund.fund_type) || null,
+    company: (profile && profile.company) || (storedFund && storedFund.company) || null,
     source: {
-      detail: parsed ? 'pingzhongdata' : 'fund-page',
-      history: apiHistory.length ? (historyFetch.source || 'eastmoney-lsjz') : 'pingzhongdata',
-      holdings: holdingsResult.status === 'fulfilled' ? 'fund-archives' : null
+      detail: parsed ? 'pingzhongdata' : (useStoredHistory ? 'cache' : 'fund-page'),
+      history: apiHistory.length ? (historyFetch.source || 'eastmoney-lsjz') : (useStoredHistory ? 'db-cache' : 'pingzhongdata'),
+      holdings: useStoredHoldings ? 'db-cache' : (holdings.length ? 'fund-archives' : null)
     }
   };
   writeDailyCache(fundCode, data);

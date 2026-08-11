@@ -455,6 +455,14 @@
     scan(true);
   };
 
+  // 单行刷新：详情抽屉刷新出最新净值后，同步更新持仓列表对应行（走缓存，不重复抓取）
+  window.refreshListRow = function (code) {
+    var row = document.querySelector('#view-root .fund-row[data-code="' + String(code) + '"]');
+    if (!row) return;
+    delete row.dataset.estimateState;
+    hydrateRow(row, false);
+  };
+
   var scanQueued = false;
   function scheduleScan() {
     if (scanQueued) return;

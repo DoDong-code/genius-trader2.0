@@ -1001,6 +1001,8 @@
         if (today.official) fund.navUpdatedAt = today.navDate;
         todayProfitCell.querySelector('b').className = tone(today.profit);
         todayProfitCell.querySelector('b').textContent = money(today.profit);
+        // 抽屉刷新出最新净值后，同步更新持仓列表对应行（返回列表即可看到最新净值）
+        if (typeof window.refreshListRow === 'function') window.refreshListRow(fund.code);
       } else {
         todayProfitCell.querySelector('b').className = '';
         todayProfitCell.querySelector('b').textContent = '待估值';

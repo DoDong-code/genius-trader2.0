@@ -175,6 +175,7 @@
       } else if(data&&data.state&&data.state.accounts){
         // 云端为空：把本地数据作为首次迁移上传
         scheduleCloudSave();
+        rerender();
       }
     }).catch(()=>{});
   }
