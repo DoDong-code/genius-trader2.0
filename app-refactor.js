@@ -1243,6 +1243,7 @@
       return [];
     }
   }
+  window.refreshSyncedAccounts = refreshSyncedAccounts;
 
   function applyProviderStatus() {
     const yjb = providerStatusCache.yangjibao;

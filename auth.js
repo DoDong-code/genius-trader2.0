@@ -78,9 +78,14 @@
 
   async function logout() {
     const token = state.token;
+    // 退出前把当前状态（含各账户投资策略等）同步到云端，避免丢失
+    if (token && typeof window.backupToCloud === 'function') {
+      try { await window.backupToCloud(); } catch (e) { /* 云端同步失败不阻塞退出 */ }
+    }
     state.user = null;
     state.token = '';
     localStorage.removeItem(TOKEN_KEY);
+    if (typeof window.clearLocalData === 'function') window.clearLocalData();
     notify();
     if (token) {
       fetch('/api/auth/logout', {

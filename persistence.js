@@ -53,7 +53,17 @@
     try{
       const payload=buildPersisted();
       localStorage.setItem(storageKey,JSON.stringify(payload));
-      syncMetaStore=payload.syncMeta||{};
+      // 同步账户元数据合并：仅当该同步账户当前存在且策略为空时才清除，
+      // 避免云端恢复/重新加载同步账户过程中被空元数据误清
+      const newMeta=payload.syncMeta||{};
+      const merged=Object.assign({},syncMetaStore,newMeta);
+      Object.keys(merged).forEach(name=>{
+        const account=state.accounts[name];
+        if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))&&!(name in newMeta)){
+          delete merged[name];
+        }
+      });
+      syncMetaStore=merged;
       scheduleCloudSave();
     }catch(error){
       console.warn('Portfolio data could not be saved.',error);
@@ -157,13 +167,25 @@
       if(data&&data.state&&data.state.accounts&&Object.keys(data.state.accounts).length>0){
         applyAccounts(data.state);
         save();
-        rerender();
+        if(typeof window.refreshSyncedAccounts==='function'){
+          window.refreshSyncedAccounts().then(rerender).catch(rerender);
+        }else{
+          rerender();
+        }
       } else if(data&&data.state&&data.state.accounts){
         // 云端为空：把本地数据作为首次迁移上传
         scheduleCloudSave();
       }
     }).catch(()=>{});
   }
+
+  // 退出登录：清空本地账户数据（云端数据已备份，登录后再恢复）
+  function clearLocalData(){
+    Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
+    if(typeof state.setActive==='function')state.setActive('');
+    save();
+  }
+  window.clearLocalData=clearLocalData;
 
   function rerender(){
     const tab=document.querySelector('.nav-tab.active');

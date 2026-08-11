@@ -369,28 +369,19 @@
         var estimateSource = estimate && (estimate.source || estimate.estimate_source);
         var providerLabel = providerDisplayName(estimateSource);
         var providerDataToday = providerLabel && estimate && String(estimate.estimate_time || '').slice(0, 10) === shanghaiToday;
-        // 交易时段：灰色估值标识（估值/小倍/养基宝）；收盘后：蓝色净值标识（已更新/小倍/养基宝 + 日期）
-        var marketClosed = !isTrading || isShanghaiAfterClose();
 
         if (officialUpdated) {
+          // 官方净值已更新到预期日期（如 0811）→ 蓝色“已更新0811”
           fund.navUpdatedAt = navDate;
           updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
           markNavUpdated(row, navDate, fund);
-        } else if (marketClosed) {
-          if (providerLabel && providerDataToday) {
-            fund.navUpdatedAt = shanghaiToday;
-            markProviderUpdated(row, shanghaiToday, fund, providerLabel);
-          } else if (navDate) {
-            fund.navUpdatedAt = navDate;
-            if (!isTrading) updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
-            markNavUpdated(row, navDate, fund);
-          } else {
-            delete fund.navUpdatedAt;
-            clearNavUpdated(row);
-            markEstimateBadge(row, fund, providerLabel);
-          }
+        } else if (!isTrading && navDate) {
+          // 非交易日：显示最新已公布净值（蓝色“已更新MMDD”）
+          fund.navUpdatedAt = navDate;
+          updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
+          markNavUpdated(row, navDate, fund);
         } else {
-          // 交易时段：只显示灰色估值标识
+          // 净值尚未更新（含交易日盘中与盘后）：灰色估值标识（估值/小倍/养基宝）
           delete fund.navUpdatedAt;
           clearNavUpdated(row);
           markEstimateBadge(row, fund, providerLabel);
