@@ -18,7 +18,7 @@ const {
   disconnectAllCredentials
 } = require('../services/sourceCredentials');
 const { normalizeProviderAccounts } = require('../services/importProvider');
-const { replaceSyncedAccount } = require('../services/portfolioService');
+const { replaceSyncedAccount, clearSyncedAccountsBySource } = require('../services/portfolioService');
 
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
@@ -144,6 +144,7 @@ async function handleProviderApi(request, response, url, userId = 0) {
 
     if (action === 'logout' && method === 'POST') {
       await disconnectAllCredentials(sourceName);
+      await clearSyncedAccountsBySource(sourceName);
       provider.logout();
       return sendJson(response, 200, { success: true });
     }

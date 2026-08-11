@@ -90,6 +90,19 @@
   }
 
   function resolveTodayData(fund, payload = {}) {
+    // 与持仓列表保持同一数据源：列表已刷新的今日估值（fund.today）优先，
+    // 抽屉与列表显示完全相同的“今日收益”，避免出现昨天的净值。
+    const localChange = Number(fund.today);
+    if (Number.isFinite(localChange)) {
+      const localProfit = Number(fund.todayEstimate);
+      return {
+        official: Boolean(fund.navUpdatedAt && fund.navUpdatedAt === shanghaiDate()),
+        navDate: fund.navUpdatedAt || null,
+        change: localChange,
+        profit: Number.isFinite(localProfit) ? localProfit : fund.amount * localChange
+      };
+    }
+
     const history = payload.history || [];
     const navDate = payload.latest_nav?.date || payload.fund?.latest_nav?.date || payload.estimate?.nav_date || null;
     let officialChange = navDate ? officialNavChange(history, navDate) : null;
@@ -117,12 +130,6 @@
       return { official: false, navDate: null, change: apiChange, profit: fund.amount * apiChange };
     }
 
-    // The list may already have refreshed a same-day manual/official value.
-    const localIsCurrent = manualIsCurrent || Boolean(fund.navUpdatedAt && fund.navUpdatedAt === shanghaiDate());
-    const localChange = Number(fund.today);
-    if (localIsCurrent && Number.isFinite(localChange)) {
-      return { official: Boolean(fund.navUpdatedAt && fund.navUpdatedAt === shanghaiDate()), navDate: fund.navUpdatedAt || null, change: localChange, profit: fund.amount * localChange };
-    }
     return { official: false, navDate: null, change: null, profit: null };
   }
 

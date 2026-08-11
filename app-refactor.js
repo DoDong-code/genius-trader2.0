@@ -8,6 +8,8 @@
   const esc=x=>String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const money=n=>Math.round(n).toLocaleString('zh-CN'), acct=()=>s.accounts[s.getActive()];
   const money2=n=>{const v=Number(n)||0;return (v<0?'−':'')+Math.abs(v).toLocaleString('zh-CN',{minimumFractionDigits:2,maximumFractionDigits:2});};
+  // 今日收益统一口径：优先用已刷新的 todayEstimate，兜底 amount × today（与持仓列表/详情抽屉同一数据源）
+  const todayProfitOf=f=>Number.isFinite(Number(f&&f.todayEstimate))?Number(f.todayEstimate):((Number(f&&f.amount)||0)*(Number(f&&f.today)||0));
   // 账户类型：sync（同步账户）/ local（本地账户）。兼容旧 __source 数据。
   function ensureAccountType(acc) {
     if (!acc || typeof acc !== 'object') return;
@@ -477,7 +479,7 @@
     const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };
     const effFunds = effectiveFundsOf(a);
     const total = effFunds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
-    const day = effFunds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
+    const day = effFunds.reduce((x, f) => x + todayProfitOf(f), 0);
     title.textContent = '天才交易员上线';
     const selectedTab = window.__accountTabSelected || 'all';
     const showAccountMgmt = selectedTab === 'all';
@@ -512,7 +514,7 @@
             const synced = isSyncAccount(a);
             const effFunds = effectiveFundsOf(a);
             const effTotal = effFunds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
-            const effDay = effFunds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
+            const effDay = effFunds.reduce((x, f) => x + todayProfitOf(f), 0);
             const children = (a.children || []).map(n => s.accounts[n]).filter(Boolean);
             return `
               <div class="account-card ${editing ? 'account-edit-row' : ''}" data-account="${esc(a.name)}">
@@ -531,7 +533,7 @@
                 <div class="sub-account-card" data-sub-account="${esc(c.name)}">
                   <div><b>${esc(c.name)}</b><small>${c.funds.length ? c.funds.length + ' 项持仓' : '暂无持仓'}</small></div>
                   <div style="display: flex; align-items: center; gap: 10px;">
-                    <div style="text-align: right;"><strong>${money(c.funds.reduce((x, f) => x + (Number(f.amount) || 0), 0))}</strong><span>${money(c.funds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0))}</span></div>
+                    <div style="text-align: right;"><strong>${money(c.funds.reduce((x, f) => x + (Number(f.amount) || 0), 0))}</strong><span>${money(c.funds.reduce((x, f) => x + todayProfitOf(f), 0))}</span></div>
                     ${editing ? `<button type="button" class="link-btn danger-link" data-action="delete-sub-account" data-child="${esc(c.name)}" data-parent="${esc(a.name)}">删除</button>` : ''}
                   </div>
                 </div>
@@ -606,7 +608,7 @@
     const funds = effectiveFundsOf(a);
     const totalAssets = funds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
     const totalProfit = funds.reduce((x, f) => x + (Number(f.holdingProfit ?? f.profit) || 0), 0);
-    const totalToday = funds.reduce((x, f) => x + (Number(f.amount) || 0) * (Number(f.today) || 0), 0);
+    const totalToday = funds.reduce((x, f) => x + todayProfitOf(f), 0);
     const profitRate = (totalAssets - totalProfit) > 0 ? totalProfit / (totalAssets - totalProfit) : 0;
     // 子账户 tab：父账户显示其子账户；子账户显示父账户下的兄弟子账户 + 返回父账户
     const parentAccount = a.parent ? s.accounts[a.parent] : null;
@@ -656,7 +658,7 @@
             <button class="fund-row" data-code="${f.code}" title="${esc(f.name)}">
               <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${esc(f.category)}</span>${f.subAccount ? `<span class="fund-meta-sep"> · </span><span class="fund-sub-tag">${esc(f.subAccount)}</span>` : ''}</small></div>
               <div class="fund-est" data-col-key="holdingProfit"><strong>${(f.amount * f.hold > 0 ? '+' : '')}${money2(f.amount * f.hold)}</strong><span>${(f.hold > 0 ? '+' : '')}${((f.hold * 100).toFixed(2))}%</span></div>
-              <div class="fund-today" data-col-key="todayProfit"><strong>${money2(f.amount * f.today)}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
+              <div class="fund-today" data-col-key="todayProfit"><strong>${money2(todayProfitOf(f))}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
               <div class="fund-amount" data-col-key="amount"><strong>${money2(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
             </button>
           `).join('')}
@@ -2406,7 +2408,8 @@
     if (yjbLogoutBtn) {
       providerApi('/api/provider/yangjibao/logout', { method: 'POST' })
         .then(() => refreshProviderStatus())
-        .then(() => { if (view === 'setting') applyProviderStatus(); showToast('已退出养基宝'); })
+        .then(() => refreshSyncedAccounts())
+        .then(() => { if (view === 'setting' || view === 'overview' || view === 'portfolio') render(view); applyProviderStatus(); showToast('已退出养基宝'); })
         .catch(() => showToast('退出登录失败', 'error'));
       return;
     }
@@ -2457,7 +2460,8 @@
     if (xbyjLogoutBtn) {
       providerApi('/api/provider/xiaobeiyangji/logout', { method: 'POST' })
         .then(() => refreshProviderStatus())
-        .then(() => { if (view === 'setting') applyProviderStatus(); showToast('已退出小倍养基'); })
+        .then(() => refreshSyncedAccounts())
+        .then(() => { if (view === 'setting' || view === 'overview' || view === 'portfolio') render(view); applyProviderStatus(); showToast('已退出小倍养基'); })
         .catch(() => showToast('退出登录失败', 'error'));
       return;
     }

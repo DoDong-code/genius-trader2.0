@@ -117,6 +117,13 @@ async function clearSyncedAccount(accountName, userId = 0) {
 }
 
 /**
+ * 退出第三方数据源时，删除该数据源的全部同步账户（个人应用：一份登录全局生效）
+ */
+async function clearSyncedAccountsBySource(sourceName) {
+  await run('DELETE FROM portfolio WHERE source_name = ?', [String(sourceName)]);
+}
+
+/**
  * 用户主动修改同步账户（改名/移动）后，将其标记为“已转换”，
  * 原记录保留（休眠），不再参与同步列表，也不会被自动恢复。
  */
@@ -131,6 +138,7 @@ module.exports = {
   replaceSyncedAccount,
   listSyncedAccounts,
   clearSyncedAccount,
+  clearSyncedAccountsBySource,
   markSyncedAccountConverted,
   upsertFund
 };

@@ -1,3 +1,23 @@
+// 本地开发：加载根目录 .env（密钥不入库，.gitignore 已忽略）
+try {
+  const envPath = require('node:path').join(__dirname, '..', '.env');
+  if (require('node:fs').existsSync(envPath)) {
+    require('node:fs').readFileSync(envPath, 'utf8').split(/\r?\n/).forEach(line => {
+      const trimmed = String(line).trim();
+      if (!trimmed || trimmed.startsWith('#')) return;
+      const eq = trimmed.indexOf('=');
+      if (eq <= 0) return;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (!(key in process.env)) process.env[key] = value;
+    });
+    console.log('[env] 已加载根目录 .env');
+  }
+} catch (e) { /* 忽略 .env 读取失败 */ }
+
 // Automatically compile TypeScript AI services on startup
 try {
   const { execSync } = require('node:child_process');

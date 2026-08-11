@@ -24,7 +24,7 @@
           account.convertedFromSync=true;
           account.convertedTime=new Date().toISOString();
           delete account.__source;
-          fetch('/api/portfolio/rename',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:oldName,to:newName})}).catch(function(){});
+          fetch('/api/portfolio/rename',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},window.auth&&window.auth.authHeaders?window.auth.authHeaders():{}),body:JSON.stringify({from:oldName,to:newName})}).catch(function(){});
         }
         window.savePortfolioState?.();
         row.dataset.accountId=newName;
@@ -53,7 +53,7 @@
     document.body.appendChild(overlay);requestAnimationFrame(()=>overlay.classList.add('visible'));
     overlay.querySelector('[data-confirm="cancel"]').focus();
     const close=()=>{overlay.classList.remove('visible');setTimeout(()=>overlay.remove(),180)};
-    overlay.addEventListener('click',e=>{if(e.target===overlay||e.target.closest('[data-confirm="cancel"]')){close();return}if(e.target.closest('[data-confirm="delete"]')){names.forEach(name=>{const account=window.portfolioState.accounts[name];if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))){fetch('/api/portfolio/delete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:name})}).catch(function(){})}Object.values(window.portfolioState.accounts).forEach(a=>{if(Array.isArray(a.children)){const i=a.children.indexOf(name);if(i!==-1)a.children.splice(i,1)}});const target=window.portfolioState.accounts[name];if(target&&Array.isArray(target.children)){target.children.forEach(cn=>{if(window.portfolioState.accounts[cn])window.portfolioState.accounts[cn].parent=undefined})}delete window.portfolioState.accounts[name]});const active=window.portfolioState.getActive();if(!window.portfolioState.accounts[active])window.portfolioState.setActive(Object.keys(window.portfolioState.accounts)[0]||'');window.savePortfolioState?.();close();root.querySelector('[data-action="toggle-edit"]')?.click()}});
+    overlay.addEventListener('click',e=>{if(e.target===overlay||e.target.closest('[data-confirm="cancel"]')){close();return}if(e.target.closest('[data-confirm="delete"]')){names.forEach(name=>{const account=window.portfolioState.accounts[name];if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))){fetch('/api/portfolio/delete',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},window.auth&&window.auth.authHeaders?window.auth.authHeaders():{}),body:JSON.stringify({account_id:name})}).catch(function(){})}Object.values(window.portfolioState.accounts).forEach(a=>{if(Array.isArray(a.children)){const i=a.children.indexOf(name);if(i!==-1)a.children.splice(i,1)}});const target=window.portfolioState.accounts[name];if(target&&Array.isArray(target.children)){target.children.forEach(cn=>{if(window.portfolioState.accounts[cn])window.portfolioState.accounts[cn].parent=undefined})}delete window.portfolioState.accounts[name]});const active=window.portfolioState.getActive();if(!window.portfolioState.accounts[active])window.portfolioState.setActive(Object.keys(window.portfolioState.accounts)[0]||'');window.savePortfolioState?.();close();root.querySelector('[data-action="toggle-edit"]')?.click()}});
     overlay.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
   }
   function syncDelete(){

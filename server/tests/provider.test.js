@@ -190,6 +190,8 @@ test('Provider API：登录→导入→退出 全链路（stub）', async () => 
   await handleProviderApi(mockRequest('POST', {}), resLogout, apiUrl('/api/provider/stub/logout'));
   assert.equal(JSON.parse(resLogout.body).success, true);
   assert.equal((await getCredential('stub')).status, 'disconnected');
+  // 退出登录同时删除该数据源的同步账户
+  assert.ok(!(await listSyncedAccounts()).some(a => a.name === '养基宝-测试账户'));
   await clearSyncedAccount('养基宝-测试账户');
 
   registry.unregisterProvider('stub');
