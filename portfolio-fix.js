@@ -185,7 +185,19 @@
 
   // --- Column Customization State & Functions ---
   let sortKey = null;
-  let sortDirection = 'default';
+  // 五态循环：收益金额升序 → 收益金额降序 → 收益率升序 → 收益率降序 → 默认
+  let sortMode = 'default';
+  const rateSortable = { todayProfit: true, holdingProfit: true };
+  function sortedLabel(key, baseLabel) {
+    if (key !== sortKey || sortMode === 'default') return baseLabel;
+    const isRate = sortMode === 'rate-asc' || sortMode === 'rate-desc';
+    const arrow = (sortMode === 'rate-asc' || sortMode === 'value-asc') ? ' ↑' : ' ↓';
+    return baseLabel + (isRate ? '率' : '') + arrow;
+  }
+  function sortAria() {
+    if (sortMode === 'default') return 'none';
+    return (sortMode === 'rate-asc' || sortMode === 'value-asc') ? 'ascending' : 'descending';
+  }
   const defaultOrder = ['fund', 'todayProfit', 'holdingProfit', 'amount'];
   const columnLabels = {
     fund: { desktop: '基金', mobile: '基金' },
@@ -471,9 +483,7 @@
           html += `<span data-col-key="fund">基金</span>`;
         } else {
           const lbl = columnLabels[key];
-          const active = key === sortKey && sortDirection !== 'default';
-          const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
-          html += `<span data-col-key="${key}"><button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="${active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'}"><span class="desktop-label">${lbl.desktop}${arrow}</span><span class="mobile-label">${lbl.mobile}${arrow}</span></button></span>`;
+          html += `<span data-col-key="${key}"><button type="button" class="holding-sort-button" data-sort-key="${key}" aria-sort="${sortAria()}"><span class="desktop-label">${sortedLabel(key, lbl.desktop)}</span><span class="mobile-label">${sortedLabel(key, lbl.mobile)}</span></button></span>`;
         }
       });
       header.innerHTML = html;
@@ -557,11 +567,17 @@
   if (!root.dataset.fundSortBound) {
     root.dataset.fundSortBound = 'true';
 
-    const sortValue = (fund, key) => {
+    const sortValue = (fund, key, rate) => {
       if (key === 'amount') return Number(fund.amount) || 0;
-      if (key === 'holdingProfit') return Number.isFinite(fund.holdingProfit)
-        ? Number(fund.holdingProfit)
-        : (Number(fund.amount) || 0) * (Number(fund.hold) || 0);
+      if (rate) {
+        if (key === 'holdingProfit') return Number.isFinite(fund.holdingRate) ? Number(fund.holdingRate) : (Number(fund.hold) || 0);
+        return Number(fund.today) || 0;
+      }
+      if (key === 'holdingProfit') {
+        return Number.isFinite(fund.holdingProfit)
+          ? Number(fund.holdingProfit)
+          : (Number(fund.amount) || 0) * (Number(fund.hold) || 0);
+      }
       return Number.isFinite(fund.todayEstimate)
         ? Number(fund.todayEstimate)
         : (Number(fund.amount) || 0) * (Number(fund.today) || 0);
@@ -576,10 +592,8 @@
             const button = span?.querySelector('[data-sort-key]');
             if (button) {
               const lbl = columnLabels[key];
-              const active = key === sortKey && sortDirection !== 'default';
-              const arrow = active ? (sortDirection === 'asc' ? ' ↑' : ' ↓') : '';
-              button.innerHTML = `<span class="desktop-label">${lbl.desktop}${arrow}</span><span class="mobile-label">${lbl.mobile}${arrow}</span>`;
-              button.setAttribute('aria-sort', active ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none');
+              button.innerHTML = `<span class="desktop-label">${sortedLabel(key, lbl.desktop)}</span><span class="mobile-label">${sortedLabel(key, lbl.mobile)}</span>`;
+              button.setAttribute('aria-sort', sortAria());
             }
           }
         });
@@ -601,12 +615,14 @@
       const nextKey = button.dataset.sortKey;
       if (sortKey !== nextKey) {
         sortKey = nextKey;
-        sortDirection = 'asc';
-      } else if (sortDirection === 'asc') {
-        sortDirection = 'desc';
+        sortMode = 'value-asc';
       } else {
-        sortKey = null;
-        sortDirection = 'default';
+        if (sortMode === 'value-asc') sortMode = 'value-desc';
+        else if (sortMode === 'value-desc') sortMode = rateSortable[nextKey] ? 'rate-asc' : 'default';
+        else if (sortMode === 'rate-asc') sortMode = 'rate-desc';
+        else if (sortMode === 'rate-desc') sortMode = 'default';
+        else sortMode = 'value-asc';
+        if (sortMode === 'default') sortKey = null;
       }
 
       const accountFunds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : ((account && account.funds) || []);
@@ -614,12 +630,13 @@
       const fundsByCode = new Map(accountFunds.map(fund => [String(fund.code), fund]));
       const rows = [...list.querySelectorAll('.fund-row')];
       const orderedRows = rows.slice().sort((left, right) => {
-        if (sortDirection === 'default') {
+        if (sortMode === 'default') {
           return (orderByCode.get(String(left.dataset.code)) || 0) - (orderByCode.get(String(right.dataset.code)) || 0);
         }
-        const difference = sortValue(fundsByCode.get(String(left.dataset.code)) || {}, sortKey)
-          - sortValue(fundsByCode.get(String(right.dataset.code)) || {}, sortKey);
-        return sortDirection === 'asc' ? difference : -difference;
+        const isRate = sortMode === 'rate-asc' || sortMode === 'rate-desc';
+        const difference = sortValue(fundsByCode.get(String(left.dataset.code)) || {}, sortKey, isRate)
+          - sortValue(fundsByCode.get(String(right.dataset.code)) || {}, sortKey, isRate);
+        return (sortMode === 'rate-asc' || sortMode === 'value-asc') ? difference : -difference;
       });
 
       if (orderedRows.some((row, index) => row !== rows[index])) {
