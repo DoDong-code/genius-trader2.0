@@ -374,3 +374,42 @@ test('跨用户凭证兜底：本地登录后任意用户均可复用估值', as
   await deleteCredential('xiaobeiyangji', 5);
   registry.registerProvider('xiaobeiyangji', realXbyj);
 });
+
+test('Provider 估值：先返回有效值的胜出（不等慢的）', async () => {
+  const realXbyj = require('../providers/xiaobeiyangji');
+  const realYjb = require('../providers/yangjibao');
+  class FastProvider extends BaseProvider {
+    constructor() { super(); this.sourceName = 'xiaobeiyangji'; this.displayName = '小倍养基'; }
+    getLoginType() { return 'phone'; }
+    async fetch_estimate(code) {
+      await new Promise(r => setTimeout(r, 100));
+      return { fund_code: String(code), estimate_nav: 2.5, estimate_growth: 1.23 };
+    }
+  }
+  class SlowProvider extends BaseProvider {
+    constructor() { super(); this.sourceName = 'yangjibao'; this.displayName = '养基宝'; }
+    getLoginType() { return 'qrcode'; }
+    async fetch_estimate() {
+      await new Promise(r => setTimeout(r, 3000));
+      return { fund_code: '000001', estimate_nav: 2.5, estimate_growth: 1.23 };
+    }
+  }
+  registry.registerProvider('xiaobeiyangji', FastProvider);
+  registry.registerProvider('yangjibao', SlowProvider);
+  await deleteCredential('xiaobeiyangji');
+  await deleteCredential('yangjibao');
+  await saveCredential({ source_name: 'xiaobeiyangji', token: 't1', status: 'connected' });
+  await saveCredential({ source_name: 'yangjibao', token: 't2', status: 'connected' });
+
+  const started = Date.now();
+  const value = await fetchProviderEstimate('000001', 1000, { force: true });
+  const elapsed = Date.now() - started;
+  assert.ok(value);
+  assert.equal(value.estimate_source, 'xiaobeiyangji');
+  assert.ok(elapsed < 2500, `应不等慢的 Provider，实际 ${elapsed}ms`);
+
+  await deleteCredential('xiaobeiyangji');
+  await deleteCredential('yangjibao');
+  registry.registerProvider('xiaobeiyangji', realXbyj);
+  registry.registerProvider('yangjibao', realYjb);
+});

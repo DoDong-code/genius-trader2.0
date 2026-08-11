@@ -3,7 +3,7 @@
 
   var getApiBase = function() { return window.FUND_API_BASE || ''; };
   var active = 0;
-  var MAX_CONCURRENT = 3;
+  var MAX_CONCURRENT = 6;
   var queue = [];
   var FUND_SECTORS = {
     '014002': '\u5168\u7403\u667a\u80fd\u79d1\u6280',
@@ -78,6 +78,15 @@
       '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
     ];
     return holidays.indexOf(yyyymmdd) === -1;
+  }
+
+  // 是否已过收盘（A股 15:00，北京时间）
+  function isShanghaiAfterClose() {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date());
+    const time = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return Number(time.hour) * 60 + Number(time.minute) >= 15 * 60;
   }
 
   // QDII 类基金：今天结算上一交易日净值（如 8.7 交易，结算 8.6 净值）
@@ -255,7 +264,8 @@
   }
 
   function refreshFund(code, force) {
-    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '?refresh=1' + (force ? '&force=1' : '');
+    // 普通进入使用服务端缓存，避免每次都重抓数据源导致缓慢；仅手动刷新强制重抓
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + (force ? '?refresh=1&force=1' : '');
     return requestJson(endpoint).catch(function (error) {
       if (error.status !== 404) throw error;
       var importUrl = getApiBase() + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
@@ -350,27 +360,31 @@
         var estimateSource = estimate && (estimate.source || estimate.estimate_source);
         var providerLabel = providerDisplayName(estimateSource);
         var providerDataToday = providerLabel && estimate && String(estimate.estimate_time || '').slice(0, 10) === shanghaiToday;
+        // 交易时段：灰色估值标识（估值/小倍/养基宝）；收盘后：蓝色净值标识（已更新/小倍/养基宝 + 日期）
+        var marketClosed = !isTrading || isShanghaiAfterClose();
 
-        if (isTrading) {
-          if (officialUpdated) {
-            fund.navUpdatedAt = navDate;
-            updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
-            markNavUpdated(row, navDate, fund);
-          } else if (providerLabel && providerDataToday) {
+        if (officialUpdated) {
+          fund.navUpdatedAt = navDate;
+          updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
+          markNavUpdated(row, navDate, fund);
+        } else if (marketClosed) {
+          if (providerLabel && providerDataToday) {
             fund.navUpdatedAt = shanghaiToday;
             markProviderUpdated(row, shanghaiToday, fund, providerLabel);
-          } else {
-            markEstimateBadge(row, fund, providerLabel);
-          }
-        } else {
-          if (navDate) {
+          } else if (navDate) {
             fund.navUpdatedAt = navDate;
-            updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
+            if (!isTrading) updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
             markNavUpdated(row, navDate, fund);
           } else {
             delete fund.navUpdatedAt;
             clearNavUpdated(row);
+            markEstimateBadge(row, fund, providerLabel);
           }
+        } else {
+          // 交易时段：只显示灰色估值标识
+          delete fund.navUpdatedAt;
+          clearNavUpdated(row);
+          markEstimateBadge(row, fund, providerLabel);
         }
 
         var estimateDate = estimate && (estimate.trade_date || estimate.nav_date);

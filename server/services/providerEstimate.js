@@ -12,7 +12,7 @@ const { getConnectedCredential } = require('./sourceCredentials');
 const { getProvider } = require('../providers/registry');
 
 const PROVIDER_ORDER = ['xiaobeiyangji', 'yangjibao'];
-const PROVIDER_TIMEOUT_MS = 5000;
+const PROVIDER_TIMEOUT_MS = 2500;
 const CACHE_TTL_MS = 30000;
 
 const estimateCache = new Map(); // fund_code -> { at, value }
@@ -75,11 +75,23 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   }
 
   const userId = Number(options.userId) || 0;
-  const attempts = PROVIDER_ORDER.map(sourceName =>
-    tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
-  );
-  const results = await Promise.all(attempts);
-  const hit = results.find(value => value) || null;
+  // 任一 Provider 先返回有效估值即胜出，避免等待慢的那个；全部失败/超时才返回 null 走本地引擎兜底
+  const hit = await new Promise(resolve => {
+    const pending = PROVIDER_ORDER.map(sourceName =>
+      tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
+    );
+    let settled = 0;
+    pending.forEach(p => {
+      p.then(value => {
+        if (value) {
+          resolve(value);
+          return;
+        }
+        settled += 1;
+        if (settled === pending.length) resolve(null);
+      });
+    });
+  });
 
   if (hit && !options.force) {
     estimateCache.set(String(code), { at: Date.now(), value: hit });

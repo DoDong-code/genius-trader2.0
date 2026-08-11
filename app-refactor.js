@@ -1936,6 +1936,45 @@
     });
   }
 
+  // 诊断前强制刷新当前账户全部基金的最新数据（估值/净值），刷新完成后再交给 AI
+  async function refreshAccountDataBeforeAi() {
+    const a = acct();
+    const funds = effectiveFundsOf(a);
+    await Promise.all(funds.map(async (f) => {
+      if (!f || !f.code) return;
+      try {
+        const [snapshot, estimate] = await Promise.all([
+          providerApi(`/api/fund/${f.code}?refresh=1&force=1`),
+          providerApi(`/api/fund/${f.code}/estimate?amount=${Number(f.amount) || 0}&force=1`)
+        ]);
+        const est = (estimate && estimate.estimate) || estimate || {};
+        const change = Number(est.estimate_change);
+        if (Number.isFinite(change)) {
+          f.today = change;
+          const profit = Number(est.estimate_profit);
+          f.todayEstimate = Number.isFinite(profit) ? profit : ((Number(f.amount) || 0) * change);
+        }
+        const navDate = snapshot && snapshot.latest_nav && snapshot.latest_nav.date;
+        if (navDate) f.navUpdatedAt = navDate;
+      } catch (e) { /* 单只基金刷新失败不阻塞整体 */ }
+    }));
+    if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+  }
+
+  // 诊断入口：先刷新最新数据，再执行 AI 诊断
+  async function runAiDiagnosticsFresh(userQuery) {
+    const a = acct();
+    if (!a) return;
+    const runBtn = document.querySelector('#run-ai-analysis-btn');
+    if (runBtn) {
+      runBtn.disabled = true;
+      const text = runBtn.querySelector('.btn-text');
+      if (text) text.textContent = '正在刷新最新数据…';
+    }
+    await refreshAccountDataBeforeAi().catch(() => {});
+    runAiDiagnostics(userQuery);
+  }
+
   // Handle Enter key on AI Q&A Input
   root.addEventListener('keydown', e => {
     if (e.target.id === 'ai-question-input' && e.key === 'Enter') {
@@ -1983,7 +2022,7 @@
 
     const runAnalysisBtn = e.target.closest('#run-ai-analysis-btn');
     if (runAnalysisBtn) {
-      runAiDiagnostics(window.lastAIUserQuestion);
+      runAiDiagnosticsFresh(window.lastAIUserQuestion);
       return;
     }
 
@@ -2715,6 +2754,8 @@
   document.querySelectorAll('.nav-tab').forEach(b=>b.addEventListener('click',()=>{editing=false;selected.clear();render(b.dataset.view)}));
   render('portfolio');
   // 阶段1：启动时从服务端加载同步账户权威数据
+  // 先同步渲染当前视图（避免刷新瞬间闪现旧演示页），再异步合并同步账户
+  render(view);
   refreshSyncedAccounts().then(() => render(view)).catch(() => {});
   // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
   // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。
