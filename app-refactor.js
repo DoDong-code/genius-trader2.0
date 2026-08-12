@@ -1244,6 +1244,13 @@
     }
   }
   window.refreshSyncedAccounts = refreshSyncedAccounts;
+  // 供估值流程判断当前是否已登录第三方（小倍/养基宝）
+  window.getProviderConnected = function () {
+    return Boolean(
+      (providerStatusCache.yangjibao && providerStatusCache.yangjibao.logged_in) ||
+      (providerStatusCache.xiaobeiyangji && providerStatusCache.xiaobeiyangji.logged_in)
+    );
+  };
 
   function applyProviderStatus() {
     const yjb = providerStatusCache.yangjibao;
@@ -2764,6 +2771,7 @@
   // 阶段1：启动时从服务端加载同步账户权威数据
   // 先同步渲染当前视图（避免刷新瞬间闪现旧演示页），再异步合并同步账户
   render(view);
+  refreshProviderStatus().catch(() => {});
   refreshSyncedAccounts().then(() => render(view)).catch(() => {});
   // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
   // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。

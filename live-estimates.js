@@ -435,6 +435,28 @@
         row.dataset.estimateState = 'ready';
         markEstimatesRefreshed();
         if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+        // 已登录第三方但本次估值是本地引擎：稍后拉取第三方估值并更正（谁快谁先出）
+        if (!providerLabel && !officialUpdated) {
+          window.setTimeout(function () {
+            if (typeof window.getProviderConnected !== 'function' || !window.getProviderConnected()) return;
+            requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + (Number(fund.amount) || 0) + '&mode=provider')
+              .then(function (payload) {
+                if (!row.isConnected) return;
+                var pv = payload && (payload.estimate || payload);
+                var pChange = Number(pv && pv.estimate_change);
+                var pLabel = providerDisplayName(pv && (pv.source || pv.estimate_source));
+                if (!pLabel || !Number.isFinite(pChange)) return;
+                fund.today = pChange;
+                fund.todayEstimate = Number.isFinite(Number(pv.estimate_profit))
+                  ? Number(pv.estimate_profit)
+                  : (Number(fund.amount) || 0) * pChange;
+                updateTodayCell(row, fund.today, fund.todayEstimate);
+                clearNavUpdated(row);
+                markEstimateBadge(row, fund, pLabel);
+                if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+              }).catch(function () {});
+          }, 2500);
+        }
         window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code } }));
       }).catch(function () {
         if (row.isConnected) row.dataset.estimateState = 'error';

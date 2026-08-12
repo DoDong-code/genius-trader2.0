@@ -314,12 +314,36 @@ async function handleFundApi(request, response, url) {
     const amount = url.searchParams.has('amount')
       ? Number(url.searchParams.get('amount')) : undefined;
     const force = url.searchParams.get('force') === '1';
+    const mode = url.searchParams.get('mode');
     const { userFromRequest } = require('../services/authService');
     const user = await userFromRequest(request);
-    // 估值优先级：小倍养基 / 养基宝（已登录）→ 本地引擎测算（兜底）
     const { fetchProviderEstimate } = require('../services/providerEstimate');
-    const estimate = (await fetchProviderEstimate(match[0], amount, { force, userId: user ? Number(user.id) : 0 }))
-      || await calculateFundEstimate(match[0], { amount, force });
+    const userId = user ? Number(user.id) : 0;
+    let estimate;
+    if (mode === 'provider') {
+      // 仅取第三方估值（供前端在本地估值后更正）
+      estimate = await fetchProviderEstimate(match[0], amount, { force, userId });
+    } else if (mode === 'local') {
+      estimate = await calculateFundEstimate(match[0], { amount, force });
+    } else {
+      // 谁快谁先出：第三方与本地引擎并行，先返回有效值者胜出
+      const providerP = fetchProviderEstimate(match[0], amount, { force, userId }).catch(() => null);
+      const localP = calculateFundEstimate(match[0], { amount, force }).catch(() => null);
+      estimate = await new Promise(resolve => {
+        let settled = 0;
+        const check = () => { if (settled >= 2) resolve(null); };
+        [providerP, localP].forEach(p => {
+          p.then(value => {
+            if (value) {
+              resolve(value);
+              return;
+            }
+            settled += 1;
+            check();
+          });
+        });
+      });
+    }
     sendJson(response, 200, { success: true, ...estimate });
     return true;
   }
