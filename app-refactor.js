@@ -1280,6 +1280,36 @@
     }
   }
 
+  function applyExternalStatus() {
+    const statusText = document.querySelector('#external-status-text');
+    if (!statusText) return;
+    const genBtn = document.querySelector('#external-gen-btn');
+    const regenBtn = document.querySelector('#external-regen-btn');
+    const revokeBtn = document.querySelector('#external-revoke-btn');
+    const area = document.querySelector('#external-token-area');
+    providerApi('/api/external/token/status')
+      .then(data => {
+        if (data && data.hasToken) {
+          let text = '已生成';
+          if (data.createdAt) text += ' · 创建 ' + String(data.createdAt).replace('T', ' ').slice(0, 16);
+          if (data.lastUsedAt) text += ' · 最后使用 ' + String(data.lastUsedAt).replace('T', ' ').slice(0, 16);
+          statusText.textContent = text;
+          if (genBtn) genBtn.style.display = 'none';
+          if (regenBtn) regenBtn.style.display = '';
+          if (revokeBtn) revokeBtn.style.display = '';
+        } else {
+          statusText.textContent = '未生成';
+          if (genBtn) genBtn.style.display = '';
+          if (regenBtn) regenBtn.style.display = 'none';
+          if (revokeBtn) revokeBtn.style.display = 'none';
+        }
+        if (area) area.style.display = 'none';
+      })
+      .catch(() => {
+        statusText.textContent = '未登录或获取失败';
+      });
+  }
+
   function runProviderImport(sourceName, overwrite) {
     const names = { yangjibao: '养基宝', xiaobeiyangji: '小倍养基' };
     return providerApi(`/api/provider/${sourceName}/import`, {
@@ -1451,7 +1481,7 @@
     const savedModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
     const savedAPIKey = window.AI_API_KEY || '';
 
-    window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, strategy: true, dangerzone: true };
+    window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, external: true, strategy: true, dangerzone: true };
 
     let strategyItemsHtml = '';
     if (strategyList.length > 0) {
@@ -1740,6 +1770,38 @@
             </div>
           </div>
 
+          <!-- Section 3.5: 只读外部分析 API -->
+          <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(0,0,0,0.06); box-shadow: 0 4px 12px rgba(0,0,0,0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
+            <div class="settings-toggle-header" data-panel="external" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: #fafafa; border-bottom: 1px solid rgba(0,0,0,0.04); user-select: none;">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <span style="display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; color: #0071e3;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></span>
+                <div style="text-align: left;">
+                  <h2 style="font-size: 16px; font-weight: 650; margin: 0; color: #1d1d1f;">AI 分析授权</h2>
+                  <p style="font-size: 12px; color: #86868b; margin: 2px 0 0 0;">数据访问 · 只读 Token 供外部 AI 分析使用</p>
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="toggle-arrow" style="font-size: 14px; color: #86868b; transition: transform 0.2s; transform: ${window.settingsCollapsedState.external ? 'rotate(-90deg)' : 'rotate(0deg)'}; font-weight: bold; display: inline-block;">▼</span>
+              </div>
+            </div>
+            <div class="panel-body-external" style="display: ${window.settingsCollapsedState.external ? 'none' : 'block'}; padding: 24px;">
+              <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">只读 Token 仅用于 AI 分析账户数据，不允许修改、删除、同步或交易。</p>
+              <div style="font-size: 13px; color: #1d1d1f; margin-bottom: 12px;">状态：<b id="external-status-text">检查中…</b></div>
+              <div style="display: flex; gap: 8px;">
+                <button class="primary" id="external-gen-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">生成只读 Token</button>
+                <button class="secondary-button" id="external-regen-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: none;">重新生成</button>
+                <button id="external-revoke-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; display: none;">撤销 Token</button>
+              </div>
+              <div id="external-token-area" style="display: none; margin-top: 14px;">
+                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px;">只读 Token（仅显示一次，请立即复制保存）</label>
+                <div style="display: flex; gap: 8px;">
+                  <input type="text" id="external-token-input" readonly style="flex: 1; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 12px; font-family: monospace; background: #f5f5f7; outline: none; box-sizing: border-box;" />
+                  <button class="secondary-button" id="external-copy-btn" style="white-space: nowrap;">复制</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <!-- Section 4: Danger Zone -->
           <div class="panel" style="padding: 0; border-radius: 18px; box-sizing: border-box; background: #fff; border: 1px solid rgba(255, 59, 48, 0.15); box-shadow: 0 4px 12px rgba(255, 59, 48, 0.01); overflow: hidden; transition: all 0.25s ease-in-out; width: 100%;">
             <div class="settings-toggle-header" data-panel="dangerzone" style="display: flex; justify-content: space-between; align-items: center; padding: 20px 24px; cursor: pointer; background: rgba(255, 59, 48, 0.02); border-bottom: 1px solid rgba(255, 59, 48, 0.08); user-select: none;">
@@ -1765,6 +1827,7 @@
     `;
     applyProviderStatus();
     refreshProviderStatus().then(() => { if (view === 'setting') applyProviderStatus(); }).catch(() => {});
+    applyExternalStatus();
   }
 
   function render(v){
@@ -1986,6 +2049,10 @@
       if (text) text.textContent = '正在刷新最新数据…';
     }
     await refreshAccountDataBeforeAi().catch(() => {});
+    // 确保云端 user_data 已包含刚刷新的数据，DeepSeek 与持仓页面使用同一数据源
+    if (typeof window.backupToCloud === 'function') {
+      try { await window.backupToCloud(); } catch (e) { /* 云端同步失败不阻塞诊断 */ }
+    }
     if (typeof window.markEstimatesRefreshed === 'function') window.markEstimatesRefreshed();
     runAiDiagnostics(userQuery);
   }
@@ -2167,7 +2234,7 @@
     if (toggleHeader) {
       const panelKey = toggleHeader.dataset.panel;
       if (panelKey) {
-        window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, strategy: true, dangerzone: true };
+        window.settingsCollapsedState = window.settingsCollapsedState || { datasource: true, aimodel: true, providers: true, external: true, strategy: true, dangerzone: true };
         window.settingsCollapsedState[panelKey] = !window.settingsCollapsedState[panelKey];
         setting();
       }
@@ -2200,6 +2267,62 @@
       return;
     }
 
+    // --- AI 分析授权（只读 Token）---
+    const externalGenBtn = e.target.closest('#external-gen-btn');
+    if (externalGenBtn) {
+      providerApi('/api/external/token', { method: 'POST' })
+        .then(data => {
+          if (data && data.token) {
+            const input = document.querySelector('#external-token-input');
+            const area = document.querySelector('#external-token-area');
+            if (input) input.value = data.token;
+            if (area) area.style.display = 'block';
+            showToast('只读 Token 已生成，请立即复制保存');
+          }
+        })
+        .catch(() => showToast('生成失败，请先登录账号', 'error'));
+      return;
+    }
+
+    const externalCopyBtn = e.target.closest('#external-copy-btn');
+    if (externalCopyBtn) {
+      const input = document.querySelector('#external-token-input');
+      if (input && input.value) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(input.value).then(() => showToast('已复制')).catch(() => showToast('复制失败，请手动选择复制', 'error'));
+        } else {
+          input.select();
+          document.execCommand('copy');
+          showToast('已复制');
+        }
+      }
+      return;
+    }
+
+    const externalRevokeBtn = e.target.closest('#external-revoke-btn');
+    if (externalRevokeBtn) {
+      providerApi('/api/external/token/revoke', { method: 'POST' })
+        .then(() => { applyExternalStatus(); showToast('只读 Token 已撤销'); })
+        .catch(() => showToast('撤销失败', 'error'));
+      return;
+    }
+
+    const externalRegenBtn = e.target.closest('#external-regen-btn');
+    if (externalRegenBtn) {
+      providerApi('/api/external/token/regenerate', { method: 'POST' })
+        .then(data => {
+          if (data && data.token) {
+            const input = document.querySelector('#external-token-input');
+            const area = document.querySelector('#external-token-area');
+            if (input) input.value = data.token;
+            if (area) area.style.display = 'block';
+            applyExternalStatus();
+            showToast('新的只读 Token 已生成，旧的已撤销');
+          }
+        })
+        .catch(() => showToast('重新生成失败', 'error'));
+      return;
+    }
 
 
     const saveApiBtn = e.target.closest('#save-api-btn');

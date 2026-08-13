@@ -51,6 +51,17 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // ---- 只读外部分析 API（Token 管理用会话登录态；数据接口用只读 Token）----
+  if (url.pathname.startsWith('/api/external/')) {
+    const { handleExternalApi, handleExternalAuthApi } = require('./external');
+    if (url.pathname.startsWith('/api/external/token')) {
+      const { userFromRequest } = require('../services/authService');
+      const user = await userFromRequest(request);
+      return handleExternalAuthApi(request, response, url, user ? Number(user.id) : 0);
+    }
+    return handleExternalApi(request, response, url);
+  }
+
   // ---- 账号认证 ----
   if (url.pathname === '/api/auth/register' && request.method === 'POST') {
     const body = await readJsonBody(request);
@@ -221,10 +232,26 @@ async function handleFundApi(request, response, url) {
       }
 
       if (url.pathname === '/api/ai/analyze') {
-        const portfolio = body.portfolio;
         const config = body.config || {};
         if (headerKey && !config.apiKey) {
           config.apiKey = headerKey;
+        }
+
+        // 统一数据源：与持仓页面、外部分析 API 一致（服务端按当前登录用户构建）
+        const { userFromRequest } = require('../services/authService');
+        const user = await userFromRequest(request);
+        const userId = user ? Number(user.id) : 0;
+        const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+        let portfolio;
+        try {
+          portfolio = await buildAnalysisPortfolio(userId);
+        } catch (err) {
+          // 兜底：使用客户端提供的结构，不破坏现有功能
+          portfolio = body.portfolio;
+        }
+        if (body && body.userQuery) {
+          portfolio = portfolio || {};
+          portfolio.userQuery = body.userQuery;
         }
 
         const ai = require('../services/ai/index');

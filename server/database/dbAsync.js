@@ -187,6 +187,14 @@ async function ensureCloudSchema() {
       user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       data TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS read_tokens (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL DEFAULT 0,
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_used_at TIMESTAMPTZ,
+      revoked_at TIMESTAMPTZ
     )`
   ];
   const db = await getPool();

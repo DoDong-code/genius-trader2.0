@@ -1230,6 +1230,12 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     padding-left: 0 !important;
     padding-right: 0 !important;
   }
+  /* 三方按钮组（养基宝/小倍/外部分析）：移动端统一全圆角，避免前圆后方的错位 */
+  #yjb-import-btn, #yjb-overwrite-btn, #yjb-logout-btn,
+  #xbyj-import-btn, #xbyj-overwrite-btn, #xbyj-logout-btn,
+  #external-gen-btn, #external-regen-btn, #external-revoke-btn {
+    border-radius: 999px !important;
+  }
 }
 .column-item-fixed {
   background: rgba(0,0,0,0.03);
