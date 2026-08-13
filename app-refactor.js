@@ -1291,9 +1291,14 @@
     const statusText = document.querySelector('#external-status-text');
     if (!statusText) return;
     const genBtn = document.querySelector('#external-gen-btn');
-    const regenBtn = document.querySelector('#external-regen-btn');
     const revokeBtn = document.querySelector('#external-revoke-btn');
     const area = document.querySelector('#external-token-area');
+    const apiArea = document.querySelector('#external-api-area');
+    const apiUrlEl = document.querySelector('#external-api-url');
+    const copyApiBtn = document.querySelector('#external-copy-api-btn');
+    const testApiBtn = document.querySelector('#external-test-api-btn');
+    const testResultEl = document.querySelector('#external-test-result');
+
     providerApi('/api/external/token/status')
       .then(data => {
         if (data && data.hasToken) {
@@ -1301,19 +1306,36 @@
           if (data.createdAt) text += ' · 创建 ' + String(data.createdAt).replace('T', ' ').slice(0, 16);
           if (data.lastUsedAt) text += ' · 最后使用 ' + String(data.lastUsedAt).replace('T', ' ').slice(0, 16);
           statusText.textContent = text;
-          if (genBtn) genBtn.style.display = 'none';
-          if (regenBtn) regenBtn.style.display = '';
+          if (genBtn) genBtn.style.display = '';
           if (revokeBtn) revokeBtn.style.display = '';
+
+          const cachedToken = localStorage.getItem('genius_external_token');
+          if (apiArea) apiArea.style.display = 'block';
+          if (apiUrlEl) {
+            if (cachedToken) {
+              const apiBase = window.FUND_API_BASE || window.location.origin;
+              apiUrlEl.textContent = `${apiBase}/api/external/analysis?token=${cachedToken}`;
+              if (copyApiBtn) copyApiBtn.style.opacity = '1';
+              if (testApiBtn) testApiBtn.style.opacity = '1';
+            } else {
+              apiUrlEl.innerHTML = '<span style="color: #86868b; font-style: italic;">只读 Token 已在服务端生成，但因安全策略明文仅在创建时显示一次。如果您需要获取 API 完整地址，请重新生成（点击上方“生成”按钮即可）。</span>';
+              if (copyApiBtn) copyApiBtn.style.opacity = '0.5';
+              if (testApiBtn) testApiBtn.style.opacity = '0.5';
+            }
+          }
         } else {
           statusText.textContent = '未生成';
           if (genBtn) genBtn.style.display = '';
-          if (regenBtn) regenBtn.style.display = 'none';
           if (revokeBtn) revokeBtn.style.display = 'none';
+          if (apiArea) apiArea.style.display = 'none';
+          if (testResultEl) testResultEl.style.display = 'none';
+          localStorage.removeItem('genius_external_token');
         }
         if (area) area.style.display = 'none';
       })
       .catch(() => {
         statusText.textContent = '未登录或获取失败';
+        if (apiArea) apiArea.style.display = 'none';
       });
   }
 
@@ -1794,17 +1816,25 @@
             <div class="panel-body-external" style="display: ${window.settingsCollapsedState.external ? 'none' : 'block'}; padding: 24px;">
               <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">只读 Token 仅用于 AI 分析账户数据，不允许修改、删除、同步或交易。</p>
               <div style="font-size: 13px; color: #1d1d1f; margin-bottom: 12px;">状态：<b id="external-status-text">检查中…</b></div>
-              <div style="display: flex; gap: 8px;">
-                <button class="primary" id="external-gen-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">生成只读 Token</button>
-                <button class="secondary-button" id="external-regen-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: none;">重新生成</button>
-                <button id="external-revoke-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; display: none;">撤销 Token</button>
-              </div>
-              <div id="external-token-area" style="display: none; margin-top: 14px;">
-                <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px;">只读 Token（仅显示一次，请立即复制保存）</label>
-                <div style="display: flex; gap: 8px;">
-                  <input type="text" id="external-token-input" readonly style="flex: 1; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 12px; font-family: monospace; background: #f5f5f7; outline: none; box-sizing: border-box;" />
-                  <button class="secondary-button" id="external-copy-btn" style="white-space: nowrap;">复制</button>
+              
+              <!-- API 地址 Area -->
+              <div id="external-api-area" style="display: none; margin-bottom: 18px; padding: 16px; background: #f5f5f7; border-radius: 12px; border: 1px solid rgba(0,0,0,0.06);">
+                <div style="font-size: 12px; font-weight: 600; color: #1d1d1f; margin-bottom: 6px;">API 地址</div>
+                <div style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0071e3; margin-bottom: 12px; line-height: 1.5;" id="external-api-url">正在加载...</div>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                  <button class="secondary-button" id="external-copy-api-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer;">[复制 API 地址]</button>
+                  <button class="secondary-button" id="external-test-api-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer;">[测试 API]</button>
                 </div>
+                <!-- Test Result Box -->
+                <div id="external-test-result" style="display: none; padding: 12px; background: #fff; border-radius: 8px; border: 1px solid rgba(0,0,0,0.05); font-size: 12px; line-height: 1.6; color: #1d1d1f;"></div>
+              </div>
+
+              <div style="display: flex; gap: 8px;">
+                <button class="primary" id="external-gen-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px;">生成</button>
+                <button id="external-revoke-btn" style="flex: 1; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: rgba(255,59,48,0.08); color: #ff3b30; border: 1px solid rgba(255,59,48,0.2); cursor: pointer; font-weight: 600; display: none;">撤销</button>
+              </div>
+              <div id="external-token-area" style="display: none;">
+                <input type="text" id="external-token-input" readonly />
               </div>
             </div>
           </div>
@@ -2280,54 +2310,112 @@
       providerApi('/api/external/token', { method: 'POST' })
         .then(data => {
           if (data && data.token) {
-            const input = document.querySelector('#external-token-input');
-            const area = document.querySelector('#external-token-area');
-            if (input) input.value = data.token;
-            if (area) area.style.display = 'block';
-            showToast('只读 Token 已生成，请立即复制保存');
+            localStorage.setItem('genius_external_token', data.token);
+            applyExternalStatus();
+            showToast('只读 Token 已生成并应用到 API 地址');
           }
         })
         .catch(() => showToast('生成失败，请先登录账号', 'error'));
       return;
     }
 
-    const externalCopyBtn = e.target.closest('#external-copy-btn');
-    if (externalCopyBtn) {
-      const input = document.querySelector('#external-token-input');
-      if (input && input.value) {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(input.value).then(() => showToast('已复制')).catch(() => showToast('复制失败，请手动选择复制', 'error'));
-        } else {
-          input.select();
-          document.execCommand('copy');
-          showToast('已复制');
-        }
+    const externalCopyApiBtn = e.target.closest('#external-copy-api-btn');
+    if (externalCopyApiBtn) {
+      const token = localStorage.getItem('genius_external_token');
+      if (!token) {
+        showToast('复制失败：请先点击上方“生成”按钮生成 Token', 'error');
+        return;
       }
+      const apiBase = window.FUND_API_BASE || window.location.origin;
+      const fullUrl = `${apiBase}/api/external/analysis?token=${token}`;
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fullUrl)
+          .then(() => showToast('已复制 API 完整地址'))
+          .catch(() => showToast('复制失败，请手动选择复制', 'error'));
+      } else {
+        const tempInput = document.createElement('input');
+        tempInput.value = fullUrl;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        showToast('已复制 API 完整地址');
+      }
+      return;
+    }
+
+    const externalTestApiBtn = e.target.closest('#external-test-api-btn');
+    if (externalTestApiBtn) {
+      const resultArea = document.querySelector('#external-test-result');
+      if (resultArea) {
+        resultArea.style.display = 'block';
+        resultArea.innerHTML = '<span style="color: #86868b; font-size: 12px; font-style: italic;">正在测试 API 接口...</span>';
+      }
+
+      const token = localStorage.getItem('genius_external_token');
+      if (!token) {
+        if (resultArea) {
+          resultArea.innerHTML = '<span style="color: #ff3b30; font-weight: 500;">✗ 测试失败：本地无可用 Token 明文，请先点击上方“生成”按钮生成 Token</span>';
+        }
+        return;
+      }
+
+      const apiBase = window.FUND_API_BASE || window.location.origin;
+      const fullUrl = `${apiBase}/api/external/analysis?token=${token}`;
+
+      fetch(fullUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP 错误 ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.success) {
+            const firstAccount = data.accounts && data.accounts[0] ? data.accounts[0].name : '无';
+            const uniqueCodes = new Set();
+            if (data.accounts) {
+              data.accounts.forEach(acc => {
+                if (acc.holdings) {
+                  acc.holdings.forEach(h => uniqueCodes.add(h.code));
+                }
+              });
+            }
+            const holdingCount = uniqueCodes.size;
+            const formattedAssets = Number(data.totalAssets || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            if (resultArea) {
+              resultArea.innerHTML = `
+                <div style="color: #34c759; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
+                  <span>✓ API 正常</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; color: #1d1d1f; font-size: 12px;">
+                  <div><b>账户：</b>${esc(firstAccount)}</div>
+                  <div><b>总资产：</b>¥${formattedAssets}</div>
+                  <div><b>持仓：</b>${holdingCount} 只</div>
+                </div>
+              `;
+            }
+          } else {
+            throw new Error(data.error || 'API 响应异常');
+          }
+        })
+        .catch(err => {
+          if (resultArea) {
+            resultArea.innerHTML = `<span style="color: #ff3b30; font-weight: 500;">✗ API 测试失败：${esc(err.message)}</span>`;
+          }
+        });
       return;
     }
 
     const externalRevokeBtn = e.target.closest('#external-revoke-btn');
     if (externalRevokeBtn) {
       providerApi('/api/external/token/revoke', { method: 'POST' })
-        .then(() => { applyExternalStatus(); showToast('只读 Token 已撤销'); })
-        .catch(() => showToast('撤销失败', 'error'));
-      return;
-    }
-
-    const externalRegenBtn = e.target.closest('#external-regen-btn');
-    if (externalRegenBtn) {
-      providerApi('/api/external/token/regenerate', { method: 'POST' })
-        .then(data => {
-          if (data && data.token) {
-            const input = document.querySelector('#external-token-input');
-            const area = document.querySelector('#external-token-area');
-            if (input) input.value = data.token;
-            if (area) area.style.display = 'block';
-            applyExternalStatus();
-            showToast('新的只读 Token 已生成，旧的已撤销');
-          }
+        .then(() => {
+          localStorage.removeItem('genius_external_token');
+          applyExternalStatus();
+          showToast('已撤销');
         })
-        .catch(() => showToast('重新生成失败', 'error'));
+        .catch(() => showToast('撤销失败', 'error'));
       return;
     }
 
@@ -2600,13 +2688,37 @@
 
     const xbyjSmsBtn = e.target.closest('#xbyj-sms-btn');
     if (xbyjSmsBtn) {
+      if (xbyjSmsBtn.disabled) return;
       const phone = ((document.querySelector('#xbyj-phone') || {}).value || '').trim();
       if (!/^1\d{10}$/.test(phone)) { showToast('请输入正确的手机号', 'warning'); return; }
+      
       providerApi('/api/provider/xiaobeiyangji/sendSMS', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone })
-      }).then(() => showToast('验证码已发送，请注意查收')).catch(err => showToast(`验证码发送失败：${err.message || '网络错误'}`, 'error'));
+      }).then(() => {
+        showToast('验证码已发送，请注意查收');
+        let count = 60;
+        xbyjSmsBtn.disabled = true;
+        xbyjSmsBtn.style.cursor = 'not-allowed';
+        xbyjSmsBtn.style.opacity = '0.6';
+        xbyjSmsBtn.textContent = `${count}s`;
+        
+        const interval = setInterval(() => {
+          count--;
+          if (count <= 0) {
+            clearInterval(interval);
+            xbyjSmsBtn.disabled = false;
+            xbyjSmsBtn.style.cursor = '';
+            xbyjSmsBtn.style.opacity = '';
+            xbyjSmsBtn.textContent = '验证码';
+          } else {
+            xbyjSmsBtn.textContent = `${count}s`;
+          }
+        }, 1000);
+      }).catch(err => {
+        showToast(`验证码发送失败：${err.message || '网络错误'}`, 'error');
+      });
       return;
     }
 

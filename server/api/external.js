@@ -96,6 +96,64 @@ async function handleExternalApi(request, response, url) {
     sendJson(response, 200, { success: true, ...data });
     return true;
   }
+  if (url.pathname === '/api/external/analysis' && request.method === 'GET') {
+    const { loadUserAccounts, buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+    const accountsList = await loadUserAccounts(userId);
+    let totalAssets = 0;
+    const processedAccounts = [];
+
+    for (const acc of accountsList) {
+      const port = await buildAnalysisPortfolio(userId, { accountId: acc.name });
+      const accountValue = port.account ? port.account.totalValue : 0;
+      totalAssets += accountValue;
+
+      const enrichedHoldings = [];
+      if (port.holdings) {
+        for (const h of port.holdings) {
+          const rawFund = acc.funds ? acc.funds.find(f => String(f.code) === String(h.code)) : null;
+          const transactions = rawFund && Array.isArray(rawFund.transactions) ? rawFund.transactions : [];
+          const shares = rawFund ? (Number(rawFund.shares) || 0) : 0;
+          
+          let cost = 0;
+          if (rawFund) {
+            if (Number.isFinite(Number(rawFund.cost)) && Number(rawFund.cost) > 0) {
+              cost = Number(rawFund.cost);
+            } else if (Number.isFinite(Number(rawFund.costBasis)) && Number(rawFund.costBasis) > 0) {
+              cost = Number(rawFund.costBasis);
+            } else {
+              cost = Number(h.amount) - Number(h.profit);
+            }
+          } else {
+            cost = Number(h.amount) - Number(h.profit);
+          }
+
+          enrichedHoldings.push({
+            ...h,
+            cost,
+            shares,
+            transactions
+          });
+        }
+      }
+
+      processedAccounts.push({
+        name: acc.name,
+        source: acc.source,
+        accountTypeLabel: acc.accountTypeLabel || acc.type || (acc.source === 'sync' ? '同步账户' : '手动账户'),
+        totalValue: accountValue,
+        strategies: port.strategies || [],
+        strategyAnalysis: port.strategy || { core: [], forbidden: [], rules: [] },
+        holdings: enrichedHoldings
+      });
+    }
+
+    sendJson(response, 200, {
+      success: true,
+      totalAssets,
+      accounts: processedAccounts
+    });
+    return true;
+  }
   if (url.pathname === '/api/external/analysis/accounts' && request.method === 'GET') {
     const accounts = await listAnalysisAccounts(userId);
     sendJson(response, 200, { success: true, accounts });

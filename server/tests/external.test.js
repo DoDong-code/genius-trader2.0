@@ -152,3 +152,45 @@ test('只读 Token：重新生成后旧 Token 失效', async () => {
   assert.ok(await validateToken(newToken));
   await revokeTokens(5);
 });
+
+test('只读 Token：GET /api/external/analysis 统一接口返回完整的真实数据', async () => {
+  await saveUserState(10, {
+    accounts: {
+      '核心账户': { name: '核心账户', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金A', amount: 3000, today: 0.01, profit: 300, category: '混合', transactions: [{ type: 'buy', amount: 3000, date: '2026-08-01' }] }], strategy: ['只买大盘股'], closedPositions: [] },
+      '理财账户': { name: '理财账户', accountType: 'local', syncSource: null, funds: [{ code: '000002', name: '测试基金B', amount: 2000, today: -0.005, profit: -50, category: '债券', transactions: [] }], strategy: [], closedPositions: [] }
+    }
+  });
+
+  const token = (await generateToken(10)).token;
+  const req = mockRequest('GET');
+  req.headers.authorization = `Bearer ${token}`;
+  const res = mockResponse();
+
+  await handleExternalApi(req, res, apiUrl('/api/external/analysis'));
+  assert.equal(res.statusCode, 200);
+  const data = json(res);
+  
+  assert.equal(data.success, true);
+  assert.equal(data.totalAssets, 5000);
+  assert.equal(data.accounts.length, 2);
+
+  const acc1 = data.accounts.find(a => a.name === '核心账户');
+  assert.ok(acc1);
+  assert.equal(acc1.totalValue, 3000);
+  assert.deepEqual(acc1.strategies, ['只买大盘股']);
+  assert.equal(acc1.holdings.length, 1);
+  assert.equal(acc1.holdings[0].code, '000001');
+  assert.equal(acc1.holdings[0].name, '测试基金A');
+  assert.equal(acc1.holdings[0].cost, 2700); // 3000 - 300
+  assert.deepEqual(acc1.holdings[0].transactions, [{ type: 'buy', amount: 3000, date: '2026-08-01' }]);
+
+  const acc2 = data.accounts.find(a => a.name === '理财账户');
+  assert.ok(acc2);
+  assert.equal(acc2.totalValue, 2000);
+  assert.equal(acc2.holdings.length, 1);
+  assert.equal(acc2.holdings[0].code, '000002');
+  assert.equal(acc2.holdings[0].cost, 2050); // 2000 - (-50)
+
+  await revokeTokens(10);
+});
+
