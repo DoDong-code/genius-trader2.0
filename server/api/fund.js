@@ -20,7 +20,7 @@ function sendJson(response, statusCode, payload) {
     'Cache-Control': 'no-store',
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type,X-AI-API-Key'
+    'Access-Control-Allow-Headers': 'Content-Type,X-AI-API-Key,Authorization'
   });
   response.end(JSON.stringify(payload));
 }
@@ -350,7 +350,14 @@ async function handleFundApi(request, response, url) {
     let estimate;
     if (mode === 'provider') {
       // 仅取第三方估值（供前端在本地估值后更正）
-      estimate = await fetchProviderEstimate(match[0], amount, { force, userId });
+      estimate = await fetchProviderEstimate(match[0], amount, {
+        force,
+        userId,
+        source: url.searchParams.get('source') || undefined
+      });
+      if (!estimate) {
+        estimate = await calculateFundEstimate(match[0], { amount, force });
+      }
     } else if (mode === 'local') {
       estimate = await calculateFundEstimate(match[0], { amount, force });
     } else {

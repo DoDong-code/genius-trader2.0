@@ -67,7 +67,7 @@ async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
  * 获取优先估值；无 Provider 估值时返回 null（由调用方走本地引擎兜底）
  * @param {string} code 基金代码
  * @param {number|undefined} amount 持有金额（用于估算收益）
- * @param {{force?: boolean}} options
+ * @param {{force?: boolean, source?: string, userId?: number}} options
  */
 async function fetchProviderEstimate(code, amount, options = {}) {
   if (!options.force) {
@@ -78,7 +78,8 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   const userId = Number(options.userId) || 0;
   // 任一 Provider 先返回有效估值即胜出，避免等待慢的那个；全部失败/超时才返回 null 走本地引擎兜底
   const hit = await new Promise(resolve => {
-    const pending = PROVIDER_ORDER.map(sourceName =>
+    const order = options.source ? PROVIDER_ORDER.filter(name => name === options.source) : PROVIDER_ORDER;
+    const pending = order.map(sourceName =>
       tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
     );
     let settled = 0;

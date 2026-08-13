@@ -1251,6 +1251,13 @@
       (providerStatusCache.xiaobeiyangji && providerStatusCache.xiaobeiyangji.logged_in)
     );
   };
+  // For estimate source switcher: expose provider login status
+  window.getProviderStatus = function () {
+    return {
+      yangjibao: Boolean(providerStatusCache.yangjibao && providerStatusCache.yangjibao.logged_in),
+      xiaobeiyangji: Boolean(providerStatusCache.xiaobeiyangji && providerStatusCache.xiaobeiyangji.logged_in)
+    };
+  };
 
   function applyProviderStatus() {
     const yjb = providerStatusCache.yangjibao;

@@ -2,6 +2,7 @@
   const getApiBase = () => window.FUND_API_BASE || '';
   const root = document.querySelector('#view-root');
   if (!root || !window.portfolioState) return;
+  const detailApiFundCache = {};
 
   function migrateFundCodes() {
     let changed = false;
@@ -954,14 +955,19 @@
   }
 
   async function requestFund(code) {
-    let response = await fetch(`${getApiBase()}/api/fund/${code}?refresh=1`);
+    const now = Date.now();
+    const lastRefresh = detailApiFundCache[String(code)] || 0;
+    const forceRefresh = now - lastRefresh > 5 * 60 * 1000;
+    let response = await fetch(`${getApiBase()}/api/fund/${code}${forceRefresh ? '?refresh=1' : ''}`);
     if (response.status === 404) {
       const imported = await fetch(`${getApiBase()}/api/fund/import/${code}`);
       if (!imported.ok) throw new Error('基金导入失败');
       response = await fetch(`${getApiBase()}/api/fund/${code}?refresh=1`);
     }
     if (!response.ok) throw new Error('基金数据读取失败');
-    return response.json();
+    const payload = await response.json();
+    detailApiFundCache[String(code)] = now;
+    return payload;
   }
 
   async function loadRealData(fund, backdrop) {

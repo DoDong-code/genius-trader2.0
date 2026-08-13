@@ -48,6 +48,14 @@ function bearerToken(request) {
   return match ? match[1].trim() : null;
 }
 
+// 兼容 Query 参数鉴权：GET ?token=<只读Token>（与 Authorization: Bearer 使用同一套验证）
+function resolveToken(request, url) {
+  const header = bearerToken(request);
+  if (header) return header;
+  const queryToken = url && url.searchParams ? url.searchParams.get('token') : null;
+  return queryToken || null;
+}
+
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
     let chunkStr = '';
@@ -72,7 +80,7 @@ async function handleExternalApi(request, response, url) {
     response.end();
     return true;
   }
-  const token = bearerToken(request);
+  const token = resolveToken(request, url);
   const auth = token ? await validateToken(token) : null;
   if (!auth) {
     sendJson(response, 401, { success: false, error: '无效或已撤销的只读 Token' });

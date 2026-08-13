@@ -261,7 +261,8 @@
   }
 
   function requestJson(url, options) {
-    return fetch(url, options).then(function (response) {
+    var headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
+    return fetch(url, Object.assign({}, options, { headers: headers })).then(function (response) {
       if (!response.ok) {
         var error = new Error('HTTP ' + response.status);
         error.status = response.status;
@@ -284,7 +285,22 @@
 
   function estimateFund(code, amount, force) {
     var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
+    var source = preferredEstimateSource();
+    if (source === 'local') {
+      endpoint += '&mode=local';
+    } else {
+      endpoint += '&mode=provider&source=' + encodeURIComponent(source);
+    }
     return requestJson(endpoint);
+  }
+
+  function preferredEstimateSource() {
+    var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
+    try {
+      return localStorage.getItem('estimate_source_' + accountName) || 'local';
+    } catch (err) {
+      return 'local';
+    }
   }
 
   function officialNavChange(snapshot, navDate) {
@@ -324,12 +340,44 @@
     drain();
   }
 
-  function hydrateRow(row, force) {
+  function hydrateRow(row, force, estimateOnly) {
     if (!row || row.dataset.estimateState === 'loading' || (!force && (row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable'))) return;
     var code = row.dataset.code;
     var fund = currentFund(code);
     if (!code || !fund) return;
     setFundMeta(row, fund);
+    if (estimateOnly) {
+      row.dataset.estimateState = 'loading';
+      enqueue(function () {
+        return estimateFund(code, fund.amount, force).then(function (payload) {
+          if (!row.isConnected) return;
+          var estimate = payload && (payload.estimate || payload);
+          var change = Number(estimate && estimate.estimate_change);
+          if (!Number.isFinite(change)) {
+            showEstimateUnavailable(row);
+            row.dataset.estimateState = 'unavailable';
+            return;
+          }
+          var profit = Number.isFinite(Number(estimate.estimate_profit))
+            ? Number(estimate.estimate_profit)
+            : (Number(fund.amount) || 0) * change;
+          var pLabel = providerDisplayName(estimate && (estimate.source || estimate.estimate_source));
+          fund.today = change;
+          fund.todayEstimate = profit;
+          fund.estimateConfidence = estimate.confidence || null;
+          clearNavUpdated(row);
+          markEstimateBadge(row, fund, pLabel);
+          updateTodayCell(row, change, profit);
+          row.dataset.estimateState = 'ready';
+          markEstimatesRefreshed();
+          if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+          window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code } }));
+        }).catch(function () {
+          if (row.isConnected) row.dataset.estimateState = 'error';
+        });
+      });
+      return;
+    }
     // 已更新净值的基金：切换 tab 直接复用缓存，不重复请求（除非手动刷新数据）
     var cachedNav = updatedNavDates[String(code)];
     if (!force && cachedNav && cachedNav.day === shanghaiDate()) {
@@ -439,7 +487,7 @@
         if (!providerLabel && !officialUpdated) {
           window.setTimeout(function () {
             if (typeof window.getProviderConnected !== 'function' || !window.getProviderConnected()) return;
-            requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + (Number(fund.amount) || 0) + '&mode=provider')
+            requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + (Number(fund.amount) || 0) + '&mode=provider&source=' + encodeURIComponent(preferredEstimateSource()))
               .then(function (payload) {
                 if (!row.isConnected) return;
                 var pv = payload && (payload.estimate || payload);
@@ -464,17 +512,17 @@
     });
   }
 
-  function scan(force) {
+  function scan(force, estimateOnly) {
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
-      hydrateRow(row, force);
+      hydrateRow(row, force, estimateOnly);
     });
   }
 
-  window.refreshFundEstimates = function () {
+  window.refreshFundEstimates = function (estimateOnly) {
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
       delete row.dataset.estimateState;
     });
-    scan(true);
+    scan(true, estimateOnly);
   };
 
   // 单行刷新：详情抽屉刷新出最新净值后，同步更新持仓列表对应行（走缓存，不重复抓取）
