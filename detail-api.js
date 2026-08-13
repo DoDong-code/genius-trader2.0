@@ -958,7 +958,7 @@
     const now = Date.now();
     const lastRefresh = detailApiFundCache[String(code)] || 0;
     const forceRefresh = now - lastRefresh > 5 * 60 * 1000;
-    let response = await fetch(`${getApiBase()}/api/fund/${code}${forceRefresh ? '?refresh=1' : ''}`);
+    let response = await fetch(`${getApiBase()}/api/fund/${code}${forceRefresh ? '?refresh=1&fast=1' : ''}`);
     if (response.status === 404) {
       const imported = await fetch(`${getApiBase()}/api/fund/import/${code}`);
       if (!imported.ok) throw new Error('基金导入失败');
@@ -1013,11 +1013,12 @@
         todayProfitCell.querySelector('b').className = '';
         todayProfitCell.querySelector('b').textContent = '待估值';
       }
-    } catch {
+    } catch (err) {
+      console.warn('[drawer] loadRealData failed:', err && err.message, err);
       if (!backdrop.isConnected) return;
       historyContent.innerHTML = `
         <div class="detail-empty detail-error">
-          暂未同步到历史净值。东方财富数据源当前不可访问，恢复后再次打开即可自动补齐。
+          暂未同步到历史净值（${escapeHtml((err && err.message) || '未知错误')}）。东方财富数据源当前不可访问，恢复后再次打开即可自动补齐。
         </div>`;
       state.textContent = '等待数据源';
     }

@@ -2022,7 +2022,7 @@
       if (!f || !f.code) return;
       try {
         const [snapshot, estimate] = await Promise.all([
-          providerApi(`/api/fund/${f.code}?refresh=1&force=1`),
+          providerApi(`/api/fund/${f.code}?refresh=1&fast=1`),
           providerApi(`/api/fund/${f.code}/estimate?amount=${Number(f.amount) || 0}&force=1`)
         ]);
         const est = (estimate && estimate.estimate) || estimate || {};

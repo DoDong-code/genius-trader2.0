@@ -391,7 +391,7 @@ async function importFund(code, options = {}) {
 
   markSyncState(data.fundCode, 'history', 24 * 60 * 60 * 1000);
   if (data.refreshedHoldings) {
-    markSyncState(data.fundCode, 'holdings', 90 * 24 * 60 * 60 * 1000);
+  markSyncState(data.fundCode, 'holdings', 93 * 24 * 60 * 60 * 1000);
   }
 
   return {

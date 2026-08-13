@@ -273,8 +273,8 @@
   }
 
   function refreshFund(code, force) {
-    // 普通进入使用服务端缓存，避免每次都重抓数据源导致缓慢；仅手动刷新强制重抓
-    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + (force ? '?refresh=1&force=1' : '');
+    // 详情快照（持仓/历史净值）始终走服务端缓存/快速模式：持仓季度更新、历史每日增量
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + (force ? '?refresh=1&fast=1' : '');
     return requestJson(endpoint).catch(function (error) {
       if (error.status !== 404) throw error;
       var importUrl = getApiBase() + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
@@ -288,6 +288,13 @@
     var source = preferredEstimateSource();
     if (source === 'local') {
       endpoint += '&mode=local';
+    } else if (typeof window.getProviderStatus === 'function') {
+      var available = window.getProviderStatus();
+      if (available[source] === true) {
+        endpoint += '&mode=provider&source=' + encodeURIComponent(source);
+      } else {
+        endpoint += '&mode=local';
+      }
     } else {
       endpoint += '&mode=provider&source=' + encodeURIComponent(source);
     }
@@ -514,6 +521,7 @@
 
   function scan(force, estimateOnly) {
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
+      // 初次/切换 tab 进入：不强制重抓基金详情，走服务端缓存，避免多基金排队卡顿
       hydrateRow(row, force, estimateOnly);
     });
   }

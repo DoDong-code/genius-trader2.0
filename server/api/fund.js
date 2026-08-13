@@ -409,12 +409,20 @@ async function handleFundApi(request, response, url) {
       return true;
     }
     if (url.searchParams.get('refresh') === '1') {
-      await importFund(match[0], { force: true }).catch(error => {
-        console.warn(`[fund-refresh] ${match[0]}: ${error.message}`);
-      });
+      // fast=1：立即返回缓存数据，后台异步增量刷新（持仓季度级、历史每日增量），抽屉秒开
+      if (url.searchParams.get('fast') === '1') {
+        importFund(match[0]).catch(error => {
+          console.warn(`[fund-refresh-fast] ${match[0]}: ${error.message}`);
+        });
+      } else {
+        await importFund(match[0], { force: true }).catch(error => {
+          console.warn(`[fund-refresh] ${match[0]}: ${error.message}`);
+        });
+      }
       fund = getFund(match[0]) || fund;
     }
     const history = getHistory(match[0]);
+    const isFast = url.searchParams.get('fast') === '1';
     sendJson(response, 200, {
       success: true,
       fund,
@@ -425,7 +433,7 @@ async function handleFundApi(request, response, url) {
         label: history.length ? '数据正常' : '等待数据源'
       },
       holdings: getFundHoldings(match[0]),
-      estimate: url.searchParams.get('refresh') === '1'
+      estimate: !isFast && url.searchParams.get('refresh') === '1'
         ? await getRealtimeFundEstimate(match[0])
         : null
     });
