@@ -194,3 +194,44 @@ test('只读 Token：GET /api/external/analysis 统一接口返回完整的真�
   await revokeTokens(10);
 });
 
+test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 AI 分析数据', async () => {
+  await saveUserState(15, {
+    accounts: {
+      '核心AI账户': { name: '核心AI账户', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金A', amount: 3000, today: 0.01, profit: 300, category: '混合', transactions: [] }], strategy: ['纪律：不追高'], closedPositions: [] }
+    }
+  });
+
+  const token = (await generateToken(15)).token;
+  const req = mockRequest('GET');
+  req.headers.authorization = `Bearer ${token}`;
+  const res = mockResponse();
+
+  await handleExternalApi(req, res, apiUrl('/api/external/analysis/ai'));
+  assert.equal(res.statusCode, 200);
+  const data = json(res);
+  
+  assert.equal(data.success, true);
+  assert.equal(data.totalAssets, 3000);
+  assert.equal(data.accounts.length, 1);
+
+  const acc = data.accounts[0];
+  assert.equal(acc.accountName, '核心AI账户');
+  assert.equal(acc.totalValue, 3000);
+  assert.deepEqual(acc.strategies, ['纪律：不追高']);
+  assert.equal(acc.holdings.length, 1);
+  
+  const h = acc.holdings[0];
+  assert.equal(h.code, '000001');
+  assert.equal(h.name, '测试基金A');
+  assert.equal(h.amount, 3000);
+  assert.equal(h.cost, 2700);
+  assert.equal(h.profit, 300);
+  assert.equal(h.profitRate, 0.1);
+  assert.equal(typeof h.todayEstimate, 'number');
+  assert.equal(typeof h.todayChange, 'number');
+  assert.ok(Array.isArray(h.history));
+
+  await revokeTokens(15);
+});
+
+

@@ -1295,8 +1295,11 @@
     const area = document.querySelector('#external-token-area');
     const apiArea = document.querySelector('#external-api-area');
     const apiUrlEl = document.querySelector('#external-api-url');
+    const apiUrlAiEl = document.querySelector('#external-api-url-ai');
     const copyApiBtn = document.querySelector('#external-copy-api-btn');
+    const copyApiAiBtn = document.querySelector('#external-copy-api-btn-ai');
     const testApiBtn = document.querySelector('#external-test-api-btn');
+    const testApiAiBtn = document.querySelector('#external-test-api-btn-ai');
     const testResultEl = document.querySelector('#external-test-result');
 
     providerApi('/api/external/token/status')
@@ -1311,17 +1314,26 @@
 
           const cachedToken = localStorage.getItem('genius_external_token');
           if (apiArea) apiArea.style.display = 'block';
-          if (apiUrlEl) {
-            if (cachedToken) {
-              const apiBase = window.FUND_API_BASE || window.location.origin;
+          if (cachedToken) {
+            const apiBase = window.FUND_API_BASE || window.location.origin;
+            if (apiUrlEl) {
               apiUrlEl.textContent = `${apiBase}/api/external/analysis?token=${cachedToken}`;
-              if (copyApiBtn) copyApiBtn.style.opacity = '1';
-              if (testApiBtn) testApiBtn.style.opacity = '1';
-            } else {
-              apiUrlEl.innerHTML = '<span style="color: #86868b; font-style: italic;">只读 Token 已在服务端生成，但因安全策略明文仅在创建时显示一次。如果您需要获取 API 完整地址，请重新生成（点击上方“生成”按钮即可）。</span>';
-              if (copyApiBtn) copyApiBtn.style.opacity = '0.5';
-              if (testApiBtn) testApiBtn.style.opacity = '0.5';
             }
+            if (apiUrlAiEl) {
+              apiUrlAiEl.textContent = `${apiBase}/api/external/analysis/ai?token=${cachedToken}`;
+            }
+            if (copyApiBtn) copyApiBtn.style.opacity = '1';
+            if (copyApiAiBtn) copyApiAiBtn.style.opacity = '1';
+            if (testApiBtn) testApiBtn.style.opacity = '1';
+            if (testApiAiBtn) testApiAiBtn.style.opacity = '1';
+          } else {
+            const tipHtml = '<span style="color: #86868b; font-style: italic;">只读 Token 已在服务端生成，但因安全策略明文仅在创建时显示一次。如果您需要获取 API 完整地址，请重新生成（点击上方“生成”按钮即可）。</span>';
+            if (apiUrlEl) apiUrlEl.innerHTML = tipHtml;
+            if (apiUrlAiEl) apiUrlAiEl.innerHTML = tipHtml;
+            if (copyApiBtn) copyApiBtn.style.opacity = '0.5';
+            if (copyApiAiBtn) copyApiAiBtn.style.opacity = '0.5';
+            if (testApiBtn) testApiBtn.style.opacity = '0.5';
+            if (testApiAiBtn) testApiAiBtn.style.opacity = '0.5';
           }
         } else {
           statusText.textContent = '未生成';
@@ -1819,12 +1831,31 @@
               
               <!-- API 地址 Area -->
               <div id="external-api-area" style="display: none; margin-bottom: 18px; padding: 16px; background: #f5f5f7; border-radius: 12px; border: 1px solid rgba(0,0,0,0.06);">
-                <div style="font-size: 12px; font-weight: 600; color: #1d1d1f; margin-bottom: 6px;">API 地址</div>
-                <div style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0071e3; margin-bottom: 12px; line-height: 1.5;" id="external-api-url">正在加载...</div>
-                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
-                  <button class="secondary-button" id="external-copy-api-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer;">[复制 API 地址]</button>
-                  <button class="secondary-button" id="external-test-api-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px; cursor: pointer;">[测试 API]</button>
+                <!-- AI 专属精简 API -->
+                <div style="margin-bottom: 16px;">
+                  <div style="font-size: 12px; font-weight: 600; color: #1d1d1f; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+                    <span>AI 专属精简 API (首选)</span>
+                    <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: #e3f2fd; color: #0d47a1;">推荐</span>
+                  </div>
+                  <div style="font-size: 11px; color: #86868b; margin-bottom: 6px; line-height: 1.4;">最适合外部大模型 (如 GPT / Claude / DeepSeek) 深度分析，体积超轻、节省 Token。</div>
+                  <div style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0071e3; margin-bottom: 8px; line-height: 1.5; background: #fff; padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.04);" id="external-api-url-ai">正在加载...</div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="secondary-button" id="external-copy-api-btn-ai" style="padding: 4px 10px; font-size: 11px; border-radius: 5px; cursor: pointer;">[复制 AI 专属 API]</button>
+                    <button class="secondary-button" id="external-test-api-btn-ai" style="padding: 4px 10px; font-size: 11px; border-radius: 5px; cursor: pointer;">[测试 AI 专属 API]</button>
+                  </div>
                 </div>
+
+                <!-- 标准 API -->
+                <div style="border-top: 1px dashed rgba(0,0,0,0.08); padding-top: 12px; margin-bottom: 12px;">
+                  <div style="font-size: 12px; font-weight: 600; color: #1d1d1f; margin-bottom: 4px;">完整原始 API</div>
+                  <div style="font-size: 11px; color: #86868b; margin-bottom: 6px; line-height: 1.4;">包含全量交易流水账单、完整日线历史净值，结构较大。</div>
+                  <div style="font-size: 12px; font-family: monospace; word-break: break-all; color: #515154; margin-bottom: 8px; line-height: 1.5; background: #fff; padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.04);" id="external-api-url">正在加载...</div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="secondary-button" id="external-copy-api-btn" style="padding: 4px 10px; font-size: 11px; border-radius: 5px; cursor: pointer;">[复制完整 API]</button>
+                    <button class="secondary-button" id="external-test-api-btn" style="padding: 4px 10px; font-size: 11px; border-radius: 5px; cursor: pointer;">[测试完整 API]</button>
+                  </div>
+                </div>
+
                 <!-- Test Result Box -->
                 <div id="external-test-result" style="display: none; padding: 12px; background: #fff; border-radius: 8px; border: 1px solid rgba(0,0,0,0.05); font-size: 12px; line-height: 1.6; color: #1d1d1f;"></div>
               </div>
@@ -2316,6 +2347,95 @@
           }
         })
         .catch(() => showToast('生成失败，请先登录账号', 'error'));
+      return;
+    }
+
+    const externalCopyApiBtnAi = e.target.closest('#external-copy-api-btn-ai');
+    if (externalCopyApiBtnAi) {
+      const token = localStorage.getItem('genius_external_token');
+      if (!token) {
+        showToast('复制失败：请先点击上方“生成”按钮生成 Token', 'error');
+        return;
+      }
+      const apiBase = window.FUND_API_BASE || window.location.origin;
+      const fullUrl = `${apiBase}/api/external/analysis/ai?token=${token}`;
+
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(fullUrl)
+          .then(() => showToast('已复制 AI 专属 API 完整地址'))
+          .catch(() => showToast('复制失败，请手动选择复制', 'error'));
+      } else {
+        const tempInput = document.createElement('input');
+        tempInput.value = fullUrl;
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        showToast('已复制 AI 专属 API 完整地址');
+      }
+      return;
+    }
+
+    const externalTestApiBtnAi = e.target.closest('#external-test-api-btn-ai');
+    if (externalTestApiBtnAi) {
+      const resultArea = document.querySelector('#external-test-result');
+      if (resultArea) {
+        resultArea.style.display = 'block';
+        resultArea.innerHTML = '<span style="color: #86868b; font-size: 12px; font-style: italic;">正在测试 AI 专属 API 接口...</span>';
+      }
+
+      const token = localStorage.getItem('genius_external_token');
+      if (!token) {
+        if (resultArea) {
+          resultArea.innerHTML = '<span style="color: #ff3b30; font-weight: 500;">✗ 测试失败：本地无可用 Token 明文，请先点击上方“生成”按钮生成 Token</span>';
+        }
+        return;
+      }
+
+      const apiBase = window.FUND_API_BASE || window.location.origin;
+      const fullUrl = `${apiBase}/api/external/analysis/ai?token=${token}`;
+
+      fetch(fullUrl)
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP 错误 ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data && data.success) {
+            const firstAccount = data.accounts && data.accounts[0] ? data.accounts[0].accountName : '无';
+            const uniqueCodes = new Set();
+            if (data.accounts) {
+              data.accounts.forEach(acc => {
+                if (acc.holdings) {
+                  acc.holdings.forEach(h => uniqueCodes.add(h.code));
+                }
+              });
+            }
+            const holdingCount = uniqueCodes.size;
+            const formattedAssets = Number(data.totalAssets || 0).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+            if (resultArea) {
+              resultArea.innerHTML = `
+                <div style="color: #34c759; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 4px;">
+                  <span>✓ AI 专属 API 正常</span>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px; color: #1d1d1f; font-size: 12px;">
+                  <div><b>账户：</b>${esc(firstAccount)}</div>
+                  <div><b>总资产：</b>¥${formattedAssets}</div>
+                  <div><b>持仓：</b>${holdingCount} 只</div>
+                  <div style="color: #86868b; font-size: 11px; margin-top: 2px;">（已优化：历史日线限制为最近10天，不包含账单明细，极度节省 Token 吞吐）</div>
+                </div>
+              `;
+            }
+          } else {
+            throw new Error(data.error || 'API 响应异常');
+          }
+        })
+        .catch(err => {
+          if (resultArea) {
+            resultArea.innerHTML = `<span style="color: #ff3b30; font-weight: 500;">✗ API 测试失败：${esc(err.message)}</span>`;
+          }
+        });
       return;
     }
 
