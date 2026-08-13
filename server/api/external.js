@@ -21,7 +21,7 @@ const {
   revokeTokens,
   tokenStatus
 } = require('../services/externalTokenService');
-const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+const { buildAnalysisPortfolio, listAnalysisAccounts } = require('../services/portfolioAnalysisService');
 const { getFund } = require('../services/fundService');
 const { getHistory } = require('../services/navService');
 const { fetchProviderEstimate } = require('../services/providerEstimate');
@@ -81,9 +81,16 @@ async function handleExternalApi(request, response, url) {
   const userId = auth.userId;
 
   if (url.pathname === '/api/external/analysis/portfolio' && request.method === 'GET') {
+    // accountId 优先于 account；两者都必须是 Token 所属用户自己的真实账户
+    const accountId = url.searchParams.get('accountId') || undefined;
     const accountName = url.searchParams.get('account') || undefined;
-    const data = await buildAnalysisPortfolio(userId, accountName);
+    const data = await buildAnalysisPortfolio(userId, { accountId, account: accountName });
     sendJson(response, 200, { success: true, ...data });
+    return true;
+  }
+  if (url.pathname === '/api/external/analysis/accounts' && request.method === 'GET') {
+    const accounts = await listAnalysisAccounts(userId);
+    sendJson(response, 200, { success: true, accounts });
     return true;
   }
 

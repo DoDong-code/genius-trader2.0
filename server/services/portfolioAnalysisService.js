@@ -129,21 +129,61 @@ function enrichFund(fund, accountFunds, strategy, userId) {
 /**
  * 构建统一分析组合（默认当前活动账户；可指定 account 名称，仅限用户自己的账户）
  */
-async function buildAnalysisPortfolio(userId, accountName) {
+async function listAnalysisAccounts(userId) {
   const accounts = await loadUserAccounts(userId);
-  let target = accountName ? accounts.find(a => a.name === accountName) : null;
-  if (!target) {
+  return accounts.map(a => ({
+    id: a.name,
+    name: a.name,
+    source: a.source,
+    totalValue: (a.funds || []).reduce((s, f) => s + (Number(f.amount) || 0), 0)
+  }));
+}
+
+/**
+ * 构建统一分析组合
+ *
+ * - 外部分析（严格模式）：accountId 优先于 account；未指定且多账户时返回账户列表，不猜测、不使用 active
+ * - DeepSeek 内部分析：useActive=true，使用当前登录用户自己的活动账户（保持现有行为）
+ */
+async function buildAnalysisPortfolio(userId, options = {}) {
+  const accounts = await loadUserAccounts(userId);
+  let target = null;
+  if (options.accountId) {
+    target = accounts.find(a => String(a.name) === String(options.accountId));
+  } else if (options.account) {
+    target = accounts.find(a => a.name === options.account);
+  } else if (options.useActive) {
     const state = await getUserState(userId);
     const activeName = state && state.active;
     target = accounts.find(a => a.name === activeName) || accounts[0] || null;
   }
+  if (!target && !options.useActive) {
+    // 严格模式：单账户直接返回；多账户需明确指定，不自动猜测
+    if (accounts.length === 1) {
+      target = accounts[0];
+    } else {
+      return {
+        success: true,
+        needsAccount: accounts.length > 1,
+        message: accounts.length > 1
+          ? '存在多个账户，请通过 account 或 accountId 明确指定'
+          : '当前用户暂无账户',
+        account: null,
+        strategies: [],
+        strategy: { core: [], forbidden: [], rules: [] },
+        holdings: [],
+        accounts: await listAnalysisAccounts(userId)
+      };
+    }
+  }
   if (!target) {
     return {
+      success: true,
       account: null,
       strategies: [],
       strategy: { core: [], forbidden: [], rules: [] },
       holdings: [],
-      accounts: []
+      accounts: await listAnalysisAccounts(userId)
     };
   }
 
@@ -195,6 +235,7 @@ async function buildAnalysisPortfolio(userId, accountName) {
 module.exports = {
   buildAnalysisPortfolio,
   loadUserAccounts,
+  listAnalysisAccounts,
   parseStrategy,
   directionFor
 };

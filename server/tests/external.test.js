@@ -63,9 +63,9 @@ test('只读 Token：生成 → 读取 → 撤销后失效', async () => {
 test('只读 Token：无法读取其他用户数据，且不允许写操作', async () => {
   await saveUserState(1, {
     accounts: {
-      '账户1': { name: '账户1', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金', amount: 1000, today: 0.01, hold: 0.1, category: '混合', transactions: [] }], strategy: [], closedPositions: [] }
+      '我的账户': { name: '我的账户', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金', amount: 1000, today: 0.01, hold: 0.1, category: '混合', transactions: [] }], strategy: [], closedPositions: [] }
     },
-    active: '账户1'
+    active: '我的账户'
   });
   const t1 = (await generateToken(1)).token;
   const t2 = (await generateToken(2)).token;
@@ -76,7 +76,7 @@ test('只读 Token：无法读取其他用户数据，且不允许写操作', as
   const res1 = mockResponse();
   await handleExternalApi(req1, res1, apiUrl('/api/external/analysis/portfolio'));
   assert.equal(res1.statusCode, 200);
-  assert.equal(json(res1).account.name, '账户1');
+  assert.equal(json(res1).account.name, '我的账户');
   assert.equal(json(res1).holdings.length, 1);
 
   // 用户2 的 Token 看不到用户1 的数据
@@ -96,6 +96,52 @@ test('只读 Token：无法读取其他用户数据，且不允许写操作', as
 
   await revokeTokens(1);
   await revokeTokens(2);
+});
+
+test('只读 Token：账户列表 + 多账户需明确指定 + accountId 优先', async () => {
+  await saveUserState(3, {
+    accounts: {
+      '核心账户': { name: '核心账户', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金', amount: 2000, today: 0.01, hold: 0.1, category: '混合', transactions: [] }], strategy: [], closedPositions: [] },
+      '观察账户': { name: '观察账户', accountType: 'local', syncSource: null, funds: [], strategy: [], closedPositions: [] }
+    },
+    active: '核心账户'
+  });
+  const token = (await generateToken(3)).token;
+  const req = (t) => { const r = mockRequest('GET'); r.headers.authorization = `Bearer ${t}`; return r; };
+
+  // /accounts：返回全部真实账户
+  const resAccounts = mockResponse();
+  await handleExternalApi(req(token), resAccounts, apiUrl('/api/external/analysis/accounts'));
+  assert.equal(resAccounts.statusCode, 200);
+  const names = json(resAccounts).accounts.map(a => a.name).sort();
+  assert.deepEqual(names, ['核心账户', '观察账户']);
+  assert.ok(json(resAccounts).accounts.every(a => a.id === a.name));
+
+  // 多账户未指定 → 不猜测，返回 needsAccount
+  const resMulti = mockResponse();
+  await handleExternalApi(req(token), resMulti, apiUrl('/api/external/analysis/portfolio'));
+  assert.equal(json(resMulti).needsAccount, true);
+  assert.equal(json(resMulti).account, null);
+  assert.equal(json(resMulti).accounts.length, 2);
+
+  // 指定 accountId → 返回该账户
+  const resId = mockResponse();
+  await handleExternalApi(req(token), resId, apiUrl('/api/external/analysis/portfolio?accountId=' + encodeURIComponent('核心账户')));
+  assert.equal(json(resId).account.name, '核心账户');
+  assert.equal(json(resId).holdings.length, 1);
+
+  // 指定 account（名称）→ 同样有效
+  const resName = mockResponse();
+  await handleExternalApi(req(token), resName, apiUrl('/api/external/analysis/portfolio?account=' + encodeURIComponent('观察账户')));
+  assert.equal(json(resName).account.name, '观察账户');
+  assert.equal(json(resName).holdings.length, 0);
+
+  // 不存在/越权的账户名 → 不返回其他用户数据
+  const resBad = mockResponse();
+  await handleExternalApi(req(token), resBad, apiUrl('/api/external/analysis/portfolio?account=' + encodeURIComponent('不存在的账户')));
+  assert.equal(json(resBad).account, null);
+
+  await revokeTokens(3);
 });
 
 test('只读 Token：重新生成后旧 Token 失效', async () => {

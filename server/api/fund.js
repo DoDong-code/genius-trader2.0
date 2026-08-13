@@ -244,7 +244,8 @@ async function handleFundApi(request, response, url) {
         const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
         let portfolio;
         try {
-          portfolio = await buildAnalysisPortfolio(userId);
+          // DeepSeek 内部分析：继续使用当前登录用户自己的活动账户
+          portfolio = await buildAnalysisPortfolio(userId, { useActive: true });
         } catch (err) {
           // 兜底：使用客户端提供的结构，不破坏现有功能
           portfolio = body.portfolio;
