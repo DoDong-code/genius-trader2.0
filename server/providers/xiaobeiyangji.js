@@ -195,14 +195,26 @@ class XiaoBeiYangJiProvider extends BaseProvider {
 
       let estimateNav;
       let estimateGrowth;
+      // 优先使用 get-optional-change-nav 的盘中估值（valuation）
       if (Number.isFinite(valuation) && valuation !== 0) {
         estimateNav = valuation;
         estimateGrowth = Number.isFinite(valuationY) ? valuationY * 100 : null;
-      } else if (Number.isFinite(nav) && nav !== 0) {
-        estimateNav = nav;
-        estimateGrowth = Number.isFinite(navY) ? navY * 100 : null;
       } else {
-        return null;
+        // valuation=0 时，尝试从持仓详情(get-fund-detail)拿 dailyYield
+        // 小倍 APP 的"估算"值就来自这个字段，比本地引擎准确得多
+        try {
+          const detail = await this._getFundDetail(fundCode);
+          const dailyYield = Number(detail && detail.dailyYield);
+          if (Number.isFinite(dailyYield) && dailyYield !== 0) {
+            // dailyYield 是小数（如 0.0201 = +2.01%），转为百分比
+            estimateGrowth = dailyYield * 100;
+            estimateNav = Number(detail.nav) || nav; // 用最新净值作为基准
+          } else {
+            return null; // 真的没数据才回退本地引擎
+          }
+        } catch (e) {
+          return null;
+        }
       }
       if (!Number.isFinite(estimateNav) || estimateGrowth === null || !Number.isFinite(estimateGrowth)) {
         return null;
@@ -214,12 +226,17 @@ class XiaoBeiYangJiProvider extends BaseProvider {
         fundName = String((detail && detail.name) || '');
       } catch (e) { /* 名称获取失败不影响估值 */ }
 
+      const todayStr = new Date().toISOString().slice(0, 10);
+      // 有盘中估值(valuation)或实时估算(dailyYield)→今天；否则不应到达这里（已return null）
+      const tradeDate = todayStr;
+
       return {
         fund_code: String(fundCode),
         fund_name: fundName,
         estimate_nav: estimateNav,
         estimate_time: new Date().toISOString(),
-        estimate_growth: estimateGrowth
+        estimate_growth: estimateGrowth,
+        trade_date: tradeDate
       };
     } catch (e) {
       return null;

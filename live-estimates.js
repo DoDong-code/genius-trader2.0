@@ -444,7 +444,11 @@
 
         var estimateDate = estimate && (estimate.trade_date || estimate.nav_date);
         var dataDateToSet = navDate;
-        if (estimateDate && estimateDate === shanghaiToday && !officialUpdated) {
+        // Provider 返回了 trade_date 时，直接用它作为数据日期（不再死板地要求 === 今天）
+        // 这样小倍返回昨日净值时显示昨日日期、养基宝盘中估值时显示今日
+        if (estimateDate && !officialUpdated) {
+          dataDateToSet = estimateDate;
+        } else if (estimateDate && estimateDate === shanghaiToday && !officialUpdated) {
           dataDateToSet = shanghaiToday;
         }
         if (dataDateToSet) {

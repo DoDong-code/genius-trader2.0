@@ -356,7 +356,14 @@ async function handleFundApi(request, response, url) {
         source: url.searchParams.get('source') || undefined
       });
       if (!estimate) {
+        // Provider 无数据时回退到本地引擎，但保留 source 标识
+        // 让前端徽标仍显示用户选择的数据源（如"小倍"）而非"估算"
+        const requestedSource = url.searchParams.get('source') || undefined;
         estimate = await calculateFundEstimate(match[0], { amount, force });
+        if (estimate && requestedSource) {
+          estimate.estimate_source = requestedSource;
+          estimate.source = requestedSource;
+        }
       }
     } else if (mode === 'local') {
       estimate = await calculateFundEstimate(match[0], { amount, force });

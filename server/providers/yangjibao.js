@@ -139,7 +139,8 @@ class YangJiBaoProvider extends BaseProvider {
             fund_name: String(holding.short_name || ''),
             estimate_nav: Number(estimateNav),
             estimate_time: new Date().toISOString(),
-            estimate_growth: Number(estimateGrowth)
+            estimate_growth: Number(estimateGrowth),
+            trade_date: new Date().toISOString().slice(0, 10)
           };
         }
         return null;

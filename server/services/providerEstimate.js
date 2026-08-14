@@ -42,7 +42,8 @@ function normalizeProviderEstimate(provider, raw, code, amount) {
     estimate_time: raw.estimate_time || new Date().toISOString(),
     estimate_source: provider.sourceName,
     source: provider.sourceName,
-    status_note: `${provider.displayName || provider.sourceName}估值`
+    status_note: `${provider.displayName || provider.sourceName}估值`,
+    trade_date: raw.trade_date || null
   };
   return estimate;
 }
