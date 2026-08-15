@@ -10,6 +10,7 @@
  * 请求签名：md5(pathname + path + token + timestamp + SECRET)
  */
 const crypto = require('node:crypto');
+const QRCode = require('qrcode');
 const BaseProvider = require('./baseProvider');
 
 class YangJiBaoProvider extends BaseProvider {
@@ -63,7 +64,22 @@ class YangJiBaoProvider extends BaseProvider {
   async getQRCode() {
     const data = await this._request('GET', '/qr_code');
     if (!data || !data.id || !data.url) throw new Error('养基宝二维码数据格式错误');
-    return { qr_id: String(data.id), qr_url: String(data.url) };
+    const qrId = String(data.id);
+    const qrContent = String(data.url);
+    // 后端本地把登录串生成为二维码图片并转 Base64，
+    // 使小程序直接展示 data URI，无需 downloadFile 第三方图片域名，也不依赖 qrserver 等外部服务。
+    let qrDataUrl;
+    try {
+      qrDataUrl = await QRCode.toDataURL(qrContent, { width: 280, margin: 2 });
+    } catch (e) {
+      throw new Error('养基宝二维码生成失败：' + e.message);
+    }
+    return {
+      qr_id: qrId,
+      qr_url: qrContent, // 保留供小程序做有效性校验
+      qr_data_url: qrDataUrl, // data:image/png;base64,... 小程序直接展示
+      qr_base64: qrDataUrl.split(',')[1] || ''
+    };
   }
 
   async checkQRCode(qrId) {

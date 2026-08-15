@@ -11,7 +11,8 @@
     "fund:sync": "node server/scripts/syncFunds.js",
     "fund:seed": "node server/scripts/seedFunds.js",
     "test": "node --test server/tests/*.test.js",
-    "build": "node scripts/build-static.js"
+    "build": "node scripts/build-static.js",
+    "build:ai": "esbuild src/services/ai/index.ts --bundle --platform=node --format=cjs --outfile=server/services/ai/index.js"
   },
   "engines": {
     "node": ">=22"
@@ -22,6 +23,8 @@
     "vite": "^7.0.0"
   },
   "dependencies": {
-    "pg": "^8.22.0"
+    "esbuild": "^0.28.2",
+    "pg": "^8.23.0",
+    "qrcode": "^1.5.4"
   }
 }

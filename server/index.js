@@ -18,17 +18,29 @@ try {
   }
 } catch (e) { /* 忽略 .env 读取失败 */ }
 
-// Automatically compile TypeScript AI services on startup
-try {
-  const { execSync } = require('node:child_process');
-  execSync('npx esbuild src/services/ai/index.ts --bundle --platform=node --format=cjs --outfile=server/services/ai/index.js');
-} catch (e) {
-  console.error('[build-ai] Failed to build AI services on startup:', e.message);
-}
-
-const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+
+// AI 服务预构建：Docker/CI 在构建阶段用 `npm run build:ai` 生成 server/services/ai/index.js。
+// 仅当预构建产物缺失时，才用本地 esbuild 依赖兜底构建；兜底失败只影响 /api/ai/*，
+// 绝不阻断整个 Node 服务（不使用 npx 临时下载，避免生产环境构建不确定性）。
+const AI_BUILD_TARGET = path.join(__dirname, 'services', 'ai', 'index.js');
+function ensureAiBundle() {
+  if (fs.existsSync(AI_BUILD_TARGET)) return; // 已有预构建产物
+  try {
+    const { execSync } = require('node:child_process');
+    console.warn('[build-ai] 预构建产物缺失，尝试本地 esbuild 兜底构建...');
+    execSync('node node_modules/esbuild/bin/esbuild src/services/ai/index.ts --bundle --platform=node --format=cjs --outfile=server/services/ai/index.js', {
+      cwd: process.cwd(),
+      stdio: 'inherit'
+    });
+  } catch (e) {
+    console.error('[build-ai] AI 服务构建失败（不影响其他接口，仅 /api/ai/* 暂不可用）：', e.message);
+  }
+}
+ensureAiBundle();
+
+const http = require('node:http');
 const { handleFundApi, sendJson } = require('./api/fund');
 const { getDatabase, databasePath, closeDatabase } = require('./database/db');
 
@@ -129,9 +141,19 @@ function serveStatic(request, response, url) {
 }
 
 async function createServer() {
-  getDatabase();
-  ensureInitialSeed();
-  const { ensureCloudSchema } = require('./database/dbAsync');
+  const { isCloud, ensureCloudSchema } = require('./database/dbAsync');
+  // 云模式（PostgreSQL）下：SQLite 仅用作可重建缓存，其初始化失败不得拖垮 Postgres 服务
+  try {
+    getDatabase();
+  } catch (e) {
+    console.warn('[server] SQLite 缓存初始化失败（非致命，缓存功能降级）：', e.message);
+  }
+  // 生产/云环境禁止自动写入示例账户与示例基金，避免污染 PostgreSQL 或产生游离数据。
+  // 仅在「非云模式」且「非 production」时（即纯本地开发）才做 SQLite 示例基金 seed；
+  // CloudBase 容器通过 Dockerfile 的 NODE_ENV=production 关闭此行为，保证空环境部署不写入游离数据。
+  if (!isCloud() && process.env.NODE_ENV !== 'production') {
+    ensureInitialSeed();
+  }
   await ensureCloudSchema();
 
   return http.createServer(async (request, response) => {

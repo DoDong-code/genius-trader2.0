@@ -13,6 +13,8 @@ const {
 } = require('../services/estimateEngine');
 const { calibrateFund } = require('../services/calibrationEngine');
 const { fetchStockQuote } = require('../services/marketService');
+const fs = require('fs');
+const path = require('path');
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -237,6 +239,12 @@ async function handleFundApi(request, response, url) {
           config.apiKey = headerKey;
         }
 
+        // 诊断请求日志
+        try {
+          fs.appendFileSync(path.join(__dirname, '..', 'ai-trace.log'),
+            `[${new Date().toISOString()}] /api/ai/analyze 收到请求. provider=${config.provider} model=${config.model} hasKey=${!!(config.apiKey)} keyLen=${(config.apiKey||'').length}\n`);
+        } catch (e) {}
+
         // 统一数据源：与持仓页面、外部分析 API 一致（服务端按当前登录用户构建）
         const { userFromRequest } = require('../services/authService');
         const user = await userFromRequest(request);
@@ -258,8 +266,48 @@ async function handleFundApi(request, response, url) {
         const ai = require('../services/ai/index');
         try {
           const analysis = await ai.analyzePortfolio(portfolio, config);
+          // 服务端兜底：按持仓逐只补齐 suggestions（无论 AI 是否返回）
+          try {
+            const _h = (portfolio && Array.isArray(portfolio.holdings)) ? portfolio.holdings : [];
+            if (_h.length > 0) {
+              const _exist = Array.isArray(analysis.suggestions) ? analysis.suggestions.filter(s => s && typeof s === 'object') : [];
+              const _byCode = {};
+              const _byName = [];
+              const _norm = x => String(x || '').replace(/\s+/g, '');
+              const _strip = x => _norm(x).replace(/(混合|A|C|债券|股票|基金|指数|ETF|联接|QDII|LOF|货币|精选|积极|稳健|价值|成长|灵活|配置|\(|\))/gi, '').trim();
+              _exist.forEach(s => {
+                if (s && s.code) _byCode[String(s.code).trim()] = s;
+                if (s && (s.fund || s.name)) _byName.push(s);
+              });
+              // 名称模糊匹配：AI 漏填 code 时（DeepSeek 常见问题），用 fund/name 字段匹配持仓
+              const _matchByName = name => {
+                const ff = _norm(name), ff2 = _strip(name);
+                return _byName.find(s => {
+                  const sf = _norm(s.fund || s.name || '');
+                  const sf2 = _strip(s.fund || s.name || '');
+                  return (sf && (sf.includes(ff) || ff.includes(sf))) ||
+                         (sf2 && ff2 && (sf2.includes(ff2) || ff2.includes(sf2)));
+                }) || null;
+              };
+              analysis.suggestions = _h.map(h => {
+                const _code = String((h && h.code) || '').trim();
+                if (_byCode[_code]) return _byCode[_code];
+                const _byNameHit = _matchByName(h.name);
+                if (_byNameHit) return _byNameHit; // 命中 AI 原始建议（保留 action/reason），不被兜底覆盖
+                return { fund: (h && h.name) || '', code: (h && h.code) || '', action: '持有', reason: '基于组合整体配置与投资纪律，建议维持当前持仓并继续观察。', targetPct: null };
+              });
+            }
+          } catch (_e) {}
+          try {
+            fs.appendFileSync(path.join(__dirname, '..', 'ai-trace.log'),
+              `[${new Date().toISOString()}] AI 成功. keys=${Object.keys(analysis).join(',')} suggestions=${Array.isArray(analysis.suggestions) ? analysis.suggestions.length : 'N/A'} firstCode=${analysis.suggestions && analysis.suggestions[0] && analysis.suggestions[0].code}\n`);
+          } catch (e) {}
           sendJson(response, 200, { success: true, analysis });
         } catch (err) {
+          try {
+            fs.appendFileSync(path.join(__dirname, '..', 'ai-trace.log'),
+              `[${new Date().toISOString()}] AI 失败: ${err.message}\n`);
+          } catch (e) {}
           sendJson(response, 500, { success: false, error: err.message });
         }
         return true;

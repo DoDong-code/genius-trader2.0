@@ -236,13 +236,26 @@
     localRisk = Math.max(5, Math.min(95, localRisk));
 
     const aiResult = loadCachedAiResult(a);
-    if (aiResult) {
+    // Sanity check: AI 模型有时会"幻觉"——收到完整持仓数据却返回"持仓为空"
+    // 当实际有持仓但 AI 返回异常值时，fallback 到本地规则引擎
+    const hasActualHoldings = funds.length > 0;
+    const aiDeviationText = (aiResult && aiResult.deviationText) || '';
+    const aiHealthScore = (aiResult && aiResult.healthScore !== undefined) ? Number(aiResult.healthScore) : null;
+    const isAiDelusional = hasActualHoldings && (
+      /为空|无持仓|空白|无任何持仓|暂无.*数据|无法判断/.test(aiDeviationText) ||
+      (aiHealthScore !== null && aiHealthScore <= 0)
+    );
+    if (aiResult && !isAiDelusional) {
       healthScore = aiResult.healthScore !== undefined ? Number(aiResult.healthScore) : healthScore;
       healthText = aiResult.healthText || healthText;
       healthColor = aiResult.healthColor || healthColor;
       deviationText = aiResult.deviationText || deviationText;
+    } else if (isAiDelusional) {
+      // AI 返回异常结果时保留本地计算值，但在 summary 中标注
+      console.warn('[AI诊断] AI 返回异常结果(声称无持仓或healthScore<=0)，已 fallback 到本地规则引擎。AI原文:', JSON.stringify(aiResult).slice(0, 200));
     }
-    const aiRisk = aiResult && Number.isFinite(Number(aiResult.riskScore)) ? Number(aiResult.riskScore) : null;
+    // riskScore 也做同样检查：有持仓时 AI 返回 100 分高风险且 deviationText 异常则忽略
+    const aiRisk = (aiResult && !isAiDelusional && Number.isFinite(Number(aiResult.riskScore))) ? Number(aiResult.riskScore) : null;
     const riskScore = aiRisk !== null ? Math.max(0, Math.min(100, Math.round(aiRisk))) : localRisk;
     const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
 
@@ -251,7 +264,7 @@
     const bondPct = (allocations.find(al => al.category === '债券类') || {}).pct || 0;
     const goldPct = (allocations.find(al => al.category === '黄金类') || {}).pct || 0;
     let rebalanceSuggestion = '组合较为稳健，维持现有配置与纪律定投即可。';
-    const aiRebalance = aiResult && typeof aiResult.rebalanceSuggestion === 'string' ? aiResult.rebalanceSuggestion.trim() : '';
+    const aiRebalance = (aiResult && !isAiDelusional && typeof aiResult.rebalanceSuggestion === 'string') ? aiResult.rebalanceSuggestion.trim() : '';
     if (aiRebalance) {
       rebalanceSuggestion = aiRebalance;
     } else if (maxCatPct > 65) {
@@ -287,24 +300,28 @@
 
       let aiSugg = null;
       if (aiResult && aiResult.suggestions) {
-        aiSugg = aiResult.suggestions.find(s =>
-          (s.code && String(s.code) === String(f.code)) ||
-          (s.fund && (s.fund.includes(f.name) || f.name.includes(s.fund)))
-        ) || null;
+        const norm = s => String(s || '').replace(/\s+/g, '');
+        const strip = s => norm(s).replace(/(混合|A|C|债券|股票|基金|指数|ETF|联接|QDII|LOF|货币|精选|积极|稳健|价值|成长|灵活|配置|\(|\))/gi, '').trim();
+        aiSugg = aiResult.suggestions.find(s => {
+          const sName = s.fund || s.name || '';
+          return (s.code && norm(s.code) === norm(f.code)) ||
+            (sName && (norm(sName).includes(norm(f.name)) || norm(f.name).includes(norm(sName)))) ||
+            (sName && (strip(sName).includes(strip(f.name)) || strip(f.name).includes(strip(sName))));
+        }) || null;
       }
 
       let adviceText, adviceColor, adviceBg, adviceReason;
-      if (aiSugg) {
-        adviceText = aiSugg.action;
-        adviceReason = aiSugg.reason;
+      const fbFallback = buildAdviceText(diffPct, parsedRules);
+      if (aiSugg && String(aiSugg.action || '').trim()) {
+        adviceText = String(aiSugg.action).trim();
+        adviceReason = String(aiSugg.reason || '').trim() || '由 AI 结合组合配置与当前估值给出的操作建议。';
         if (/(加|低吸|买|定投)/.test(adviceText)) { adviceColor = '#ff3b30'; adviceBg = 'rgba(255, 59, 48, 0.08)'; }
         else if (/(减|止盈|卖|赎)/.test(adviceText)) { adviceColor = '#ff9500'; adviceBg = 'rgba(255, 149, 0, 0.08)'; }
         else { adviceColor = '#0071e3'; adviceBg = 'rgba(0, 113, 227, 0.08)'; }
       } else {
-        const fb = buildAdviceText(diffPct, parsedRules);
-        adviceText = fb.adviceText;
-        adviceColor = fb.adviceColor;
-        adviceBg = fb.adviceBg;
+        adviceText = fbFallback.adviceText;
+        adviceColor = fbFallback.adviceColor;
+        adviceBg = fbFallback.adviceBg;
         adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
       }
 
@@ -343,7 +360,7 @@
       riskLevel,
       rebalanceSuggestion,
       hasAi: Boolean(aiResult),
-      summary: aiResult && aiResult.summary ? aiResult.summary : null,
+      summary: (aiResult && !isAiDelusional && aiResult.summary) ? aiResult.summary : null,
       rows,
       aiResult
     };
@@ -820,8 +837,8 @@
             </div>
             <div style="display: flex; gap: 10px; align-items: center; width: 100%; flex-wrap: wrap;">
               ${window.innerWidth <= 760 ? `
-              <textarea id="ai-question-input" rows="2" placeholder="向 AI 提问，或输入调仓指令，如：大成产业趋势混合C 减仓一半" style="flex: 1 1 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; line-height: 1.5; outline: none; transition: border-color 0.2s; resize: none; font-family: inherit; box-sizing: border-box; min-height: 46px;">${esc(window.lastAIUserQuestion || '')}</textarea>` : `
-              <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（如：大成产业趋势混合C 昨天减仓一半）..." style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />`}
+              <textarea id="ai-question-input" rows="2" placeholder="向 AI 提问，或输入调仓指令（可多只、模糊）：易方达加仓2000 蓝筹减仓一半 中欧医疗清仓" style="flex: 1 1 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; line-height: 1.5; outline: none; transition: border-color 0.2s; resize: none; font-family: inherit; box-sizing: border-box; min-height: 46px;">${esc(window.lastAIUserQuestion || '')}</textarea>` : `
+              <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（可多只、模糊）：易方达加仓2000 蓝筹减仓一半 中欧医疗清仓" style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />`}
               <div class="ai-ask-actions" style="display: flex; gap: 10px; align-items: center;">
                 <button id="ai-trade-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #34a853; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">调仓</button>
                 <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
@@ -1385,13 +1402,35 @@
     });
   }
 
+  // 提问结果持久化：切换视图也不丢失，回来自动恢复（含进行中/完成/失败状态）
+  function saveAiChatState(state) {
+    window.__aiChatState = state;
+    try { localStorage.setItem('LAST_AI_CHAT', JSON.stringify(state)); } catch (e) {}
+  }
+  function loadAiChatState() {
+    try { return JSON.parse(localStorage.getItem('LAST_AI_CHAT') || 'null'); } catch (e) { return null; }
+  }
+  function restoreAiAnswerWindow() {
+    const box = document.querySelector('#ai-answer-window');
+    if (!box) return;
+    const st = loadAiChatState();
+    if (!st) return;
+    box.style.display = 'block';
+    if (st.status === 'loading') box.textContent = st.reply || 'AI 正在思考，请稍候…';
+    else if (st.status === 'done') box.textContent = st.reply || 'AI 未返回有效回答';
+    else if (st.status === 'error') box.textContent = st.reply || '回答生成失败';
+  }
   // AI 问答回答窗口：根据上方提问生成答案（输入“复盘”触发复盘分析）
   function askAiQuestion(question) {
     const a = acct();
     const answerBox = document.querySelector('#ai-answer-window');
-    if (!answerBox) return;
-    answerBox.style.display = 'block';
-    answerBox.textContent = 'AI 正在思考，请稍候…';
+    const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // 不论 DOM 是否存在都发起请求；状态存全局/localStorage，切换视图回来可恢复
+    saveAiChatState({ status: 'loading', reply: 'AI 正在思考，请稍候…', question: question || '', time: nowStr });
+    if (answerBox) {
+      answerBox.style.display = 'block';
+      answerBox.textContent = 'AI 正在思考，请稍候…';
+    }
 
     const holdings = effectiveFundsOf(a).map(f => ({
       name: f.name,
@@ -1402,6 +1441,7 @@
     }));
     const portfolio = { account: a.name || '默认账户', strategies: a.strategy || [], holdings };
     const isReview = /复盘/.test(question);
+    const isBrief = /简短|简答|精简|简略|一句话|不要太长|尽量短|少说|brief|concise/i.test(question || '');
 
     (async () => {
       try {
@@ -1416,7 +1456,10 @@
           } catch (e) { /* 默认提示 */ }
           prompt = `${closedNote}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n`;
         } else {
-          prompt = `请基于以下基金组合数据回答用户问题，回答尽量具体、给出操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n用户问题：${question}`;
+          const answerStyle = isBrief
+            ? '回答请高度简洁，控制在200字以内，直接给结论和关键操作建议，不要展开分析、不要长篇分点。'
+            : '回答简洁明了、直击要点，避免冗余，不要过度展开。';
+          prompt = `请基于以下基金组合数据回答用户问题。${answerStyle}\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n用户问题：${question}`;
         }
         const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
         const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
@@ -1427,16 +1470,18 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: prompt,
-            config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey }
+            config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey, maxTokens: isBrief ? 600 : 1500 }
           })
         });
         // 诊断流程可能已重新渲染页面，写入时重新获取窗口元素
+        saveAiChatState({ status: 'done', reply: data.reply || 'AI 未返回有效回答', question: question || '', time: nowStr });
         const freshBox = document.querySelector('#ai-answer-window');
         if (freshBox) {
           freshBox.style.display = 'block';
           freshBox.textContent = data.reply || 'AI 未返回有效回答';
         }
       } catch (err) {
+        saveAiChatState({ status: 'error', reply: `回答生成失败：${err.message || '网络错误'}`, question: question || '', time: nowStr });
         const freshBox = document.querySelector('#ai-answer-window');
         if (freshBox) {
           freshBox.style.display = 'block';
@@ -1675,7 +1720,18 @@
                 </div>
 
                 <div style="display: flex; justify-content: flex-end;">
-                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
+                  <button class="primary" id="save-ai-config-btn" onclick="
+                    const p=document.querySelector('#ai-provider-select')?.value||'OpenAI';
+                    const b=document.querySelector('#ai-base-url-input')?.value.trim()||'';
+                    const k=document.querySelector('#ai-api-key-input')?.value.trim()||'';
+                    const m=document.querySelector('#ai-model-name-input')?.value.trim()||'gpt-5-mini';
+                    localStorage.setItem('AI_PROVIDER',p);
+                    localStorage.setItem('AI_BASE_URL',b);
+                    localStorage.setItem('AI_MODEL_NAME',m);
+                    if(k){window.AI_API_KEY=k;localStorage.setItem('AI_API_KEY',k);}else{window.AI_API_KEY='';localStorage.removeItem('AI_API_KEY');}
+                    alert('AI 接口配置保存并应用成功！');
+                    setTimeout(()=>typeof setting==='function'&&setting(),100);
+                  " style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
                 </div>
               </div>
 
@@ -1907,6 +1963,7 @@
       portfolio();
     } else if(view==='analysis') {
       analysis();
+      restoreAiAnswerWindow();
     } else if(view==='setting') {
       setting();
     } else {
@@ -1990,6 +2047,189 @@
     return { acted, actionMsg };
   }
 
+  // 在指令文本中定位某只基金的命中区间（用于把指令按基金切分成“各自的动作片段”）
+  function findFundSpan(query, f) {
+    if (!f || !f.name || !query) return null;
+    const name = String(f.name);
+    const candidates = [];
+    if (name && query.includes(name)) {
+      const i = query.indexOf(name);
+      candidates.push({ start: i, end: i + name.length, text: name });
+    }
+    if (f.code && query.includes(String(f.code))) {
+      const i = query.indexOf(String(f.code));
+      candidates.push({ start: i, end: i + String(f.code).length, text: String(f.code) });
+    }
+    // 去后缀后的名称（A/C/混合/债券…），支持模糊简称
+    const cleanName = name.replace(/(混合|A|C|债券|股票|基金|指数|ETF|联接|QDII|LOF|货币|精选|积极|稳健|价值|成长|灵活|配置)/gi, '').trim();
+    if (cleanName.length >= 2 && query.includes(cleanName)) {
+      const i = query.indexOf(cleanName);
+      candidates.push({ start: i, end: i + cleanName.length, text: cleanName });
+    }
+    if (!candidates.length) {
+      // 关键词模糊：从指令里抽取中文字符，命中基金名/清理名
+      const kws = (query.replace(/(加仓|增持|买入|减仓|减持|卖出|清仓|全部|一半|半仓|定投|元|万|块|日|号|今天|昨天|明天|调整|操作|调仓|改为|至|由|从|到|后|前|和|的|在|把|将|第|个|只|次|基金|账户|组合)/g, '').match(/[\u4e00-\u9fa5]{2,}/g)) || [];
+      let best = null;
+      for (const kw of kws) {
+        if (name.includes(kw) || cleanName.includes(kw)) {
+          const i = query.indexOf(kw);
+          if (!best || kw.length > best.text.length) best = { start: i, end: i + kw.length, text: kw };
+        }
+      }
+      if (best) candidates.push(best);
+    }
+    if (!candidates.length) return null;
+    // 选最长命中，定位最准确
+    candidates.sort((a, b) => (b.end - b.start) - (a.end - a.start));
+    return candidates[0];
+  }
+
+  // 解析单只基金片段里的动作（加仓/减仓/清仓）
+  function parseActionFromTail(tail, oldAmount) {
+    const amt = Number(oldAmount) || 0;
+    if (/(清仓|全部卖出|卖出全部|减仓100%|全部减掉|清掉|清空)/.test(tail)) {
+      return { label: '清仓', newAmount: 0 };
+    }
+    if (/(减仓一半|卖出一半|减半|减持一半|减仓50%|减持50%|卖出50%|半仓)/.test(tail)) {
+      return { label: '减仓一半', newAmount: Number((amt * 0.5).toFixed(2)) };
+    }
+    let m = tail.match(/(减仓|减持|卖出|减仓占比|减仓比例)(\d+(?:\.\d+)?)\s*%/);
+    if (m) {
+      const pct = parseFloat(m[2]);
+      if (pct > 0 && pct <= 100) return { label: `减仓 ${pct}%`, newAmount: Number((amt * (100 - pct) / 100).toFixed(2)) };
+    }
+    m = tail.match(/(加仓|增持|买入)(\d+(?:\.\d+)?)\s*%/);
+    if (m) {
+      const pct = parseFloat(m[2]);
+      if (pct > 0) return { label: `加仓 ${pct}%`, newAmount: Number((amt * (100 + pct) / 100).toFixed(2)) };
+    }
+    m = tail.match(/(减仓|减持|卖出)(\d+(?:\.\d+)?)\s*(元|万)?/);
+    if (m) {
+      let val = parseFloat(m[2]);
+      if (m[3] === '万') val *= 10000;
+      if (val > 0) return { label: `减仓 ${val.toLocaleString()}`, newAmount: Number(Math.max(0, amt - val).toFixed(2)) };
+    }
+    m = tail.match(/(加仓|增持|买入)(\d+(?:\.\d+)?)\s*(元|万)?/);
+    if (m) {
+      let val = parseFloat(m[2]);
+      if (m[3] === '万') val *= 10000;
+      if (val > 0) return { label: `加仓 ${val.toLocaleString()}`, newAmount: Number((amt + val).toFixed(2)) };
+    }
+    return null;
+  }
+
+  // 把一条指令解析成多只基金的调仓计划（支持模糊、多只、各自动作）
+  function parseTrades(userQuery) {
+    const a = acct();
+    if (!a || !a.funds || !a.funds.length) return [];
+    const q = String(userQuery).trim();
+    if (!q) return [];
+
+    // 1. 找出所有基金在指令中的命中区间
+    const spans = [];
+    a.funds.forEach(f => {
+      const span = findFundSpan(q, f);
+      if (span) spans.push({ fund: f, start: span.start, end: span.end });
+    });
+    if (!spans.length) return [];
+
+    // 2. 按起点排序，解决重叠（重叠时保留更具体的那只）
+    spans.sort((x, y) => x.start - y.start || (y.end - y.start) - (x.end - x.start));
+    const dedup = [];
+    const seen = new Set();
+    for (const s of spans) {
+      const key = (s.fund.code || '') + '|' + s.fund.name;
+      if (seen.has(key)) continue;
+      // 丢弃与已选区间重叠的较短区间
+      const overlap = dedup.some(d => s.start < d.end && d.start < s.end);
+      if (overlap) continue;
+      seen.add(key);
+      dedup.push(s);
+    }
+
+    // 3. 为每只基金划分其对应的动作片段并解析（支持"动作在前"如"清仓 XX" 和 "动作在后"如"XX 清仓"）
+    const trades = [];
+    for (let i = 0; i < dedup.length; i++) {
+      const s = dedup[i];
+      const prevEnd = (i > 0) ? dedup[i - 1].end : 0;
+      const nextStart = (i + 1 < dedup.length) ? dedup[i + 1].start : q.length;
+      const prefix = q.slice(prevEnd, s.start);   // 基金名之前的文本（如"清仓 "）
+      const tail   = q.slice(s.end, nextStart);     // 基金名之后的文本（如" 减仓一半"）
+      // 优先从后缀解析（"XX基金 减仓一半"更常见）；无结果则从前缀解析（"清仓 XX基金"）
+      let action = parseActionFromTail(tail, s.fund.amount);
+      if (!action) action = parseActionFromTail(prefix, s.fund.amount);
+      if (action) {
+        trades.push({
+          fund: s.fund,
+          actionLabel: action.label,
+          oldAmount: Number(s.fund.amount) || 0,
+          newAmount: action.newAmount
+        });
+      }
+    }
+    return trades;
+  }
+
+  // 二次确认弹窗：列出每只基金的目标金额，支持就地修改后再执行
+  function openTradeConfirmModal(trades) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.className = 'confirm-overlay apple-dialog-overlay trade-confirm-overlay';
+      const rows = trades.map((t, i) => {
+        const delta = Number((t.newAmount - t.oldAmount).toFixed(2));
+        const deltaText = delta === 0 ? '不变' : (delta > 0 ? `+${delta.toLocaleString()}` : delta.toLocaleString());
+        const deltaColor = delta === 0 ? '#86868b' : (delta > 0 ? '#34a853' : '#ff3b30');
+        return `
+          <div class="trade-row" data-idx="${i}">
+            <div class="trade-fund">
+              <div class="trade-name">${esc(t.fund.name || t.fund.code)}</div>
+              <div class="trade-code">${esc(t.fund.code || '')}</div>
+            </div>
+            <div class="trade-action">${esc(t.actionLabel)}</div>
+            <div class="trade-amounts">
+              <div class="trade-old">现 ${Number(t.oldAmount).toLocaleString()}</div>
+              <div class="trade-arrow">→</div>
+              <div class="trade-new">
+                <input type="number" class="trade-new-input" data-idx="${i}" value="${t.newAmount}" min="0" step="0.01" />
+                <span class="trade-delta" style="color: ${deltaColor};">${deltaText}</span>
+              </div>
+            </div>
+          </div>`;
+      }).join('');
+      overlay.innerHTML = `
+        <div class="confirm-dialog apple-dialog trade-confirm-dialog" role="alertdialog" aria-modal="true">
+          <h2>确认调仓操作</h2>
+          <p class="apple-dialog-message">请核对每只基金的调仓金额，<b>目标金额可直接修改</b>，确认无误后执行。</p>
+          <div class="trade-list">${rows}</div>
+          <div class="confirm-actions apple-dialog-actions">
+            <button type="button" class="apple-dialog-cancel" data-role="cancel">取消</button>
+            <button type="button" class="primary" data-role="ok">确认</button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      requestAnimationFrame(() => overlay.classList.add('visible'));
+
+      const close = result => {
+        overlay.classList.remove('visible');
+        setTimeout(() => overlay.remove(), 180);
+        resolve(result);
+      };
+      overlay.addEventListener('click', e => {
+        if (e.target === overlay) return; // 点遮罩不关闭，防误触
+        if (e.target.closest('[data-role="cancel"]')) { close(null); return; }
+        if (e.target.closest('[data-role="ok"]')) {
+          const edited = trades.map((t, i) => {
+            const inp = overlay.querySelector('.trade-new-input[data-idx="' + i + '"]');
+            let v = inp ? parseFloat(inp.value) : t.newAmount;
+            if (isNaN(v) || v < 0) v = t.newAmount;
+            return { ...t, newAmount: Number(v.toFixed(2)) };
+          });
+          close(edited);
+        }
+      });
+    });
+  }
+
   function runAiDiagnostics(userQuery) {
     const a = acct();
     if (!a) return;
@@ -2036,20 +2276,15 @@
       if (btnText) btnText.textContent = userQuery ? '正在调取 AI 问答及调仓建议...' : '正在调取今日最新估值与诊断...';
     }
 
-    fetch('/api/ai/analyze', {
+    providerApi('/api/ai/analyze', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify(requestBody)
     })
-    .then(async response => {
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData?.error || `HTTP ${response.status}`);
-      }
-      const resData = await response.json();
-      if (resData.success && resData.analysis) {
+    .then(async resData => {
+      if (resData && resData.success && resData.analysis) {
         window.lastAIAnalysisResult = resData.analysis;
         const activeAccountName = a.name || '默认账户';
         const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -2058,7 +2293,7 @@
         localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
         localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
       } else {
-        throw new Error('AI 返回数据格式不正确');
+        throw new Error((resData && resData.error) || 'AI 返回数据格式不正确');
       }
     })
     .catch(err => {
@@ -2135,7 +2370,7 @@
     }
   });
 
-  root.addEventListener('click',e=>{
+  root.addEventListener('click', async e => {
     // Close other tooltips when clicking outside or clicking another one
     const clickedDetails = e.target.closest('.tooltip-details');
     document.querySelectorAll('details.tooltip-details').forEach(d => {
@@ -2184,18 +2419,43 @@
         showToast('请输入调仓指令，例如：易方达加仓2000', 'warning');
         return;
       }
-      const result = applyTradeInstruction(val);
-      if (result.acted) {
-        showAppleDialog({
-          title: '调仓已执行',
-          message: result.actionMsg.trim(),
-          okText: '知道了',
-          cancelText: ''
-        });
-        render('analysis');
-      } else {
+      const trades = parseTrades(val);
+      if (!trades.length) {
         showToast('未识别到调仓指令，请包含基金名称和操作（加仓/减仓/清仓）及金额', 'warning');
+        return;
       }
+      const confirmed = await openTradeConfirmModal(trades);
+      if (!confirmed) {
+        showToast('已取消调仓', 'warning');
+        return;
+      }
+      let actionMsg = '';
+      const clearedFunds = [];
+      confirmed.forEach(t => {
+        const oldAmt = t.fund.amount;
+        t.fund.amount = t.newAmount;
+        actionMsg += `\n- 【${t.actionLabel}】已将【${t.fund.name}】持仓金额由 ${Number(oldAmt).toLocaleString()} 调整为 ${t.newAmount.toLocaleString()}。`;
+        if (t.newAmount === 0) clearedFunds.push(t.fund);
+      });
+      // 清仓的基金从持仓列表中移除
+      if (clearedFunds.length > 0) {
+        const a = acct();
+        if (a && Array.isArray(a.funds)) {
+          const clearedCodes = new Set(clearedFunds.map(f => f.code));
+          const before = a.funds.length;
+          a.funds = a.funds.filter(f => !clearedCodes.has(f.code));
+          const removed = before - a.funds.length;
+          if (removed > 0) actionMsg += `\n\n已从持仓列表中移除 ${removed} 只清仓基金。`;
+        }
+      }
+      window.savePortfolioState?.();
+      showAppleDialog({
+        title: '调仓已执行',
+        message: actionMsg.trim(),
+        okText: '知道了',
+        cancelText: ''
+      });
+      render('analysis');
       return;
     }
 
