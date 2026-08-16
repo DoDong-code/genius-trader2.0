@@ -229,7 +229,7 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/account/backups' && request.method === 'POST') {
     const { userFromRequest } = require('../services/authService');
-    const { createBackup } = require('../services/accountBackupService');
+    const { createBackup, listBackups } = require('../services/accountBackupService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0;
     const body = await readJsonBody(request);
