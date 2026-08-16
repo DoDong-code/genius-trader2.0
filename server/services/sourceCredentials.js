@@ -36,27 +36,19 @@ async function getCredential(sourceName, userId = 0) {
 }
 
 /**
- * 读取已连接凭证（含跨用户兜底）
+ * 读取已连接凭证（严格按 userId 隔离）
  *
- * 个人应用场景：只要任意一个入口登录过第三方，估值 / 状态 / 同步即可复用该凭证。
- * 查找顺序：当前用户 → 本地用户(user_id=0) → 最近更新的任意已连接凭证。
+ * 多用户隔离：只查询「当前 userId + 指定 provider」且已连接、token 非空的凭证。
+ * 禁止回退到 user_id=0，禁止回退到其他用户的凭证。
+ * 当前用户无凭证时返回 null（未连接）。
  */
 async function getConnectedCredential(sourceName, userId = 0) {
-  const candidates = [];
-  const primary = await getCredential(sourceName, userId);
-  if (primary) candidates.push(primary);
-  if (Number(userId) !== 0) {
-    const guest = await getCredential(sourceName, 0);
-    if (guest) candidates.push(guest);
-  }
-  const rows = await all(
+  const row = await get(
     `SELECT * FROM source_credentials
-     WHERE source_name = ? AND status = 'connected' AND token != ''
-     ORDER BY updated_at DESC LIMIT 1`,
-    [String(sourceName)]
+     WHERE user_id = ? AND source_name = ? AND status = 'connected' AND token != ''`,
+    [userId, String(sourceName)]
   );
-  if (rows && rows.length) candidates.push(rowToCredential(rows[0]));
-  return candidates.find(c => c && c.status === 'connected' && c.token) || null;
+  return rowToCredential(row);
 }
 
 /**
@@ -96,14 +88,14 @@ async function disconnectCredential(sourceName, userId = 0) {
 }
 
 /**
- * 断开某数据源的全部凭证（个人应用：一份登录全局生效，退出也应全局生效）
+ * 断开某数据源在当前用户下的全部凭证（严格按 userId 隔离，不跨用户、不全局）
  */
-async function disconnectAllCredentials(sourceName) {
+async function disconnectAllCredentials(sourceName, userId = 0) {
   await run(`
     UPDATE source_credentials
     SET status = 'disconnected', token = '', refresh_token = '', cookie = '', updated_at = CURRENT_TIMESTAMP
-    WHERE source_name = ?
-  `, [String(sourceName)]);
+    WHERE user_id = ? AND source_name = ?
+  `, [userId, String(sourceName)]);
 }
 
 /**
