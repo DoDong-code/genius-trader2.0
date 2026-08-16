@@ -47,6 +47,20 @@ function readJsonBody(request) {
   });
 }
 
+// 账户摘要：只返回 name / accountType / syncSource / convertedFromSync，绝不返回持仓、金额、token 等
+function summarizeAccount(name, acc) {
+  if (!acc || typeof acc !== 'object') return { name: String(name || ''), accountType: null, accountTypeLabel: null, syncSource: null, convertedFromSync: false };
+  const type = acc.accountType || (acc.syncSource || acc.__source ? 'sync' : 'local');
+  const typeLabel = type === 'sync' ? '同步账户' : type === 'local' ? '本地账户' : String(type);
+  return {
+    name: String(name || acc.name || ''),
+    accountType: type,
+    accountTypeLabel: typeLabel,
+    syncSource: acc.syncSource || null,
+    convertedFromSync: Boolean(acc.convertedFromSync)
+  };
+}
+
 async function handleFundApi(request, response, url) {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
@@ -83,6 +97,53 @@ async function handleFundApi(request, response, url) {
       });
     } catch (e) {
       sendJson(response, 500, { success: false, error: '诊断查询失败：' + (e.message || '未知错误') });
+    }
+    return true;
+  }
+
+  // ---- 临时只读账户摘要接口（DEBUG_KEY 鉴权，仅 GET）----
+  if (url.pathname === '/api/debug/account-summary' && request.method === 'GET') {
+    const debugKey = process.env.DEBUG_KEY || '';
+    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
+    if (!debugKey || providedKey !== debugKey) {
+      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
+      return true;
+    }
+    try {
+      const { all } = require('../database/dbAsync');
+      const rows = await all('SELECT user_id, data, updated_at FROM user_data ORDER BY user_id');
+      const users = (rows || []).map(r => {
+        let parsed = null;
+        try { parsed = JSON.parse(r.data); } catch (e) { parsed = null; }
+        // 兼容 accounts 在顶层或 state 内、对象或数组
+        let accountsSource = null;
+        if (parsed && parsed.accounts) accountsSource = parsed.accounts;
+        else if (parsed && parsed.state && parsed.state.accounts) accountsSource = parsed.state.accounts;
+        const accountSummaries = [];
+        if (accountsSource && typeof accountsSource === 'object' && !Array.isArray(accountsSource)) {
+          Object.keys(accountsSource).forEach(name => accountSummaries.push(summarizeAccount(name, accountsSource[name])));
+        } else if (Array.isArray(accountsSource)) {
+          accountsSource.forEach(acc => accountSummaries.push(summarizeAccount(acc && acc.name, acc)));
+        }
+        // providerStatus 只返回 connected 布尔，不返回 token/credential
+        const providerRaw = (parsed && parsed.providerStatus) || (parsed && parsed.state && parsed.state.providerStatus) || {};
+        const providerSummary = {};
+        Object.keys(providerRaw || {}).forEach(k => {
+          if (k === 'yjbConnected' || k === 'xbyjConnected') providerSummary[k] = Boolean(providerRaw[k]);
+        });
+        return {
+          user_id: Number(r.user_id),
+          account_count: accountSummaries.length,
+          accounts: accountSummaries,
+          active: parsed ? (parsed.active || parsed.activeAccount || parsed.activeAccountName || null) : null,
+          providerStatus: providerSummary,
+          updatedAt: parsed ? (parsed.updatedAt || null) : null,
+          db_updated_at: r.updated_at
+        };
+      });
+      sendJson(response, 200, { success: true, users });
+    } catch (e) {
+      sendJson(response, 500, { success: false, error: '摘要查询失败：' + (e.message || '未知错误') });
     }
     return true;
   }
