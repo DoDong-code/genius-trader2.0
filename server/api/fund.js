@@ -95,16 +95,13 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
-  // ---- 云端账户状态（登录后手动账户/策略持久化）----
+  // ---- 云端账户状态（登录用户或匿名小程序用户持久化）----
   if (url.pathname === '/api/account/state' && request.method === 'GET') {
     const { userFromRequest } = require('../services/authService');
     const { getUserState } = require('../services/accountStateService');
     const user = await userFromRequest(request);
-    if (!user) {
-      sendJson(response, 401, { success: false, error: '请先登录' });
-      return true;
-    }
-    const state = await getUserState(Number(user.id));
+    const userId = user ? Number(user.id) : 0; // 匿名小程序用户用 userId=0
+    const state = await getUserState(userId);
     sendJson(response, 200, { success: true, state });
     return true;
   }
@@ -113,18 +110,66 @@ async function handleFundApi(request, response, url) {
     const { userFromRequest } = require('../services/authService');
     const { saveUserState } = require('../services/accountStateService');
     const user = await userFromRequest(request);
-    if (!user) {
-      sendJson(response, 401, { success: false, error: '请先登录' });
-      return true;
-    }
+    const userId = user ? Number(user.id) : 0; // 匿名小程序用户用 userId=0
     const body = await readJsonBody(request);
     if (!body.state) {
       sendJson(response, 400, { success: false, error: '缺少 state' });
       return true;
     }
-    await saveUserState(Number(user.id), body.state);
+    await saveUserState(userId, body.state);
     sendJson(response, 200, { success: true });
     return true;
+  }
+
+  // ---- 账户备份（最多 5 个快照）----
+  if (url.pathname === '/api/account/backups' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const { listBackups } = require('../services/accountBackupService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    const backups = await listBackups(userId);
+    sendJson(response, 200, { success: true, backups });
+    return true;
+  }
+
+  if (url.pathname === '/api/account/backups' && request.method === 'POST') {
+    const { userFromRequest } = require('../services/authService');
+    const { createBackup } = require('../services/accountBackupService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    const body = await readJsonBody(request);
+    if (!body.state) {
+      sendJson(response, 400, { success: false, error: '缺少 state' });
+      return true;
+    }
+    await createBackup(userId, body.state, body.reason || 'manual');
+    const backups = await listBackups(userId);
+    sendJson(response, 200, { success: true, backups });
+    return true;
+  }
+
+  {
+    const restoreMatch = url.pathname.match(/^\/api\/account\/backups\/(\d+)\/restore$/);
+    if (restoreMatch && request.method === 'POST') {
+      const { userFromRequest } = require('../services/authService');
+      const { getBackup } = require('../services/accountBackupService');
+      const { saveUserState } = require('../services/accountStateService');
+      const user = await userFromRequest(request);
+      const userId = user ? Number(user.id) : 0;
+      const snapshot = await getBackup(userId, restoreMatch[1]);
+      if (!snapshot) {
+        sendJson(response, 404, { success: false, error: '备份不存在' });
+        return true;
+      }
+      // 恢复：写回 user_data（upsert，原子单条写入，失败不破坏现有数据）
+      try {
+        await saveUserState(userId, snapshot);
+        sendJson(response, 200, { success: true, state: snapshot });
+      } catch (e) {
+        sendJson(response, 500, { success: false, error: '恢复失败：' + (e.message || '未知错误') });
+      }
+      return true;
+    }
   }
 
   if (url.pathname === '/api/portfolio/delete' && request.method === 'POST') {

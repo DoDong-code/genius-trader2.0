@@ -184,10 +184,11 @@ async function ensureCloudSchema() {
       expires_at TIMESTAMPTZ NOT NULL
     )`,
     `CREATE TABLE IF NOT EXISTS user_data (
-      user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      user_id INTEGER PRIMARY KEY,
       data TEXT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    `ALTER TABLE user_data DROP CONSTRAINT IF EXISTS user_data_user_id_fkey`,
     `CREATE TABLE IF NOT EXISTS read_tokens (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL DEFAULT 0,
@@ -195,7 +196,16 @@ async function ensureCloudSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       last_used_at TIMESTAMPTZ,
       revoked_at TIMESTAMPTZ
-    )`
+    )`,
+    `CREATE TABLE IF NOT EXISTS account_backups (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL DEFAULT 0,
+      data TEXT NOT NULL,
+      account_count INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_account_backups_user ON account_backups (user_id, id DESC)`
   ];
   const db = await getPool();
   for (const statement of statements) {

@@ -165,6 +165,15 @@ function initialize(db) {
       last_used_at TEXT,
       revoked_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS account_backups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL DEFAULT 0,
+      data TEXT NOT NULL,
+      account_count INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   const stockColumns = db.prepare('PRAGMA table_info(stock_price)').all();
