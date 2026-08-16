@@ -53,6 +53,40 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // ---- 临时只读数据库诊断接口（DEBUG_KEY 鉴权，仅 GET，严禁写）----
+  if (url.pathname === '/api/debug/database' && request.method === 'GET') {
+    const debugKey = process.env.DEBUG_KEY || '';
+    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
+    if (!debugKey || providedKey !== debugKey) {
+      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
+      return true;
+    }
+    try {
+      const { all } = require('../database/dbAsync');
+      const userData = await all('SELECT user_id, length(data) AS data_length, updated_at FROM user_data ORDER BY user_id');
+      const credentials = await all('SELECT user_id, source_name, token FROM source_credentials ORDER BY user_id, source_name');
+      const backups = await all('SELECT COUNT(*) AS count FROM account_backups');
+      // 只返回元信息，绝不返回 data 全文、token 原文
+      sendJson(response, 200, {
+        success: true,
+        user_data: {
+          count: (userData || []).length,
+          rows: (userData || []).map(r => ({ user_id: r.user_id, data_length: Number(r.data_length) || 0, updated_at: r.updated_at }))
+        },
+        source_credentials: {
+          count: (credentials || []).length,
+          rows: (credentials || []).map(r => ({ user_id: r.user_id, provider: r.source_name, has_credential: Boolean(r.token) }))
+        },
+        account_backups: {
+          count: Number((backups && backups[0] && backups[0].count) || 0)
+        }
+      });
+    } catch (e) {
+      sendJson(response, 500, { success: false, error: '诊断查询失败：' + (e.message || '未知错误') });
+    }
+    return true;
+  }
+
   // ---- 只读外部分析 API（Token 管理用会话登录态；数据接口用只读 Token）----
   if (url.pathname.startsWith('/api/external/')) {
     const { handleExternalApi, handleExternalAuthApi } = require('./external');
