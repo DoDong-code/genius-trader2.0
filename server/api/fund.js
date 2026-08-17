@@ -14,6 +14,7 @@ const {
 const { calibrateFund } = require('../services/calibrationEngine');
 const { fetchStockQuote } = require('../services/marketService');
 const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const fs = require('fs');
 const path = require('path');
 
@@ -595,7 +596,7 @@ async function handleFundApi(request, response, url) {
 
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/calibration$/);
   if (match) {
-    const calibration = calibrateFund(match[0], {
+    const calibration = await calibrateFund(match[0], {
       force: url.searchParams.get('recalibrate') === '1'
     });
     sendJson(response, 200, { success: true, calibration });
@@ -625,36 +626,36 @@ async function handleFundApi(request, response, url) {
     const code = stockMatch[0];
     const from = url.searchParams.get('from') || null;
     const to = url.searchParams.get('to') || null;
-    const db = getDatabase();
     const where = ['stock_code = ?'];
     const params = [code];
     if (from) { where.push('date >= ?'); params.push(from); }
     if (to) { where.push('date <= ?'); params.push(to); }
     const cond = where.join(' AND ');
-    const agg = db.prepare(`
-      SELECT COUNT(*) AS total,
-             COUNT(DISTINCT date) AS distinct_dates,
+    // 走 dbAsync：生产 PostgreSQL / 本地 SQLite 回退。CAST 成 INTEGER 避免 PG 的 COUNT/SUM 以 bigint 字符串返回导致 NaN。
+    const agg = await dbAsync.get(`
+      SELECT CAST(COUNT(*) AS INTEGER) AS total,
+             CAST(COUNT(DISTINCT date) AS INTEGER) AS distinct_dates,
              MIN(date) AS min_date,
              MAX(date) AS max_date,
-             SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS null_price,
-             SUM(CASE WHEN change_percent IS NULL THEN 1 ELSE 0 END) AS null_change
+             CAST(COALESCE(SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END), 0) AS INTEGER) AS null_price,
+             CAST(COALESCE(SUM(CASE WHEN change_percent IS NULL THEN 1 ELSE 0 END), 0) AS INTEGER) AS null_change
       FROM stock_price WHERE ${cond}
-    `).get(...params);
-    const rows = db.prepare(`
+    `, params);
+    const rows = await dbAsync.all(`
       SELECT stock_code, date, price, change_percent, updated_at
       FROM stock_price WHERE ${cond}
       ORDER BY date ASC
-    `).all(...params);
+    `, params);
     sendJson(response, 200, {
       success: true,
       stock_code: code,
-      total: agg.total,
-      distinct_dates: agg.distinct_dates,
+      total: Number(agg.total),
+      distinct_dates: Number(agg.distinct_dates),
       min_date: agg.min_date,
       max_date: agg.max_date,
-      null_price: agg.null_price || 0,
-      null_change: agg.null_change || 0,
-      duplicates: agg.total - agg.distinct_dates,
+      null_price: Number(agg.null_price || 0),
+      null_change: Number(agg.null_change || 0),
+      duplicates: Number(agg.total) - Number(agg.distinct_dates),
       rows
     });
     return true;

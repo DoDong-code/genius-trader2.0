@@ -1,4 +1,5 @@
 const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const { assertFundCode, getFund } = require('./fundService');
 const config = require('../config/estimateConfig');
 
@@ -8,24 +9,24 @@ function round(value, digits = 6) {
   return Math.round((Number(value) + Number.EPSILON) * factor) / factor;
 }
 
-function getStoredCalibration(fundCode) {
-  const db = getDatabase();
-  const row = db.prepare(`
+// fund_calibration 读写统一走 dbAsync（生产 PostgreSQL / 本地 SQLite 回退），
+// 使校准结果跨 Render 重启持久，不再因临时 SQLite 被清空而样本归零。
+async function getStoredCalibration(fundCode) {
+  const row = await dbAsync.get(`
     SELECT fund_code, optimal_holdings_weight, optimal_sector_weight,
            cash_adjustment, mae, rmse, direction_accuracy, sample_size, calibrated_at
     FROM fund_calibration
     WHERE fund_code = ?
-  `).get(fundCode);
+  `, [fundCode]);
   return row || null;
 }
 
-function saveCalibration(record) {
-  const db = getDatabase();
-  db.prepare(`
+async function saveCalibration(record) {
+  await dbAsync.run(`
     INSERT INTO fund_calibration (
       fund_code, optimal_holdings_weight, optimal_sector_weight, cash_adjustment,
-      mae, rmse, direction_accuracy, sample_size, calibrated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      mae, rmse, direction_accuracy, sample_size
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(fund_code) DO UPDATE SET
       optimal_holdings_weight = excluded.optimal_holdings_weight,
       optimal_sector_weight = excluded.optimal_sector_weight,
@@ -34,8 +35,8 @@ function saveCalibration(record) {
       rmse = excluded.rmse,
       direction_accuracy = excluded.direction_accuracy,
       sample_size = excluded.sample_size,
-      calibrated_at = datetime('now')
-  `).run(
+      calibrated_at = CURRENT_TIMESTAMP
+  `, [
     record.fund_code,
     record.optimal_holdings_weight,
     record.optimal_sector_weight,
@@ -44,20 +45,20 @@ function saveCalibration(record) {
     record.rmse,
     record.direction_accuracy,
     record.sample_size
-  );
+  ]);
 }
 
 /**
  * Calibrates the estimation weights and cash adjustment using historical NAVs.
  * Evaluates model accuracy (MAE, RMSE, direction hit rate) against real historical NAVs.
  */
-function calibrateFund(code, options = {}) {
+async function calibrateFund(code, options = {}) {
   const fundCode = assertFundCode(code);
   const db = getDatabase();
 
   // If cached and not forced, return stored calibration if available
   if (!options.force) {
-    const existing = getStoredCalibration(fundCode);
+    const existing = await getStoredCalibration(fundCode);
     if (existing) {
       return {
         calibrated: existing.sample_size > 0,
@@ -94,7 +95,7 @@ function calibrateFund(code, options = {}) {
       direction_accuracy: null,
       sample_size: 0
     };
-    saveCalibration(defaultRecord);
+    await saveCalibration(defaultRecord);
     return {
       calibrated: false,
       ...defaultRecord,
@@ -130,12 +131,12 @@ function calibrateFund(code, options = {}) {
   // Collect stock prices for historical dates to run backtest
   const stockPricesByDate = {};
   for (const h of holdings) {
-    const prices = db.prepare(`
+    const prices = await dbAsync.all(`
       SELECT date, change_percent, price
       FROM stock_price
       WHERE stock_code = ?
       ORDER BY date ASC
-    `).all(h.stock_code);
+    `, [h.stock_code]);
     for (const p of prices) {
       if (!stockPricesByDate[p.date]) stockPricesByDate[p.date] = {};
       stockPricesByDate[p.date][h.stock_code] = p.change_percent;
@@ -228,7 +229,7 @@ function calibrateFund(code, options = {}) {
     sample_size: pairedSamples.length
   };
 
-  saveCalibration(record);
+  await saveCalibration(record);
 
   return {
     calibrated: pairedSamples.length > 0,

@@ -16,7 +16,8 @@
  *
  * 不降低 requiredSamples，不伪造数据，不复制当天数据当历史。
  */
-const { getDatabase, transaction } = require('../database/db');
+const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const { fetchStockHistory } = require('./marketService');
 
 const DEFAULT_HISTORY_DAYS = 365;
@@ -41,26 +42,20 @@ function getDistinctHeldStocks() {
   return db.prepare('SELECT DISTINCT stock_code FROM fund_holdings').all().map(r => r.stock_code);
 }
 
-function upsertStockPrices(records) {
-  const db = getDatabase();
-  const stmt = db.prepare(`
+// 写入统一走 dbAsync：生产（DATABASE_URL）落 PostgreSQL，本地/测试无 DATABASE_URL 时回退 SQLite。
+// 用 CURRENT_TIMESTAMP 取代 datetime('now')，使同一段 SQL 在 SQLite 与 PostgreSQL 均合法。
+async function upsertStockPrices(records) {
+  const sql = `
     INSERT INTO stock_price (stock_code, date, price, change_percent, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(stock_code, date) DO UPDATE SET
       price = excluded.price,
       change_percent = excluded.change_percent,
-      updated_at = datetime('now')
-  `);
-  transaction(database => {
+      updated_at = CURRENT_TIMESTAMP
+  `;
+  await dbAsync.transaction(async (helpers) => {
     for (const r of records) {
-      database.prepare(`
-        INSERT INTO stock_price (stock_code, date, price, change_percent, updated_at)
-        VALUES (?, ?, ?, ?, datetime('now'))
-        ON CONFLICT(stock_code, date) DO UPDATE SET
-          price = excluded.price,
-          change_percent = excluded.change_percent,
-          updated_at = datetime('now')
-      `).run(r.stock_code, r.date, r.price, r.change_percent);
+      await helpers.run(sql, [r.stock_code, r.date, r.price, r.change_percent]);
     }
   });
 }
@@ -87,7 +82,7 @@ async function syncStockHistory(stockCode, { days = DEFAULT_HISTORY_DAYS } = {})
   }
   // 先在内存里收集全部记录，再一次性写入；任一写入异常整体回滚，绝不半写污染。
   try {
-    upsertStockPrices(result.records);
+    await upsertStockPrices(result.records);
   } catch (error) {
     return { stock_code: stockCode, fetched: result.records.length, inserted: 0, source: result.source, error: error.message };
   }

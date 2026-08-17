@@ -205,7 +205,32 @@ async function ensureCloudSchema() {
       reason TEXT NOT NULL DEFAULT '',
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
-    `CREATE INDEX IF NOT EXISTS idx_account_backups_user ON account_backups (user_id, id DESC)`
+    `CREATE INDEX IF NOT EXISTS idx_account_backups_user ON account_backups (user_id, id DESC)`,
+    // —— 持久化迁移（A3 修复）：stock_price / fund_calibration 从本地 SQLite 迁至 PostgreSQL ——
+    // 此前这两张表落在 Render 的临时 SQLite，实例重启/重新部署后被清空，导致 calibration 样本归零。
+    // 现与账号层共用同一 DATABASE_URL 的 PostgreSQL，保证跨重启持久。本地无 DATABASE_URL 时仍走 SQLite 回退。
+    `CREATE TABLE IF NOT EXISTS stock_price (
+      id SERIAL PRIMARY KEY,
+      stock_code TEXT NOT NULL,
+      date TEXT NOT NULL,
+      price REAL NOT NULL,
+      change_percent REAL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (stock_code, date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_stock_price_code_date ON stock_price (stock_code, date DESC)`,
+    `CREATE TABLE IF NOT EXISTS fund_calibration (
+      fund_code TEXT PRIMARY KEY,
+      optimal_holdings_weight REAL NOT NULL,
+      optimal_sector_weight REAL NOT NULL,
+      cash_adjustment REAL NOT NULL DEFAULT 0,
+      mae REAL,
+      rmse REAL,
+      direction_accuracy REAL,
+      sample_size INTEGER NOT NULL DEFAULT 0,
+      calibrated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`
   ];
   const db = await getPool();
   for (const statement of statements) {

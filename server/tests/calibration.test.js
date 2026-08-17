@@ -46,8 +46,8 @@ test.beforeEach(() => {
   insertPrice.run('600519', '2026-07-28', 1848, 0.0375); // stock move +3.75% -> fund move +3.0%
 });
 
-test('calibrates optimal weights using historical NAV and stock holdings', () => {
-  const result = calibrateFund('000001', { force: true });
+test('calibrates optimal weights using historical NAV and stock holdings', async () => {
+  const result = await calibrateFund('000001', { force: true });
   assert.equal(result.calibrated, true);
   assert.equal(result.sample_size, 3);
   assert.equal(result.holdings_weight, 0.8); // 0.025 * 0.8 = 0.020 (exact match for 2% NAV change)
@@ -55,7 +55,7 @@ test('calibrates optimal weights using historical NAV and stock holdings', () =>
   assert.ok(Number.isFinite(result.direction_accuracy));
   assert.equal(result.direction_accuracy, 1.0); // 100% directional hit rate
 
-  const stored = getStoredCalibration('000001');
+  const stored = await getStoredCalibration('000001');
   assert.equal(stored.optimal_holdings_weight, 0.8);
   assert.equal(stored.direction_accuracy, 1.0);
 });

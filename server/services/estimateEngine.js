@@ -361,7 +361,7 @@ async function calculateFundEstimate(code, options = {}) {
     }
   }
 
-  const calibration = calibrateFund(fundCode, { force: options.force });
+  const calibration = await calibrateFund(fundCode, { force: options.force });
   const holdingsWeight = calibration.holdings_weight ?? config.holdingsWeight;
   const sectorWeight = calibration.sector_weight ?? config.sectorWeight;
   const cashAdjustment = calibration.cash_adjustment ?? config.cashAdjustment;
