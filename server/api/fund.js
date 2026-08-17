@@ -456,6 +456,20 @@ async function handleFundApi(request, response, url) {
     }
   }
 
+  // 股票历史行情同步（校准依赖 stock_price 历史数据，A2）
+  // 必须放在「非 GET 直接 return false」守卫之前，否则 POST 不可达
+  let stockMatch = routeMatch(url.pathname, /^\/api\/stock\/sync-history$/);
+  if (stockMatch && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const days = Number(body.days) || 365;
+    const { syncFundHoldingsHistory, syncAllHoldingsHistory } = require('../services/stockHistoryService');
+    const result = body.fundCode
+      ? await syncFundHoldingsHistory(String(body.fundCode), { days })
+      : await syncAllHoldingsHistory({ days });
+    sendJson(response, 200, { success: true, ...result });
+    return true;
+  }
+
   if (request.method !== 'GET') return false;
 
   if (url.pathname === '/api/market/status') {
@@ -585,19 +599,6 @@ async function handleFundApi(request, response, url) {
       force: url.searchParams.get('recalibrate') === '1'
     });
     sendJson(response, 200, { success: true, calibration });
-    return true;
-  }
-
-  // 股票历史行情同步（校准依赖 stock_price 历史数据，A2）
-  let stockMatch = routeMatch(url.pathname, /^\/api\/stock\/sync-history$/);
-  if (stockMatch && request.method === 'POST') {
-    const body = await readJsonBody(request);
-    const days = Number(body.days) || 365;
-    const { syncFundHoldingsHistory, syncAllHoldingsHistory } = require('../services/stockHistoryService');
-    const result = body.fundCode
-      ? await syncFundHoldingsHistory(String(body.fundCode), { days })
-      : await syncAllHoldingsHistory({ days });
-    sendJson(response, 200, { success: true, ...result });
     return true;
   }
 
