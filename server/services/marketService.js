@@ -26,7 +26,15 @@ async function fetchText(url, options = {}) {
         signal: AbortSignal.timeout(Number(options.timeout || 15000))
       });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.text();
+      const text = await response.text();
+      if (options.returnMeta) {
+        return {
+          text,
+          status: response.status,
+          contentType: response.headers.get('content-type') || ''
+        };
+      }
+      return text;
     } catch (error) {
       lastError = error;
       if (attempt < attempts) {
@@ -388,19 +396,34 @@ const ALPHANUMERIC_MAPPING = {
 };
 
 function stockSecIds(code) {
-  let normalized = String(code || '').trim().toUpperCase();
-  if (ALPHANUMERIC_MAPPING[normalized]) {
-    normalized = ALPHANUMERIC_MAPPING[normalized];
+  let input = String(code || '').trim().toUpperCase();
+  if (ALPHANUMERIC_MAPPING[input]) {
+    input = ALPHANUMERIC_MAPPING[input];
   }
-  if (/^\d{5}$/.test(normalized)) return [`116.${normalized}`];
+  // 如果输入已经是 secid 格式（如 1.603986 / 0.300750 / 124.HSTECH），
+  // 先提取真正的标的代码（点号后的部分），再统一按代码规则判定市场，
+  // 避免把传入的 1.603986 误当成 116.603986。
+  const secidMatch = input.match(/^\d{1,3}\.(\d{4,6})$/);
+  if (secidMatch) {
+    input = secidMatch[1];
+  }
+  // 纯数字代码（去除任何非数字字符做保险）
+  const normalized = input.replace(/[^0-9]/g, '');
+  // 6 位 A 股代码：上海(5/6/9 开头)→1.xxxxxx，深圳(0/3 开头)→0.xxxxxx。
+  // 注意：绝不加 116. 前缀（116. 是基金/港股市场，不是 A 股股票）。
   if (/^\d{6}$/.test(normalized)) {
     const domestic = /^(5|6|9)/.test(normalized) ? `1.${normalized}` : `0.${normalized}`;
-    return [domestic, `116.${normalized}`];
+    return [domestic];
   }
-  if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) {
-    return [`105.${normalized}`, `106.${normalized}`, `107.${normalized}`];
+  // 5 位（基金/港股等）保留原 116. 映射，不影响股票场景
+  if (/^\d{5}$/.test(normalized)) {
+    return [`116.${normalized}`];
   }
-  return [stockSecId(normalized)];
+  // 美股/港股字母代码
+  if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(input)) {
+    return [`105.${input}`, `106.${input}`, `107.${input}`];
+  }
+  return [stockSecId(input)];
 }
 
 async function fetchStockPayload(secid) {
@@ -482,19 +505,24 @@ async function fetchStockHistory(code, options = {}) {
         url.searchParams.set('beg', beg);   // 历史开始日期
         url.searchParams.set('end', '20500101');
         url.searchParams.set('lmt', String(days));
-        const text = await fetchText(url, {
+        const meta = await fetchText(url, {
           accept: 'application/json,*/*',
           referer: 'https://quote.eastmoney.com/',
           userAgent: 'Mozilla/5.0',
           attempts: 2,
-          timeout: 8000
+          timeout: 8000,
+          returnMeta: true
         });
+        const text = meta.text;
         const payload = parseJsonp(text) || safeJsonParse(text);
         const data = payload && payload.data;
         const klines = data && data.klines;
         if (!Array.isArray(klines) || klines.length === 0) {
           // HTTP 200 但 klines 缺失/为空：视为数据源失败，不是"正常空历史"
           const reason = payload && payload.rc !== 0 ? `rc=${payload.rc}` : 'data.klines 为空或缺失';
+          // 只读诊断日志：仅输出关键元信息用于定位返回结构，禁止写入数据库
+          const respText = String(text || '');
+          console.warn(`[stock-history-debug] secid=${secid} status=200 content-type=${meta.contentType} response_length=${respText.length} response_prefix=${respText.slice(0, 300)}`);
           console.warn(`[stock-history] source=eastmoney secid=${secid} endpoint=${baseName} status=200 error=${reason}`);
           lastEmptyReason = `[${baseName}] ${reason}`;
           continue;
