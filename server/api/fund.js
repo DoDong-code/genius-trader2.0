@@ -587,6 +587,36 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // 股票历史行情同步（校准依赖 stock_price 历史数据，A2）
+  let stockMatch = routeMatch(url.pathname, /^\/api\/stock\/sync-history$/);
+  if (stockMatch && request.method === 'POST') {
+    const body = await readJsonBody(request);
+    const days = Number(body.days) || 365;
+    const { syncFundHoldingsHistory, syncAllHoldingsHistory } = require('../services/stockHistoryService');
+    const result = body.fundCode
+      ? await syncFundHoldingsHistory(String(body.fundCode), { days })
+      : await syncAllHoldingsHistory({ days });
+    sendJson(response, 200, { success: true, ...result });
+    return true;
+  }
+
+  stockMatch = routeMatch(url.pathname, /^\/api\/stock\/([^/]+)\/history$/);
+  if (stockMatch) {
+    const days = Number(url.searchParams.get('days')) || 365;
+    const { fetchStockHistory } = require('../services/marketService');
+    const result = await fetchStockHistory(stockMatch[0], { limit: days });
+    sendJson(response, 200, {
+      success: true,
+      stock_code: stockMatch[0],
+      records: result.records.length,
+      source: result.source,
+      start: result.records[0]?.date || null,
+      end: result.records[result.records.length - 1]?.date || null,
+      history: result.records
+    });
+    return true;
+  }
+
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})$/);
   if (match) {
     let fund = getFund(match[0]);

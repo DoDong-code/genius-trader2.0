@@ -234,9 +234,12 @@ async function collectFund(code, options = {}) {
   }
 
   const db = getDatabase();
-  // 详情/历史缓存：持仓 90 天、历史 24 小时内已同步则复用，净值只做增量刷新
-  const useStoredHoldings = freshSyncState(fundCode, 'holdings');
-  const useStoredHistory = freshSyncState(fundCode, 'history');
+  // 详情/历史缓存：持仓 90 天、历史 24 小时内已同步则复用，净值只做增量刷新。
+  // force=true（强制重新导入）时必须绕过增量缓存，执行全量历史回填，否则 fund_nav
+  // 永远停留在首次入库的那段区间（例如仅 7.16~8.13），历史净值无法补齐。
+  const force = Boolean(options.force);
+  const useStoredHoldings = !force && freshSyncState(fundCode, 'holdings');
+  const useStoredHistory = !force && freshSyncState(fundCode, 'history');
   const storedFund = db.prepare('SELECT fund_name, fund_type, company FROM fund WHERE fund_code = ?').get(fundCode);
 
   let profileSource = '';

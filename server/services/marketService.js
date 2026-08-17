@@ -4,6 +4,8 @@ const EASTMONEY_FUND_ESTIMATE = 'https://fundgz.1234567.com.cn';
 const EASTMONEY_FUND_ARCHIVES = 'https://fundf10.eastmoney.com';
 const EASTMONEY_STOCK_API = 'https://push2.eastmoney.com';
 const EASTMONEY_STOCK_DELAY_API = 'https://push2delay.eastmoney.com';
+const EASTMONEY_STOCK_HIS_API = 'https://push2his.eastmoney.com';
+const EASTMONEY_STOCK_HIS_DELAY_API = 'https://push2hisdelay.eastmoney.com';
 
 function sleep(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -443,6 +445,70 @@ async function fetchStockQuote(code) {
   return null;
 }
 
+/**
+ * 获取个股历史日 K 线（用于校准所需的 stock_price 历史行情）。
+ * 复用与实时行情相同的 secid 解析（stockSecIds），依次尝试主/延迟历史行情接口。
+ * 返回 { records: [{ stock_code, date, price(收盘), change_percent(涨跌幅, 小数) }], source, secid }。
+ * - kline 字段 f51=日期, f52=开, f53=收, f54=高, f55=低, f59=涨跌幅(百分比)。
+ * - change_percent 与 stock/get 的 f170/10000 保持一致，统一存为小数（1.23% => 0.0123）。
+ * - 任何单接口失败都不抛出，最终无数据则返回 records: []，由调用方决定降级策略。
+ */
+async function fetchStockHistory(code, options = {}) {
+  const limit = Math.min(Math.max(Number(options.limit || 365), 1), 2000);
+  let lastError;
+  for (const secid of stockSecIds(code)) {
+    for (const base of [EASTMONEY_STOCK_HIS_API, EASTMONEY_STOCK_HIS_DELAY_API]) {
+      try {
+        const url = new URL('/api/qt/stock/kline/get', base);
+        url.searchParams.set('secid', secid);
+        url.searchParams.set('ut', 'fa5fd1943c7b386f172d6893dbfba10b');
+        url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6');
+        url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61');
+        url.searchParams.set('klt', '101'); // 日 K
+        url.searchParams.set('fqt', '1'); // 前复权
+        url.searchParams.set('end', '20500101');
+        url.searchParams.set('lmt', String(limit));
+        const text = await fetchText(url, {
+          accept: 'application/json,*/*',
+          referer: 'https://quote.eastmoney.com/',
+          attempts: 2,
+          timeout: 15000
+        });
+        const payload = parseJsonp(text) || safeJsonParse(text);
+        const klines = payload?.data?.klines;
+        if (Array.isArray(klines) && klines.length) {
+          const records = klines.map(line => {
+            const parts = String(line).split(',');
+            const date = parts[0];
+            const close = Number(parts[2]);
+            const changePercent = Number(parts[8]);
+            return {
+              stock_code: String(code),
+              date,
+              price: close,
+              change_percent: Number.isFinite(changePercent) ? changePercent / 100 : null
+            };
+          }).filter(r => r.date && Number.isFinite(r.price) && Number.isFinite(r.change_percent));
+          if (records.length) {
+            return { records, source: `eastmoney-kline(${secid})`, secid };
+          }
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+  }
+  return { records: [], source: null, error: lastError?.message };
+}
+
+function safeJsonParse(source) {
+  try {
+    return JSON.parse(String(source || ''));
+  } catch {
+    return null;
+  }
+}
+
 // 主要指数行情（东方财富 secid）
 const INDEX_SECIDS = {
   '上证指数': '1.000001',
@@ -496,5 +562,6 @@ module.exports = {
   stockSecId,
   stockSecIds,
   fetchStockQuote,
+  fetchStockHistory,
   fetchIndexQuotes
 };
