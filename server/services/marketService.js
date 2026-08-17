@@ -21,7 +21,7 @@ async function fetchText(url, options = {}) {
         headers: {
           Accept: options.accept || 'application/json,text/html,application/javascript;q=0.9,*/*;q=0.8',
           Referer: options.referer || `${EASTMONEY_FUND}/`,
-          'User-Agent': 'Mozilla/5.0 GeniusTraderFundData/2.0'
+          'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0'
         },
         signal: AbortSignal.timeout(Number(options.timeout || 15000))
       });
@@ -447,17 +447,30 @@ async function fetchStockQuote(code) {
 
 /**
  * 获取个股历史日 K 线（用于校准所需的 stock_price 历史行情）。
- * 复用与实时行情相同的 secid 解析（stockSecIds），依次尝试主/延迟历史行情接口。
- * 返回 { records: [{ stock_code, date, price(收盘), change_percent(涨跌幅, 小数) }], source, secid }。
- * - kline 字段 f51=日期, f52=开, f53=收, f54=高, f55=低, f59=涨跌幅(百分比)。
- * - change_percent 与 stock/get 的 f170/10000 保持一致，统一存为小数（1.23% => 0.0123）。
- * - 任何单接口失败都不抛出，最终无数据则返回 records: []，由调用方决定降级策略。
+ *
+ * 数据源：东方财富历史 K 线接口（push2his / push2hisdelay），与实时行情共用 secid 解析。
+ * 返回 { records: [{ stock_code, date, open, close, high, low, volume, amount, price, change_percent }], source, secid }。
+ * - kline 字段：f51=日期, f52=开, f53=收, f54=高, f55=低, f56=成交量, f57=成交额, f59=涨跌幅(百分比)。
+ * - price 始终 = 收盘价（与 stockPrice upsert 契约一致）；change_percent 存小数（1.23% => 0.0123）。
+ * - 超时策略：单 endpoint timeout=8000ms、最多 2 次尝试；两个 endpoint 依次尝试；不无限重试。
+ * - 关键错误处理：HTTP 200 但 data.klines 缺失/为空，视为数据源失败（非"正常空历史"），记录 [stock-history] 日志；
+ *   两个 endpoint 都失败时返回 records:[] 并附带明确 error，绝不伪造 records。
  */
 async function fetchStockHistory(code, options = {}) {
-  const limit = Math.min(Math.max(Number(options.limit || 365), 1), 2000);
-  let lastError;
-  for (const secid of stockSecIds(code)) {
-    for (const base of [EASTMONEY_STOCK_HIS_API, EASTMONEY_STOCK_HIS_DELAY_API]) {
+  const days = Math.min(Math.max(Number(options.days || options.limit || 365), 1), 2000);
+  // beg：合理的历史开始日期（days 个自然日之前，上海时区，紧凑 YYYYMMDD）
+  const begDate = new Date(Date.now() - days * 86400000);
+  const beg = shanghaiDateString(begDate.getTime()).replace(/-/g, '');
+  const secids = stockSecIds(code);
+  let lastError = null;
+  let lastEmptyReason = null;
+
+  for (const secid of secids) {
+    const endpoints = [
+      ['push2his', EASTMONEY_STOCK_HIS_API],
+      ['push2hisdelay', EASTMONEY_STOCK_HIS_DELAY_API]
+    ];
+    for (const [baseName, base] of endpoints) {
       try {
         const url = new URL('/api/qt/stock/kline/get', base);
         url.searchParams.set('secid', secid);
@@ -465,40 +478,67 @@ async function fetchStockHistory(code, options = {}) {
         url.searchParams.set('fields1', 'f1,f2,f3,f4,f5,f6');
         url.searchParams.set('fields2', 'f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61');
         url.searchParams.set('klt', '101'); // 日 K
-        url.searchParams.set('fqt', '1'); // 前复权
+        url.searchParams.set('fqt', '1');   // 前复权
+        url.searchParams.set('beg', beg);   // 历史开始日期
         url.searchParams.set('end', '20500101');
-        url.searchParams.set('lmt', String(limit));
+        url.searchParams.set('lmt', String(days));
         const text = await fetchText(url, {
           accept: 'application/json,*/*',
           referer: 'https://quote.eastmoney.com/',
+          userAgent: 'Mozilla/5.0',
           attempts: 2,
-          timeout: 15000
+          timeout: 8000
         });
         const payload = parseJsonp(text) || safeJsonParse(text);
-        const klines = payload?.data?.klines;
-        if (Array.isArray(klines) && klines.length) {
-          const records = klines.map(line => {
-            const parts = String(line).split(',');
-            const date = parts[0];
-            const close = Number(parts[2]);
-            const changePercent = Number(parts[8]);
-            return {
-              stock_code: String(code),
-              date,
-              price: close,
-              change_percent: Number.isFinite(changePercent) ? changePercent / 100 : null
-            };
-          }).filter(r => r.date && Number.isFinite(r.price) && Number.isFinite(r.change_percent));
-          if (records.length) {
-            return { records, source: `eastmoney-kline(${secid})`, secid };
-          }
+        const data = payload && payload.data;
+        const klines = data && data.klines;
+        if (!Array.isArray(klines) || klines.length === 0) {
+          // HTTP 200 但 klines 缺失/为空：视为数据源失败，不是"正常空历史"
+          const reason = payload && payload.rc !== 0 ? `rc=${payload.rc}` : 'data.klines 为空或缺失';
+          console.warn(`[stock-history] source=eastmoney secid=${secid} endpoint=${baseName} status=200 error=${reason}`);
+          lastEmptyReason = `[${baseName}] ${reason}`;
+          continue;
         }
+        const records = klines.map(line => {
+          const parts = String(line).split(',');
+          const date = parts[0];
+          const open = Number(parts[1]);
+          const close = Number(parts[2]);
+          const high = Number(parts[3]);
+          const low = Number(parts[4]);
+          const volume = Number(parts[5]);
+          const amount = Number(parts[6]);
+          const changePercent = Number(parts[8]);
+          return {
+            stock_code: String(code),
+            date,
+            open: Number.isFinite(open) ? open : null,
+            close: Number.isFinite(close) ? close : null,
+            high: Number.isFinite(high) ? high : null,
+            low: Number.isFinite(low) ? low : null,
+            volume: Number.isFinite(volume) ? volume : null,
+            amount: Number.isFinite(amount) ? amount : null,
+            price: Number.isFinite(close) ? close : null,
+            change_percent: Number.isFinite(changePercent) ? changePercent / 100 : null
+          };
+        }).filter(r => r.date && Number.isFinite(r.price) && Number.isFinite(r.change_percent));
+        if (records.length) {
+          console.log(`[stock-history] source=eastmoney secid=${secid} endpoint=${baseName} status=200 records=${records.length} start=${records[0].date} end=${records[records.length - 1].date}`);
+          return { records, source: `eastmoney-kline(${secid})`, secid };
+        }
+        console.warn(`[stock-history] source=eastmoney secid=${secid} endpoint=${baseName} status=200 error=解析后无有效记录`);
+        lastEmptyReason = `[${baseName}] 解析后无有效记录`;
+        continue;
       } catch (error) {
+        console.warn(`[stock-history] source=eastmoney secid=${secid} endpoint=${baseName} status=error error=${error.message}`);
         lastError = error;
       }
     }
   }
-  return { records: [], source: null, error: lastError?.message };
+  // 两个 endpoint 都失败：返回明确失败状态，不要伪造 records
+  const errMsg = lastEmptyReason || (lastError && lastError.message) || '所有东方财富历史行情 endpoint 均无可用数据';
+  console.error(`[stock-history] source=eastmoney code=${code} status=failed error=${errMsg}`);
+  return { records: [], source: null, error: errMsg };
 }
 
 function safeJsonParse(source) {
