@@ -1,4 +1,5 @@
 const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const { assertFundCode, getFund, getRealtimeFundEstimate } = require('./fundService');
 const { fetchStockQuote } = require('./marketService');
 const { calibrateFund } = require('./calibrationEngine');
@@ -30,8 +31,8 @@ function sectorForFund(fund) {
   return config.nameRules.find(rule => rule.pattern.test(searchable))?.sector || null;
 }
 
-function latestHoldings(fundCode) {
-  return getDatabase().prepare(`
+async function latestHoldings(fundCode) {
+  return await dbAsync.all(`
     SELECT stock_code, stock_name, weight, report_date
     FROM fund_holdings
     WHERE fund_code = ?
@@ -40,7 +41,7 @@ function latestHoldings(fundCode) {
       )
     ORDER BY weight DESC
     LIMIT 10
-  `).all(fundCode, fundCode);
+  `, [fundCode, fundCode]);
 }
 
 function cachedQuote(stockCode, ttlMinutes = config.quoteTtlMinutes) {
@@ -304,7 +305,7 @@ async function calculateFundEstimate(code, options = {}) {
     }
   }
 
-  const holdings = latestHoldings(fundCode);
+  const holdings = await latestHoldings(fundCode);
   let quoteResults;
 
   if (targetDate === shanghaiDate()) {

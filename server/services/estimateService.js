@@ -1,4 +1,5 @@
 const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const { getLatestPair } = require('./navService');
 
 function round(value, digits = 2) {
@@ -15,16 +16,15 @@ function dampBondChange(change) {
   return sign * Math.min(damped, 0.003);
 }
 
-function estimateFund(fundCode, amount) {
-  const history = getLatestPair(fundCode);
+async function estimateFund(fundCode, amount) {
+  const history = await getLatestPair(fundCode);
   const latest = history[0] || null;
   const previous = history[1] || null;
   let todayChange = latest && previous && previous.nav
     ? latest.nav / previous.nav - 1
     : 0;
 
-  const db = getDatabase();
-  const fund = db.prepare('SELECT fund_type, fund_name FROM fund WHERE fund_code = ?').get(fundCode);
+  const fund = await dbAsync.get('SELECT fund_type, fund_name FROM fund WHERE fund_code = ?', [fundCode]);
   if (fund && (fund.fund_type?.includes('债券') || fund.fund_type?.includes('纯债') || fund.fund_name?.includes('债券') || fund.fund_name?.includes('纯债'))) {
     todayChange = dampBondChange(todayChange);
   }
@@ -38,29 +38,28 @@ function estimateFund(fundCode, amount) {
   };
 }
 
-function estimatePortfolio(accountId) {
+async function estimatePortfolio(accountId) {
   const normalizedAccount = String(accountId || '').trim();
   if (!normalizedAccount) {
     const error = new Error('账户 ID 不能为空');
     error.statusCode = 400;
     throw error;
   }
-  const db = getDatabase();
-  const positions = db.prepare(`
+  const positions = await dbAsync.all(`
     SELECT p.account_id, p.fund_code, p.shares, p.cost, p.amount, f.fund_name
     FROM portfolio p
     JOIN fund f ON f.fund_code = p.fund_code
     WHERE p.account_id = ?
     ORDER BY p.fund_code
-  `).all(normalizedAccount);
+  `, [normalizedAccount]);
 
-  const funds = positions.map(position => ({
-    ...estimateFund(position.fund_code, position.amount),
+  const funds = await Promise.all(positions.map(async position => ({
+    ...await estimateFund(position.fund_code, position.amount),
     fund_name: position.fund_name,
     shares: position.shares,
     cost: position.cost,
     cumulative_profit: round(position.amount - position.cost)
-  }));
+  })));
 
   return {
     account_id: normalizedAccount,

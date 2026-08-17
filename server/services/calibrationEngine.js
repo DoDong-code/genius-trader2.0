@@ -1,6 +1,5 @@
-const { getDatabase } = require('../database/db');
 const dbAsync = require('../database/dbAsync');
-const { assertFundCode, getFund } = require('./fundService');
+const { assertFundCode } = require('./fundService');
 const config = require('../config/estimateConfig');
 
 function round(value, digits = 6) {
@@ -54,7 +53,6 @@ async function saveCalibration(record) {
  */
 async function calibrateFund(code, options = {}) {
   const fundCode = assertFundCode(code);
-  const db = getDatabase();
 
   // If cached and not forced, return stored calibration if available
   if (!options.force) {
@@ -76,12 +74,12 @@ async function calibrateFund(code, options = {}) {
   }
 
   // Retrieve historical NAVs sorted by date ascending
-  const navs = db.prepare(`
+  const navs = await dbAsync.all(`
     SELECT date, nav
     FROM fund_nav
     WHERE fund_code = ?
     ORDER BY date ASC
-  `).all(fundCode);
+  `, [fundCode]);
 
   // If there are fewer than 2 NAV records, we cannot backtest properly
   if (navs.length < 2) {
@@ -119,12 +117,12 @@ async function calibrateFund(code, options = {}) {
   }
 
   // Get current holdings weights for fund
-  const holdings = db.prepare(`
+  const holdings = await dbAsync.all(`
     SELECT stock_code, weight
     FROM fund_holdings
     WHERE fund_code = ?
       AND report_date = (SELECT MAX(report_date) FROM fund_holdings WHERE fund_code = ?)
-  `).all(fundCode, fundCode);
+  `, [fundCode, fundCode]);
 
   const totalPublishedWeight = holdings.reduce((sum, item) => sum + Number(item.weight || 0), 0);
 

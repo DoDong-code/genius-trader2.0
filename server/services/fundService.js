@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const { getDatabase, transaction } = require('../database/db');
+const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const {
   fetchHistory,
   fetchHoldings,
@@ -233,14 +234,13 @@ async function collectFund(code, options = {}) {
     if (cached) return { ...cached, fromCache: true };
   }
 
-  const db = getDatabase();
   // 详情/历史缓存：持仓 90 天、历史 24 小时内已同步则复用，净值只做增量刷新。
   // force=true（强制重新导入）时必须绕过增量缓存，执行全量历史回填，否则 fund_nav
   // 永远停留在首次入库的那段区间（例如仅 7.16~8.13），历史净值无法补齐。
   const force = Boolean(options.force);
   const useStoredHoldings = !force && freshSyncState(fundCode, 'holdings');
   const useStoredHistory = !force && freshSyncState(fundCode, 'history');
-  const storedFund = db.prepare('SELECT fund_name, fund_type, company FROM fund WHERE fund_code = ?').get(fundCode);
+  const storedFund = await dbAsync.get('SELECT fund_name, fund_type, company FROM fund WHERE fund_code = ?', [fundCode]);
 
   let profileSource = '';
   let profile = null;
@@ -281,7 +281,7 @@ async function collectFund(code, options = {}) {
 
   let holdings = [];
   if (useStoredHoldings) {
-    holdings = getFundHoldings(fundCode);
+    holdings = await getFundHoldings(fundCode);
   } else {
     try {
       holdings = await fetchHoldings(fundCode);
@@ -294,8 +294,7 @@ async function collectFund(code, options = {}) {
   const historyByDate = new Map();
   // 增量刷新时以数据库已有历史为基底，合并最新净值
   if (useStoredHistory) {
-    db.prepare('SELECT date, nav, acc_nav FROM fund_nav WHERE fund_code = ?')
-      .all(fundCode)
+    (await dbAsync.all('SELECT date, nav, acc_nav FROM fund_nav WHERE fund_code = ?', [fundCode]))
       .forEach(row => {
         const nav = Number(row.nav);
         if (row.date && Number.isFinite(nav)) {
@@ -344,51 +343,50 @@ async function collectFund(code, options = {}) {
 
 async function importFund(code, options = {}) {
   const data = await collectFund(code, options);
-  const db = getDatabase();
   const existingDates = new Set(
-    db.prepare('SELECT date FROM fund_nav WHERE fund_code = ?').all(data.fundCode)
+    (await dbAsync.all('SELECT date FROM fund_nav WHERE fund_code = ?', [data.fundCode]))
       .map(row => row.date)
   );
 
-  transaction(database => {
-    database.prepare(`
+  await dbAsync.transaction(async (database) => {
+    await database.run(`
       INSERT INTO fund (fund_code, fund_name, fund_type, company)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(fund_code) DO UPDATE SET
         fund_name = excluded.fund_name,
         fund_type = COALESCE(excluded.fund_type, fund.fund_type),
         company = COALESCE(excluded.company, fund.company),
-        updated_at = datetime('now')
-    `).run(data.fundCode, data.fundName, data.fundType, data.company);
+        updated_at = CURRENT_TIMESTAMP
+    `, [data.fundCode, data.fundName, data.fundType, data.company]);
 
-    const upsertNav = database.prepare(`
+    const upsertNavSql = `
       INSERT INTO fund_nav (fund_code, date, nav, acc_nav)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(fund_code, date) DO UPDATE SET
         nav = excluded.nav,
         acc_nav = excluded.acc_nav
-    `);
-    data.history.forEach(item => {
-      upsertNav.run(data.fundCode, item.date, item.nav, item.accNav);
-    });
+    `;
+    for (const item of data.history) {
+      await database.run(upsertNavSql, [data.fundCode, item.date, item.nav, item.accNav]);
+    }
 
     if (data.holdings.length) {
-      const upsertHolding = database.prepare(`
+      const upsertHoldingSql = `
         INSERT INTO fund_holdings (fund_code, stock_code, stock_name, weight, report_date)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(fund_code, stock_code, report_date) DO UPDATE SET
           stock_name = excluded.stock_name,
           weight = excluded.weight
-      `);
-      data.holdings.forEach(item => {
-        upsertHolding.run(
+      `;
+      for (const item of data.holdings) {
+        await database.run(upsertHoldingSql, [
           data.fundCode,
           item.stock_code,
           item.stock_name,
           item.weight,
           item.report_date || 'unknown'
-        );
-      });
+        ]);
+      }
     }
   });
 
@@ -423,13 +421,13 @@ async function getRealtimeFundEstimate(code) {
   try {
     result = await fetchRealtimeEstimate(fundCode);
   } catch (error) {
-    const latestPair = getDatabase().prepare(`
+    const latestPair = await dbAsync.all(`
       SELECT date, nav
       FROM fund_nav
       WHERE fund_code = ?
       ORDER BY date DESC
       LIMIT 2
-    `).all(fundCode);
+    `, [fundCode]);
     const latest = latestPair[0];
     const previous = latestPair[1];
     let change = null;
@@ -450,7 +448,7 @@ async function getRealtimeFundEstimate(code) {
   }
 
   // Apply bond damping
-  const fund = getFund(fundCode);
+  const fund = await getFund(fundCode);
   if (fund && (fund.fund_type?.includes('债券') || fund.fund_type?.includes('纯债') || fund.fund_name?.includes('债券') || fund.fund_name?.includes('纯债'))) {
     if (Number.isFinite(result.estimate_change)) {
       result.estimate_change = dampBondChange(result.estimate_change);
@@ -459,36 +457,35 @@ async function getRealtimeFundEstimate(code) {
   return result;
 }
 
-function getFund(code) {
+async function getFund(code) {
   const fundCode = assertFundCode(code);
-  const db = getDatabase();
-  const fund = db.prepare(`
+  const fund = await dbAsync.get(`
     SELECT id, fund_code, fund_name, fund_type, company, created_at, updated_at
     FROM fund
     WHERE fund_code = ?
-  `).get(fundCode);
+  `, [fundCode]);
   if (!fund) return null;
-  const latestNav = db.prepare(`
+  const latestNav = await dbAsync.get(`
     SELECT date, nav, acc_nav
     FROM fund_nav
     WHERE fund_code = ?
     ORDER BY date DESC
     LIMIT 1
-  `).get(fundCode);
+  `, [fundCode]);
   return { ...fund, latest_nav: latestNav || null };
 }
 
-function listFunds() {
-  return getDatabase().prepare(`
+async function listFunds() {
+  return await dbAsync.all(`
     SELECT fund_code, fund_name, fund_type, company, updated_at
     FROM fund
     ORDER BY fund_code
-  `).all();
+  `);
 }
 
-function getFundHoldings(code) {
+async function getFundHoldings(code) {
   const fundCode = assertFundCode(code);
-  return getDatabase().prepare(`
+  return await dbAsync.all(`
     SELECT stock_code, stock_name, weight, report_date
     FROM fund_holdings
     WHERE fund_code = ?
@@ -497,7 +494,7 @@ function getFundHoldings(code) {
       )
     ORDER BY weight DESC
     LIMIT 10
-  `).all(fundCode, fundCode);
+  `, [fundCode, fundCode]);
 }
 
 module.exports = {

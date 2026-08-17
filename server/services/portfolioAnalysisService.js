@@ -82,7 +82,7 @@ async function resolveFundToday(code, amount, userId, savedToday) {
     if (local && Number.isFinite(Number(local.estimate_change))) return Number(local.estimate_change);
   } catch (e) { /* 忽略 */ }
   try {
-    const pair = getLatestPair(String(code));
+    const pair = await getLatestPair(String(code));
     if (pair.length >= 2 && Number(pair[1].nav) > 0) {
       return (Number(pair[0].nav) - Number(pair[1].nav)) / Number(pair[1].nav);
     }
@@ -200,7 +200,7 @@ async function buildAnalysisPortfolio(userId, options = {}) {
     base.today_change = (Number(fund.amount) || 0) * today;
     base.positionType = classifyPositionType({ ...fund, today }, accountFunds, strategy);
     try {
-      const history = getHistory(String(fund.code));
+      const history = await getHistory(String(fund.code));
       base.history = history;
       base.ret7d = periodReturn(history, 7);
       base.ret30d = periodReturn(history, 30);
@@ -211,7 +211,7 @@ async function buildAnalysisPortfolio(userId, options = {}) {
       base.ret30d = null;
       base.ret60d = null;
     }
-    const fundMeta = getFund(String(fund.code)) || {};
+    const fundMeta = await getFund(String(fund.code)) || {};
     if (!base.name || base.name === String(fund.code)) base.name = fundMeta.fund_name || base.name;
     if (!base.type || base.type === '基金') base.type = fundMeta.fund_type || base.type;
     holdings.push(base);

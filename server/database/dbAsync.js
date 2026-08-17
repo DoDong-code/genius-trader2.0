@@ -137,6 +137,31 @@ async function ensureCloudSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
+    // 阶段2：补全 fund 表 id / fund_type / company（与本地 SQLite DDL 对齐；fund_code 仍为主键）
+    `ALTER TABLE fund ADD COLUMN IF NOT EXISTS id SERIAL`,
+    `ALTER TABLE fund ADD COLUMN IF NOT EXISTS fund_type TEXT`,
+    `ALTER TABLE fund ADD COLUMN IF NOT EXISTS company TEXT`,
+    // 阶段2：fund_nav / fund_holdings 持久化迁入 PostgreSQL（与 fund 共用 DATABASE_URL；本地无 DATABASE_URL 时回退 SQLite）
+    `CREATE TABLE IF NOT EXISTS fund_nav (
+      id SERIAL PRIMARY KEY,
+      fund_code TEXT NOT NULL REFERENCES fund(fund_code) ON DELETE CASCADE,
+      date TEXT NOT NULL,
+      nav REAL NOT NULL,
+      acc_nav REAL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (fund_code, date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_nav_code_date ON fund_nav (fund_code, date DESC)`,
+    `CREATE TABLE IF NOT EXISTS fund_holdings (
+      id SERIAL PRIMARY KEY,
+      fund_code TEXT NOT NULL REFERENCES fund(fund_code) ON DELETE CASCADE,
+      stock_code TEXT NOT NULL,
+      stock_name TEXT,
+      weight REAL NOT NULL DEFAULT 0,
+      report_date TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE (fund_code, stock_code, report_date)
+    )`,
     `CREATE TABLE IF NOT EXISTS portfolio (
       id SERIAL PRIMARY KEY,
       user_id INTEGER NOT NULL DEFAULT 0,

@@ -500,7 +500,7 @@ async function handleFundApi(request, response, url) {
   }
 
   if (url.pathname === '/api/funds') {
-    sendJson(response, 200, { success: true, funds: listFunds() });
+    sendJson(response, 200, { success: true, funds: await listFunds() });
     return true;
   }
 
@@ -524,12 +524,12 @@ async function handleFundApi(request, response, url) {
 
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/history$/);
   if (match) {
-    const fund = getFund(match[0]);
+    const fund = await getFund(match[0]);
     if (!fund) {
       sendJson(response, 404, { success: false, error: '基金尚未导入' });
       return true;
     }
-    const history = getHistory(match[0], {
+    const history = await getHistory(match[0], {
       limit: url.searchParams.get('limit')
     });
     sendJson(response, 200, {
@@ -663,12 +663,12 @@ async function handleFundApi(request, response, url) {
 
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})$/);
   if (match) {
-    let fund = getFund(match[0]);
+    let fund = await getFund(match[0]);
     if (!fund) {
       try {
         console.log(`[auto-import] API fund details: auto-importing ${match[0]}...`);
         await importFund(match[0]);
-        fund = getFund(match[0]);
+        fund = await getFund(match[0]);
       } catch (importErr) {
         console.error(`[auto-import] Failed to auto-import fund ${match[0]} during details request:`, importErr.message);
       }
@@ -688,9 +688,9 @@ async function handleFundApi(request, response, url) {
           console.warn(`[fund-refresh] ${match[0]}: ${error.message}`);
         });
       }
-      fund = getFund(match[0]) || fund;
+      fund = (await getFund(match[0])) || fund;
     }
-    const history = getHistory(match[0]);
+    const history = await getHistory(match[0]);
     const isFast = url.searchParams.get('fast') === '1';
     sendJson(response, 200, {
       success: true,
@@ -701,7 +701,7 @@ async function handleFundApi(request, response, url) {
         history: history.length ? 'normal' : 'pending',
         label: history.length ? '数据正常' : '等待数据源'
       },
-      holdings: getFundHoldings(match[0]),
+      holdings: await getFundHoldings(match[0]),
       estimate: !isFast && url.searchParams.get('refresh') === '1'
         ? await getRealtimeFundEstimate(match[0])
         : null
@@ -724,7 +724,7 @@ async function handleFundApi(request, response, url) {
   if (match) {
     sendJson(response, 200, {
       success: true,
-      ...estimatePortfolio(match[0])
+      ...await estimatePortfolio(match[0])
     });
     return true;
   }

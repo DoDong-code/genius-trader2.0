@@ -1,10 +1,9 @@
-const { getDatabase } = require('../database/db');
+const dbAsync = require('../database/dbAsync');
 const { assertFundCode, importFund, listFunds } = require('./fundService');
 
-function getHistory(code, options = {}) {
+async function getHistory(code, options = {}) {
   const fundCode = assertFundCode(code);
   const limit = Math.min(Math.max(Number(options.limit) || 0, 0), 5000);
-  const db = getDatabase();
   const sql = `
     SELECT date, nav, acc_nav
     FROM fund_nav
@@ -13,24 +12,24 @@ function getHistory(code, options = {}) {
     ${limit ? 'LIMIT ?' : ''}
   `;
   const rows = limit
-    ? db.prepare(sql).all(fundCode, limit).reverse()
-    : db.prepare(sql).all(fundCode);
+    ? (await dbAsync.all(sql, [fundCode, limit])).reverse()
+    : await dbAsync.all(sql, [fundCode]);
   return rows;
 }
 
-function getLatestPair(code) {
+async function getLatestPair(code) {
   const fundCode = assertFundCode(code);
-  return getDatabase().prepare(`
+  return await dbAsync.all(`
     SELECT date, nav, acc_nav
     FROM fund_nav
     WHERE fund_code = ?
     ORDER BY date DESC
     LIMIT 2
-  `).all(fundCode);
+  `, [fundCode]);
 }
 
 async function syncAll(options = {}) {
-  const funds = listFunds();
+  const funds = await listFunds();
   const results = [];
   for (const fund of funds) {
     const startedAt = Date.now();

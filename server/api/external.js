@@ -225,7 +225,7 @@ async function handleExternalApi(request, response, url) {
 
   let match;
   if ((match = url.pathname.match(/^\/api\/external\/fund\/(\d{6})$/)) && request.method === 'GET') {
-    const fund = getFund(match[1]);
+    const fund = await getFund(match[1]);
     if (!fund) {
       sendJson(response, 404, { success: false, error: '基金不存在' });
       return true;
@@ -234,7 +234,7 @@ async function handleExternalApi(request, response, url) {
     return true;
   }
   if ((match = url.pathname.match(/^\/api\/external\/fund\/(\d{6})\/history$/)) && request.method === 'GET') {
-    const history = getHistory(match[1]);
+    const history = await getHistory(match[1]);
     sendJson(response, 200, { success: true, fund_code: match[1], records: history.length, history });
     return true;
   }

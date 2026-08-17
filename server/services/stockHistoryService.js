@@ -16,7 +16,6 @@
  *
  * 不降低 requiredSamples，不伪造数据，不复制当天数据当历史。
  */
-const { getDatabase } = require('../database/db');
 const dbAsync = require('../database/dbAsync');
 const { fetchStockHistory } = require('./marketService');
 
@@ -26,20 +25,19 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function getLatestHoldings(fundCode) {
-  const db = getDatabase();
-  return db.prepare(`
+async function getLatestHoldings(fundCode) {
+  return await dbAsync.all(`
     SELECT stock_code, stock_name, weight, report_date
     FROM fund_holdings
     WHERE fund_code = ?
       AND report_date = (SELECT MAX(report_date) FROM fund_holdings WHERE fund_code = ?)
     ORDER BY weight DESC
-  `).all(fundCode, fundCode);
+  `, [fundCode, fundCode]);
 }
 
-function getDistinctHeldStocks() {
-  const db = getDatabase();
-  return db.prepare('SELECT DISTINCT stock_code FROM fund_holdings').all().map(r => r.stock_code);
+async function getDistinctHeldStocks() {
+  const rows = await dbAsync.all('SELECT DISTINCT stock_code FROM fund_holdings');
+  return rows.map(r => r.stock_code);
 }
 
 // 写入统一走 dbAsync：生产（DATABASE_URL）落 PostgreSQL，本地/测试无 DATABASE_URL 时回退 SQLite。
@@ -100,7 +98,7 @@ async function syncStockHistory(stockCode, { days = DEFAULT_HISTORY_DAYS } = {})
  * 同步某只基金最新报告期全部持仓股票的历史行情。
  */
 async function syncFundHoldingsHistory(fundCode, { days = DEFAULT_HISTORY_DAYS } = {}) {
-  const holdings = getLatestHoldings(fundCode);
+  const holdings = await getLatestHoldings(fundCode);
   const perStock = [];
   let totalInserted = 0;
   let failed = 0;
@@ -125,7 +123,7 @@ async function syncFundHoldingsHistory(fundCode, { days = DEFAULT_HISTORY_DAYS }
  * 同步数据库中所有出现过持仓的股票的历史行情（用于一次性补齐全部基金的校准样本）。
  */
 async function syncAllHoldingsHistory({ days = DEFAULT_HISTORY_DAYS } = {}) {
-  const codes = getDistinctHeldStocks();
+  const codes = await getDistinctHeldStocks();
   const perStock = [];
   let totalInserted = 0;
   let failed = 0;

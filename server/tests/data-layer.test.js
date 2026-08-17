@@ -146,13 +146,13 @@ test('parses Tiantian Fund historical NAV fallback response', () => {
   assert.equal(parsed.history[0].changePercent, -0.067);
 });
 
-test('returns chronological history and calculates estimates', () => {
-  const history = getHistory('019633');
+test('returns chronological history and calculates estimates', async () => {
+  const history = await getHistory('019633');
   assert.deepEqual(history.map(item => item.date), ['2026-07-29', '2026-07-30']);
-  const fundEstimate = estimateFund('019633', 10000);
+  const fundEstimate = await estimateFund('019633', 10000);
   assert.equal(fundEstimate.today_change, 0.1);
   assert.equal(fundEstimate.estimate_profit, 1000);
-  const accountEstimate = estimatePortfolio('account2');
+  const accountEstimate = await estimatePortfolio('account2');
   assert.equal(accountEstimate.total_asset, 10000);
   assert.equal(accountEstimate.today_estimate_profit, 1000);
   assert.equal(accountEstimate.cumulative_profit, 1000);
