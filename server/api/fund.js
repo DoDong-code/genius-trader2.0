@@ -13,6 +13,7 @@ const {
 } = require('../services/estimateEngine');
 const { calibrateFund } = require('../services/calibrationEngine');
 const { fetchStockQuote } = require('../services/marketService');
+const { getDatabase } = require('../database/db');
 const fs = require('fs');
 const path = require('path');
 
@@ -613,6 +614,47 @@ async function handleFundApi(request, response, url) {
       start: result.records[0]?.date || null,
       end: result.records[result.records.length - 1]?.date || null,
       history: result.records
+    });
+    return true;
+  }
+
+  // 只读诊断：回读 stock_price 真实落库数据（A2→A3 写库验证用，绝不写库）
+  stockMatch = routeMatch(url.pathname, /^\/api\/stock\/([^/]+)\/prices$/);
+  if (stockMatch) {
+    const code = stockMatch[0];
+    const from = url.searchParams.get('from') || null;
+    const to = url.searchParams.get('to') || null;
+    const db = getDatabase();
+    const where = ['stock_code = ?'];
+    const params = [code];
+    if (from) { where.push('date >= ?'); params.push(from); }
+    if (to) { where.push('date <= ?'); params.push(to); }
+    const cond = where.join(' AND ');
+    const agg = db.prepare(`
+      SELECT COUNT(*) AS total,
+             COUNT(DISTINCT date) AS distinct_dates,
+             MIN(date) AS min_date,
+             MAX(date) AS max_date,
+             SUM(CASE WHEN price IS NULL THEN 1 ELSE 0 END) AS null_price,
+             SUM(CASE WHEN change_percent IS NULL THEN 1 ELSE 0 END) AS null_change
+      FROM stock_price WHERE ${cond}
+    `).get(...params);
+    const rows = db.prepare(`
+      SELECT stock_code, date, price, change_percent, updated_at
+      FROM stock_price WHERE ${cond}
+      ORDER BY date ASC
+    `).all(...params);
+    sendJson(response, 200, {
+      success: true,
+      stock_code: code,
+      total: agg.total,
+      distinct_dates: agg.distinct_dates,
+      min_date: agg.min_date,
+      max_date: agg.max_date,
+      null_price: agg.null_price || 0,
+      null_change: agg.null_change || 0,
+      duplicates: agg.total - agg.distinct_dates,
+      rows
     });
     return true;
   }
