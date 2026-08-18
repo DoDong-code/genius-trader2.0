@@ -12,6 +12,8 @@ const { getCredential } = require('./sourceCredentials');
 const { getProvider } = require('../providers/registry');
 
 const PROVIDER_ORDER = ['xiaobeiyangji', 'yangjibao'];
+// 微信端短名 → 服务端内部名；内部名原样透传，不影响网页端现有行为
+const SOURCE_ALIASES = { xbyj: 'xiaobeiyangji', yjb: 'yangjibao' };
 const PROVIDER_TIMEOUT_MS = 2500;
 const CACHE_TTL_MS = 30000;
 
@@ -77,9 +79,11 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   }
 
   const userId = Number(options.userId) || 0;
+  // 统一 source 别名：微信端短名(xbyj/yjb) → 服务端内部名(xiaobeiyangji/yangjibao)；内部名原样透传
+  const source = options.source ? (SOURCE_ALIASES[String(options.source)] || options.source) : undefined;
   // 任一 Provider 先返回有效估值即胜出，避免等待慢的那个；全部失败/超时才返回 null 走本地引擎兜底
   const hit = await new Promise(resolve => {
-    const order = options.source ? PROVIDER_ORDER.filter(name => name === options.source) : PROVIDER_ORDER;
+    const order = source ? PROVIDER_ORDER.filter(name => name === source) : PROVIDER_ORDER;
     const pending = order.map(sourceName =>
       tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
     );

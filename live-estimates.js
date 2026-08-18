@@ -359,7 +359,13 @@
         return estimateFund(code, fund.amount, force).then(function (payload) {
           if (!row.isConnected) return;
           var estimate = payload && (payload.estimate || payload);
-          var change = Number(estimate && estimate.estimate_change);
+          // 估值涨跌幅：null/undefined/NaN/Infinity/-Infinity 一律视为无有效估值（避免 Number(null)=0 误显 0%）
+          var rawChange = estimate ? estimate.estimate_change : undefined;
+          var change = NaN;
+          if (rawChange !== null && rawChange !== undefined) {
+            var rawNum = Number(rawChange);
+            change = Number.isFinite(rawNum) ? rawNum : NaN;
+          }
           if (!Number.isFinite(change)) {
             showEstimateUnavailable(row);
             row.dataset.estimateState = 'unavailable';

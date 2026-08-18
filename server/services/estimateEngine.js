@@ -266,13 +266,13 @@ function confidenceFor({ holdingsCount, quotedCount, publishedWeight, sectorAvai
 
 async function calculateFundEstimate(code, options = {}) {
   const fundCode = assertFundCode(code);
-  let fund = getFund(fundCode);
+  let fund = await getFund(fundCode);
   if (!fund) {
     try {
       console.log(`[auto-import] Fund ${fundCode} not found in DB. Auto-importing...`);
       const { importFund } = require('./fundService');
       await importFund(fundCode);
-      fund = getFund(fundCode);
+      fund = await getFund(fundCode);
     } catch (importErr) {
       console.error(`[auto-import-failed] Fund ${fundCode}: ${importErr.message}`);
     }
