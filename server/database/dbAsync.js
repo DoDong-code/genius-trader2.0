@@ -25,6 +25,12 @@ async function getPool() {
       max: 5,
       connectionTimeoutMillis: 10000
     });
+    // P0 健壮性修复（Phase 3.1.2）：PG idle client / 连接错误若未监听会冒泡为
+    // 未处理的 'error' 事件，导致 Node 进程退出（Render 自动重启）。
+    // 注册错误监听，仅记录不吞掉查询异常——查询 await 失败仍按原路径抛出 → API 返回 500。
+    pool.on('error', (err) => {
+      console.error('[dbAsync] PostgreSQL pool idle/connection error (non-fatal, 不终止进程):', err && err.message);
+    });
   }
   return pool;
 }
@@ -255,7 +261,27 @@ async function ensureCloudSchema() {
       direction_accuracy REAL,
       sample_size INTEGER NOT NULL DEFAULT 0,
       calibrated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-    )`
+    )`,
+    // —— 阶段3.1.2 修复（P0 架构断裂）：fund_estimate 从 SQLite 迁至 PostgreSQL ——
+    // 此前 fund_estimate 落在 Render 临时 SQLite，且外键指向空的 SQLite fund 表，
+    // 导致每只基金 /estimate 写入时 FOREIGN KEY constraint failed → API 500。
+    // 现与 fund_nav / fund_holdings 一致使用 PG，外键指向 PG fund（始终有对应行）。
+    `CREATE TABLE IF NOT EXISTS fund_estimate (
+      id SERIAL PRIMARY KEY,
+      fund_code TEXT NOT NULL REFERENCES fund(fund_code) ON DELETE CASCADE,
+      trade_date TEXT NOT NULL,
+      estimate_change REAL NOT NULL,
+      holdings_change REAL,
+      sector_change REAL,
+      cash_adjustment REAL NOT NULL DEFAULT 0,
+      confidence TEXT NOT NULL,
+      quote_coverage REAL NOT NULL DEFAULT 0,
+      calculation_json TEXT,
+      calculated_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      UNIQUE (fund_code, trade_date)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_fund_estimate_code_date ON fund_estimate (fund_code, trade_date DESC)`
   ];
   const db = await getPool();
   for (const statement of statements) {

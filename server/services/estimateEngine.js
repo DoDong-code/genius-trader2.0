@@ -238,12 +238,12 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
   return null;
 }
 
-function cachedEstimate(fundCode, targetDate = shanghaiDate()) {
-  const row = getDatabase().prepare(`
+async function cachedEstimate(fundCode, targetDate = shanghaiDate()) {
+  const row = await dbAsync.get(`
     SELECT calculation_json, expires_at
     FROM fund_estimate
     WHERE fund_code = ? AND trade_date = ?
-  `).get(fundCode, targetDate);
+  `, [fundCode, targetDate]);
   if (!row) return null;
   const expired = Date.parse(row.expires_at) <= Date.now();
   if (expired && !isShanghaiPostClose()) return null;
@@ -293,7 +293,7 @@ async function calculateFundEstimate(code, options = {}) {
   }
 
   if (!options.force) {
-    const cached = cachedEstimate(fundCode, targetDate);
+    const cached = await cachedEstimate(fundCode, targetDate);
     if (cached) {
       cached.estimateChange = cached.estimate_change_percent;
       if (Number.isFinite(Number(options.amount))) {
@@ -442,7 +442,7 @@ async function calculateFundEstimate(code, options = {}) {
   if (!Number.isFinite(estimateChange)) return result;
 
   const expiresAt = new Date(Date.now() + config.estimateTtlMinutes * 60_000).toISOString();
-  getDatabase().prepare(`
+  await dbAsync.run(`
     INSERT INTO fund_estimate (
       fund_code, trade_date, estimate_change, holdings_change, sector_change,
       cash_adjustment, confidence, quote_coverage, calculation_json, calculated_at, expires_at
@@ -457,11 +457,11 @@ async function calculateFundEstimate(code, options = {}) {
       calculation_json = excluded.calculation_json,
       calculated_at = excluded.calculated_at,
       expires_at = excluded.expires_at
-  `).run(
+  `, [
     fundCode, result.trade_date, result.estimate_change, result.holdings_change,
     result.sector_change, result.cash_adjustment, result.confidence,
     result.quote_coverage, JSON.stringify(result), result.calculated_at, expiresAt
-  );
+  ]);
   return result;
 }
 
