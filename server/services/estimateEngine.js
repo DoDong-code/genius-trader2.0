@@ -173,15 +173,22 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
     }
   }
 
-  // Fallback 1: Yahoo Finance
+  // Fallback 1: Yahoo Finance（query1 失败/无数据则回退 query2，提升 Render 出网鲁棒性，指令 F）
   try {
     const symbol = getYahooSymbol(stockCode);
-    const response = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
-      signal: AbortSignal.timeout(3000)
-    });
-    if (response.ok) {
-      const json = await response.json();
-      const result = json?.chart?.result?.[0];
+    let json = null;
+    for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
+      try {
+        const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
+          signal: AbortSignal.timeout(3000)
+        });
+        if (response.ok) {
+          const j = await response.json();
+          if (j?.chart?.result?.[0]) { json = j; break; }
+        }
+      } catch (err) { /* try next host */ }
+    }
+    const result = json?.chart?.result?.[0];
       const timestamps = result?.timestamp;
       const closes = result?.indicators?.quote?.[0]?.close;
       if (timestamps && closes && timestamps.length > 0) {
@@ -209,7 +216,6 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
           }
         }
       }
-    }
   } catch (err) {
     // ignore
   }
@@ -368,11 +374,15 @@ async function calculateFundEstimate(code, options = {}) {
     estimateChange = sectorChange - cashAdjustment;
     fallback = 'sector-only';
   } else {
+    // holdings + sector 均不可得时的最后兜底：接受任何有限值的公开估计。
+    // Render 出网屏蔽东方财富(fundgz)时，getRealtimeFundEstimate 会回退到本地 NAV 历史
+    // （source='本地数据库缓存'），其 estimate_change 是有限有效值，不应因 source!=='fundgz'
+    // 被丢弃而导致 estimate_change=null（指令 F：采用其他现有可用行情源作最小兜底）。
     const publicEstimate = await getRealtimeFundEstimate(fundCode);
     const publicChange = Number(publicEstimate?.estimate_change);
-    if (publicEstimate?.source === 'fundgz' && Number.isFinite(publicChange)) {
+    if (Number.isFinite(publicChange)) {
       estimateChange = publicChange;
-      fallback = 'public-estimate';
+      fallback = publicEstimate?.source === 'fundgz' ? 'public-estimate' : 'public-estimate-local';
     } else {
       estimateChange = null;
       fallback = 'unavailable';
