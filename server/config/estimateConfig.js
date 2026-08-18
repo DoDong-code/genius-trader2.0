@@ -21,7 +21,9 @@ module.exports = {
     '007339': 'broad',
     '004253': 'gold',
     '025422': 'technology',
-    '015442': 'technology'
+    '015442': 'technology',
+    '018147': 'broad',
+    '016665': 'technology'
   },
   nameRules: [
     { pattern: /半导体|芯片|集成电路/i, sector: 'semiconductor' },

@@ -395,6 +395,43 @@ const ALPHANUMERIC_MAPPING = {
   'BYD': '01211'
 };
 
+// 持仓代码运行时归一化（绝不修改数据库中的原始持仓代码）。
+// 仅覆盖已查证的标准交易代码，其余透传：
+// - JP3236330001: Kioxia Holdings(铠侠) ISIN → 东京证交所 ticker 285A
+// - 285A:         Kioxia 东京证交所代码 → Yahoo Tokyo 后缀 .T
+// - 000660:       SK Hynix(SK海力士) 韩国 KRX 代码 → Yahoo Korea 后缀 .KS
+//   注：000660 曾为深市 *ST南华(2004 已终止上市)，本应用数据仅于 QDII 外股持仓出现，等价 SK Hynix。
+const STOCK_CODE_NORMALIZATION = {
+  'JP3236330001': '285A.T',
+  '285A': '285A.T',
+  '000660': '000660.KS'
+};
+
+function normalizeStockCode(rawCode) {
+  const key = String(rawCode || '').trim().toUpperCase();
+  return STOCK_CODE_NORMALIZATION[key] || key;
+}
+
+// 将（已归一化的）代码转为 Yahoo Finance 代码；无法转换返回 null。
+function toYahooSymbol(code) {
+  const c = String(code || '').trim().toUpperCase();
+  if (/\.(T|KS|HK|TW|SS|SZ)$/.test(c)) return c;      // 已是 Yahoo 风格后缀
+  if (/^\d{4}[A-Z]$/.test(c)) return `${c}.T`;          // 东京证交所如 285A
+  if (/^[A-Z]{1,5}$/.test(c)) return c;                // 美股 ticker
+  if (/^\d{5}$/.test(c)) return `${c}.HK`;             // 港股 5 位
+  if (/^\d{6}$/.test(c)) {
+    if (/^(5|6|9)/.test(c)) return `${c}.SS`;
+    if (/^(005930|000660)$/.test(c)) return `${c}.KS`; // 三星 / SK海力士
+    return `${c}.SZ`;
+  }
+  return null;
+}
+
+// Eastmoney push2 仅可靠支持 A股/港股/美股；东京(.T)与韩国(.KS)走 Yahoo。
+function isEastmoneyUnsupported(rawCode) {
+  return /\.(T|KS)$/.test(normalizeStockCode(rawCode));
+}
+
 function stockSecIds(code) {
   let input = String(code || '').trim().toUpperCase();
   if (ALPHANUMERIC_MAPPING[input]) {
@@ -449,23 +486,61 @@ async function fetchStockPayload(secid) {
 }
 
 async function fetchStockQuote(code) {
-  for (const secid of stockSecIds(code)) {
+  const normalized = normalizeStockCode(code);
+  // 东京(.T)/韩国(.KS) Eastmoney 不可靠，直接走 Yahoo，避免误查 A股同名代码
+  if (!isEastmoneyUnsupported(normalized)) {
+    for (const secid of stockSecIds(normalized)) {
+      try {
+        const payload = await fetchStockPayload(secid);
+        const data = payload?.data;
+        if (!data) continue;
+        return {
+          stock_code: String(data.f12 || normalized),
+          stock_name: data.f14 || data.f58 || null,
+          price: Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
+          change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
+          source: payload?.rt === 4 ? 'push2-delay' : 'push2'
+        };
+      } catch (error) {
+        console.warn(`[marketService] Failed to fetch stock quote for secid ${secid}:`, error.message);
+      }
+    }
+  }
+  // Yahoo Finance 兜底（东京/韩国必走此路；其余市场失败时也兜底）
+  const yf = toYahooSymbol(normalized);
+  if (yf) {
     try {
-      const payload = await fetchStockPayload(secid);
-      const data = payload?.data;
-      if (!data) continue;
-      return {
-        stock_code: String(data.f12 || code),
-        stock_name: data.f14 || data.f58 || null,
-        price: Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
-        change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
-        source: payload?.rt === 4 ? 'push2-delay' : 'push2'
-      };
+      const q = await fetchStockQuoteYahoo(yf);
+      if (q) return q;
     } catch (error) {
-      console.warn(`[marketService] Failed to fetch stock quote for secid ${secid}:`, error.message);
+      console.warn(`[marketService] Failed to fetch Yahoo quote for ${yf}:`, error.message);
     }
   }
   return null;
+}
+
+async function fetchStockQuoteYahoo(yfSymbol) {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSymbol)}?interval=1d&range=1d`;
+  const text = await fetchText(url, {
+    referer: 'https://finance.yahoo.com/',
+    accept: 'application/json,*/*',
+    timeout: 8000,
+    attempts: 2
+  });
+  const json = safeJsonParse(text);
+  const meta = json?.chart?.result?.[0]?.meta;
+  if (!meta) return null;
+  const price = Number(meta.regularMarketPrice);
+  const prev = Number(meta.chartPreviousClose ?? meta.previousClose);
+  if (!Number.isFinite(price) || !Number.isFinite(prev) || prev <= 0) return null;
+  const changePercent = price / prev - 1;
+  return {
+    stock_code: String(meta.symbol || yfSymbol),
+    stock_name: meta.shortName || meta.longName || null,
+    price,
+    change_percent: changePercent,
+    source: 'yahoo'
+  };
 }
 
 // 股票代码 → 交易所前缀（腾讯/新浪接口需要 sh / sz）
@@ -745,6 +820,8 @@ module.exports = {
   fetchHoldings,
   stockSecId,
   stockSecIds,
+  normalizeStockCode,
+  toYahooSymbol,
   fetchStockQuote,
   fetchStockHistory,
   fetchIndexQuotes

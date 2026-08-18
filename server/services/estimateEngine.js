@@ -1,7 +1,7 @@
 const { getDatabase } = require('../database/db');
 const dbAsync = require('../database/dbAsync');
 const { assertFundCode, getFund, getRealtimeFundEstimate } = require('./fundService');
-const { fetchStockQuote } = require('./marketService');
+const { fetchStockQuote, toYahooSymbol, normalizeStockCode } = require('./marketService');
 const { calibrateFund } = require('./calibrationEngine');
 const config = require('../config/estimateConfig');
 
@@ -139,48 +139,37 @@ function isUsMarketSessionStartedToday() {
 }
 
 function getYahooSymbol(stockCode) {
-  const code = String(stockCode || '').trim().toUpperCase();
-  if (/^[A-Z][A-Z0-9.-]{0,9}$/.test(code)) {
-    return code;
-  }
-  if (/^\d{5}$/.test(code)) {
-    return code + '.HK';
-  }
-  if (/^\d{6}$/.test(code)) {
-    if (/^(5|6|9)/.test(code)) {
-      return code + '.SS';
-    }
-    if (/^(005930|000660)$/.test(code)) {
-      return code + '.KS';
-    }
-    return code + '.SZ';
-  }
-  return code;
+  // 统一走 marketService 的归一化 + Yahoo 代码转换（已覆盖 JP3236330001→285A.T、285A→285A.T、000660→000660.KS）
+  return toYahooSymbol(normalizeStockCode(stockCode));
 }
 
 async function fetchHistoricalChange(stockCode, date, options = {}) {
-  const { stockSecIds } = require('./marketService');
-  const secids = stockSecIds(stockCode);
-  for (const secid of secids) {
-    try {
-      const url = `http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&end=20500101&lmt=15`;
-      const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
-      if (!response.ok) continue;
-      const json = await response.json();
-      const klines = json?.data?.klines;
-      if (klines && klines.length > 0) {
-        for (const line of klines) {
-          const parts = line.split(',');
-          if (parts[0] === date) {
-            const pct = Number(parts[8]);
-            if (Number.isFinite(pct)) {
-              return pct / 100;
+  const { stockSecIds, normalizeStockCode } = require('./marketService');
+  const rawCode = normalizeStockCode(stockCode);
+  const secids = stockSecIds(rawCode);
+  // 东京(.T)/韩国(.KS) Eastmoney 不可靠，跳过以免误查 A股同名代码
+  if (!/\.(T|KS)$/.test(rawCode)) {
+    for (const secid of secids) {
+      try {
+        const url = `http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&end=20500101&lmt=15`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        if (!response.ok) continue;
+        const json = await response.json();
+        const klines = json?.data?.klines;
+        if (klines && klines.length > 0) {
+          for (const line of klines) {
+            const parts = line.split(',');
+            if (parts[0] === date) {
+              const pct = Number(parts[8]);
+              if (Number.isFinite(pct)) {
+                return pct / 100;
+              }
             }
           }
         }
+      } catch (err) {
+        // ignore
       }
-    } catch (err) {
-      // ignore
     }
   }
 
