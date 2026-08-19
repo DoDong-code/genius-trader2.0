@@ -17,6 +17,7 @@ const { getDatabase } = require('../database/db');
 const dbAsync = require('../database/dbAsync');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -27,6 +28,17 @@ function sendJson(response, statusCode, payload) {
     'Access-Control-Allow-Headers': 'Content-Type,X-AI-API-Key,Authorization'
   });
   response.end(JSON.stringify(payload));
+}
+
+// 诊断接口保护：复用现有 DEBUG_KEY；若未设置则生成一次性随机令牌（仅本次进程有效，非永久密钥，仅打印到服务端日志一次，绝不通过 API 返回）
+let __diagToken = null;
+function getDiagnosticKey() {
+  if (process.env.DEBUG_KEY) return process.env.DEBUG_KEY;
+  if (!__diagToken) {
+    __diagToken = crypto.randomBytes(16).toString('hex');
+    console.log('[diag] 临时只读诊断令牌(仅本次进程有效，非永久密钥):', __diagToken);
+  }
+  return __diagToken;
 }
 
 function routeMatch(pathname, expression) {
@@ -146,6 +158,32 @@ async function handleFundApi(request, response, url) {
       sendJson(response, 200, { success: true, users });
     } catch (e) {
       sendJson(response, 500, { success: false, error: '摘要查询失败：' + (e.message || '未知错误') });
+    }
+    return true;
+  }
+
+  // ---- 临时只读诊断：source_credentials 安全状态（仅返回 count / credential_count，绝不返回任何 token/secret/DATABASE_URL）----
+  if (url.pathname === '/api/debug/credentials-status' && request.method === 'GET') {
+    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
+    const expectedKey = getDiagnosticKey();
+    if (!expectedKey || providedKey !== expectedKey) {
+      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
+      return true;
+    }
+    try {
+      const { get } = require('../database/dbAsync');
+      const total = await get('SELECT COUNT(*) AS count FROM source_credentials');
+      // 注意：schema 中 token 为 NOT NULL DEFAULT ''，故用 <> '' 判定“存在加密凭证”（与现有 debug 接口的 Boolean(r.token) 一致）
+      const cred = await get("SELECT COUNT(*) AS count FROM source_credentials WHERE token <> '' OR refresh_token <> '' OR cookie <> ''");
+      sendJson(response, 200, {
+        success: true,
+        source_credentials: {
+          count: Number(total && total.count) || 0,
+          credential_count: Number(cred && cred.count) || 0
+        }
+      });
+    } catch (e) {
+      sendJson(response, 500, { success: false, error: '诊断查询失败：' + (e.message || '未知错误') });
     }
     return true;
   }

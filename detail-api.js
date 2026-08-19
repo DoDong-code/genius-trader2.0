@@ -811,6 +811,7 @@
         const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
         if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
         close();
+        if (typeof window.portfolioState?.render === 'function') window.portfolioState.render('portfolio');
         if (typeof window.showToast === 'function') window.showToast('已设置定投并买入本期', 'success');
         return;
       }
@@ -851,11 +852,12 @@
       const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
       if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
       close();
+      if (typeof window.portfolioState?.render === 'function') window.portfolioState.render('portfolio');
     });
   }
 
   function renderDrawer(fund) {
-    document.querySelectorAll('.drawer-backdrop').forEach(el => el.remove());
+    document.querySelectorAll('.drawer-backdrop').forEach(el => { if (el._syncController) el._syncController.stop(); el.remove(); });
 
     const holdingRate = Number.isFinite(fund.holdingRate) ? fund.holdingRate : Number(fund.hold) || 0;
     const holdingProfit = Number.isFinite(fund.holdingProfit)
@@ -934,6 +936,7 @@
     requestAnimationFrame(() => backdrop.classList.add('visible'));
 
     const close = () => {
+      if (backdrop._syncController) backdrop._syncController.stop();
       backdrop.classList.remove('visible');
       document.body.classList.remove('drawer-open');
       setTimeout(() => backdrop.remove(), 180);
@@ -951,77 +954,293 @@
       }
     });
 
-    loadRealData(fund, backdrop);
+    startLoad(fund, backdrop);
   }
 
-  async function requestFund(code) {
-    const now = Date.now();
-    const lastRefresh = detailApiFundCache[String(code)] || 0;
-    const forceRefresh = now - lastRefresh > 5 * 60 * 1000;
-    let response = await fetch(`${getApiBase()}/api/fund/${code}${forceRefresh ? '?refresh=1&fast=1' : ''}`);
+  // 数据同步数据源（代码已确认，非编造）：server/services/fundService.js 的
+  // EASTMONEY_FUND_URL = 'https://fund.eastmoney.com'（天天基金），且服务侧
+  // 错误文案直接使用“天天基金”，故此处展示真实数据源名称。
+  const FUND_DATA_SOURCE_LABEL = '天天基金';
+
+  // 同步/重试轮询策略：首次打开用 refresh=1&fast=1 触发后台同步；后续轮询仅普通查询，
+  // 不再触发数据源请求（避免请求风暴）。递增退避 + 次数/总等待上限，避免无限后台任务与请求风暴。
+  const SYNC_POLL_DELAYS = [1500, 2000, 3000, 5000, 8000, 10000, 10000, 10000];
+  const SYNC_MAX_ATTEMPTS = 40;
+  const SYNC_MAX_WAIT_MS = 180000;
+
+  async function fetchFundPayload(code, refresh) {
+    let response = await fetch(`${getApiBase()}/api/fund/${code}${refresh ? '?refresh=1&fast=1' : ''}`);
     if (response.status === 404) {
       const imported = await fetch(`${getApiBase()}/api/fund/import/${code}`);
       if (!imported.ok) throw new Error('基金导入失败');
       response = await fetch(`${getApiBase()}/api/fund/${code}?refresh=1`);
     }
     if (!response.ok) throw new Error('基金数据读取失败');
-    const payload = await response.json();
-    detailApiFundCache[String(code)] = now;
-    return payload;
+    return response.json();
   }
 
-  async function loadRealData(fund, backdrop) {
-    const state = backdrop.querySelector('.detail-api-state');
+  // 绑定/重建一个同步控制器到抽屉：先停掉旧的，避免切换基金或重开时残留轮询。
+  function attachController(backdrop) {
+    if (backdrop._syncController) backdrop._syncController.stop();
+    const ctl = {
+      stopped: false, pollTimer: null, waitTimer: null, attempt: 0,
+      waitStart: 0, status: 'IDLE', waitNode: null
+    };
+    ctl.stop = function () {
+      ctl.stopped = true;
+      if (ctl.pollTimer) { clearTimeout(ctl.pollTimer); ctl.pollTimer = null; }
+      if (ctl.waitTimer) { clearInterval(ctl.waitTimer); ctl.waitTimer = null; }
+    };
+    backdrop._syncController = ctl;
+    return ctl;
+  }
+
+  // SYNCING：阶段进度（仅展示后端可确认的真实状态）+ 不确定进度条（不伪造百分比）+ 真实等待秒数。
+  function renderSyncPanel(backdrop, waitSeconds, label) {
     const historyContent = backdrop.querySelector('.detail-history-content');
-    try {
-      const payload = await requestFund(fund.code);
-      if (!backdrop.isConnected) return;
-      const history = payload.history || [];
-      setupHistoryExplorer(backdrop, history, fund);
+    if (!historyContent) return;
+    historyContent.innerHTML = `
+      <div class="detail-sync-panel" role="status" aria-live="polite">
+        <div class="detail-sync-title">正在同步历史净值…</div>
+        <div class="detail-sync-bar" aria-hidden="true"><span class="detail-sync-bar-fill"></span></div>
+        <ul class="detail-sync-stages">
+          <li class="done">✓ 已发起数据同步</li>
+          <li class="active">● 正在获取历史净值</li>
+          <li class="pending">○ 数据准备完成</li>
+        </ul>
+        <div class="detail-sync-meta">
+          <span>数据源：${escapeHtml(FUND_DATA_SOURCE_LABEL)}</span>
+          <span class="detail-sync-wait">已等待 ${waitSeconds} 秒</span>
+        </div>
+        <div class="detail-sync-status">${escapeHtml(label || '数据准备完成后自动显示')}</div>
+        <div class="detail-sync-hint">数据准备完成后自动显示</div>
+      </div>`;
+  }
 
-      backdrop.fundHistory = history;
-      state.textContent = payload.data_status?.history === 'normal'
-        ? '✓ 数据正常'
-        : '⚠ 等待数据源';
+  // RETRYING：数据源本次访问失败，但尚不能证明基金永久无数据 → 自动重试，不显示“暂无”。
+  function renderRetryPanel(backdrop, attempt, waitSeconds, message) {
+    const historyContent = backdrop.querySelector('.detail-history-content');
+    if (!historyContent) return;
+    historyContent.innerHTML = `
+      <div class="detail-sync-panel" role="status" aria-live="polite">
+        <div class="detail-sync-title">数据源暂时不可用</div>
+        <div class="detail-sync-bar" aria-hidden="true"><span class="detail-sync-bar-fill"></span></div>
+        <ul class="detail-sync-stages">
+          <li class="done">✓ 已发起数据同步</li>
+          <li class="active">● 正在自动重试</li>
+          <li class="pending">○ 数据准备完成</li>
+        </ul>
+        <div class="detail-sync-meta">
+          <span>数据源：${escapeHtml(FUND_DATA_SOURCE_LABEL)}</span>
+          <span class="detail-sync-wait">第 ${attempt} 次尝试 · 已等待 ${waitSeconds} 秒</span>
+        </div>
+        <div class="detail-sync-status">正在自动重试，数据恢复后自动显示</div>
+        <div class="detail-sync-hint">数据源暂时不可用，正在自动重试…</div>
+      </div>`;
+  }
 
-      if (payload.fund?.fund_name) {
-        backdrop.querySelector('#real-detail-title').textContent = payload.fund.fund_name;
-      }
-      const typeParts = [payload.fund?.fund_type, payload.fund?.company].filter(Boolean);
-      if (typeParts.length) {
-        backdrop.querySelector('.detail-api-type').textContent = `${typeParts.join(' · ')} · 基金详情`;
-      }
-      backdrop.querySelector('.detail-holdings-content').innerHTML = holdingsMarkup({
-        holdings: payload.holdings
-      });
+  // FAILED：连续重试/超时达到安全上限 —— 明确区别于 EMPTY（失败≠无数据）：
+  // 显示“数据获取较慢”，绝不显示“暂无历史净值数据”，保留“继续获取”按钮重新启动 180s 周期。
+  function renderFailedPanel(backdrop, fund, message) {
+    const historyContent = backdrop.querySelector('.detail-history-content');
+    if (!historyContent) return;
+    historyContent.innerHTML = `
+      <div class="detail-sync-panel" role="status" aria-live="polite">
+        <div class="detail-sync-title">数据获取较慢</div>
+        <div class="detail-sync-bar" aria-hidden="true"><span class="detail-sync-bar-fill"></span></div>
+        <div class="detail-sync-meta">
+          <span>数据源：${escapeHtml(FUND_DATA_SOURCE_LABEL)}</span>
+        </div>
+        <div class="detail-sync-status">已自动尝试获取 3 分钟，当前仍未获得历史净值。系统不会把它判断为“基金没有历史数据”。${escapeHtml(message ? '（' + message + '）' : '')}</div>
+        <button type="button" class="detail-sync-retry" data-sync-refresh>继续获取</button>
+      </div>`;
+    historyContent.querySelector('[data-sync-refresh]')?.addEventListener('click', () => {
+      startLoad(fund, backdrop, { forceRefresh: true });
+    });
+  }
 
-      // Load stock realtime price details asynchronously
+  // 与历史净值无关的基础信息（名称/类型/持仓/今日估值）立即生效，
+  // 保证“历史净值未就绪”不会拖垮整个详情页（模块独立加载）。
+  function applyMetaSideEffects(fund, backdrop, payload) {
+    if (payload.fund?.fund_name) {
+      const titleNode = backdrop.querySelector('#real-detail-title');
+      if (titleNode) titleNode.textContent = payload.fund.fund_name;
+    }
+    const typeParts = [payload.fund?.fund_type, payload.fund?.company].filter(Boolean);
+    if (typeParts.length) {
+      const typeNode = backdrop.querySelector('.detail-api-type');
+      if (typeNode) typeNode.textContent = `${typeParts.join(' · ')} · 基金详情`;
+    }
+    const holdingsContent = backdrop.querySelector('.detail-holdings-content');
+    if (holdingsContent) holdingsContent.innerHTML = holdingsMarkup({ holdings: payload.holdings });
+    // 仅首次加载实时股价，避免每次轮询都打 /api/stock/ 造成请求风暴。
+    if (!backdrop._stockLoaded) {
       loadStockRealtimeDetails(payload.holdings, backdrop);
+      backdrop._stockLoaded = true;
+    }
 
-      const today = resolveTodayData(fund, payload);
-      const metricCells = backdrop.querySelectorAll('.detail-values > div');
-      const todayProfitCell = metricCells[1];
+    const today = resolveTodayData(fund, payload);
+    const metricCells = backdrop.querySelectorAll('.detail-values > div');
+    const todayProfitCell = metricCells[1];
+    if (todayProfitCell) {
+      const b = todayProfitCell.querySelector('b');
       if (Number.isFinite(today.change) && Number.isFinite(today.profit)) {
         fund.today = today.change;
         fund.todayEstimate = today.profit;
         if (today.official) fund.navUpdatedAt = today.navDate;
-        todayProfitCell.querySelector('b').className = tone(today.profit);
-        todayProfitCell.querySelector('b').textContent = money(today.profit);
-        // 抽屉刷新出最新净值后，同步更新持仓列表对应行（返回列表即可看到最新净值）
+        if (b) { b.className = tone(today.profit); b.textContent = money(today.profit); }
         if (typeof window.refreshListRow === 'function') window.refreshListRow(fund.code);
-      } else {
-        todayProfitCell.querySelector('b').className = '';
-        todayProfitCell.querySelector('b').textContent = '待估值';
+      } else if (b) {
+        b.className = '';
+        b.textContent = '待估值';
       }
-    } catch (err) {
-      console.warn('[drawer] loadRealData failed:', err && err.message, err);
-      if (!backdrop.isConnected) return;
-      historyContent.innerHTML = `
-        <div class="detail-empty detail-error">
-          暂未同步到历史净值（${escapeHtml((err && err.message) || '未知错误')}）。东方财富数据源当前不可访问，恢复后再次打开即可自动补齐。
-        </div>`;
-      state.textContent = '等待数据源';
     }
+  }
+
+  function finishSuccess(fund, backdrop, payload, history, ctl) {
+    if (ctl) ctl.stop();
+    const state = backdrop.querySelector('.detail-api-state');
+    if (state) state.textContent = '✓ 数据已更新';
+    applyMetaSideEffects(fund, backdrop, payload);
+    setupHistoryExplorer(backdrop, history, fund);
+    backdrop.fundHistory = history;
+  }
+
+  function finishFailed(fund, backdrop, ctl, message) {
+    if (ctl) ctl.stop();
+    const state = backdrop.querySelector('.detail-api-state');
+    if (state) state.textContent = '暂时无法获取';
+    renderFailedPanel(backdrop, fund, message);
+  }
+
+  function elapsedSecs(ctl) {
+    return ctl.waitStart ? Math.floor((Date.now() - ctl.waitStart) / 1000) : 0;
+  }
+
+  // 统一的等待计时器：仅刷新“已等待 / 第 X 次尝试”文本与超时提示，不伪造百分比；单一实例。
+  function startWaitTimer(ctl, backdrop) {
+    if (ctl.waitTimer) return;
+    ctl.waitTimer = setInterval(() => {
+      if (ctl.stopped || !backdrop.isConnected) return;
+      const secs = elapsedSecs(ctl);
+      const waitNode = backdrop.querySelector('.detail-sync-wait');
+      if (waitNode) {
+        waitNode.textContent = ctl.status === 'RETRYING'
+          ? `第 ${ctl.attempt + 1} 次尝试 · 已等待 ${secs} 秒`
+          : `已等待 ${secs} 秒`;
+      }
+      if (secs > 10) {
+        const hint = backdrop.querySelector('.detail-sync-hint');
+        if (hint) hint.textContent = ctl.status === 'RETRYING'
+          ? '数据源暂时不可用，正在自动重试…'
+          : '数据仍在同步，请稍候…';
+      }
+    }, 1000);
+  }
+
+  function enterSyncing(fund, backdrop, ctl, payload) {
+    ctl.status = 'SYNCING';
+    if (!ctl.waitStart) ctl.waitStart = Date.now();
+    applyMetaSideEffects(fund, backdrop, payload);
+    renderSyncPanel(backdrop, elapsedSecs(ctl), payload?.data_status?.label);
+    startWaitTimer(ctl, backdrop);
+    schedulePoll(fund, backdrop, ctl);
+  }
+
+  function enterRetrying(fund, backdrop, ctl, message) {
+    ctl.status = 'RETRYING';
+    if (!ctl.waitStart) ctl.waitStart = Date.now();
+    renderRetryPanel(backdrop, ctl.attempt + 1, elapsedSecs(ctl), message);
+    startWaitTimer(ctl, backdrop);
+    schedulePoll(fund, backdrop, ctl);
+  }
+
+  // 轮询策略：首次由 startLoad 触发 refresh；此处后续轮询一律不带 refresh（避免请求风暴）。
+  // 递增退避 1.5→2→3→5→8→10s…，到达次数/总等待上限后判 FAILED（绝不判 EMPTY）。
+  function schedulePoll(fund, backdrop, ctl) {
+    if (ctl.stopped || !backdrop.isConnected) return;
+    if (ctl.attempt >= SYNC_MAX_ATTEMPTS || (ctl.waitStart && Date.now() - ctl.waitStart > SYNC_MAX_WAIT_MS)) {
+      ctl.status = 'FAILED';
+      finishFailed(fund, backdrop, ctl, '数据同步超时，可重新获取');
+      return;
+    }
+    const delay = SYNC_POLL_DELAYS[Math.min(ctl.attempt, SYNC_POLL_DELAYS.length - 1)];
+    ctl.pollTimer = setTimeout(async () => {
+      if (ctl.stopped || !backdrop.isConnected) return;
+      ctl.attempt += 1;
+      try {
+        const payload = await fetchFundPayload(fund.code, false); // 后续轮询绝不带 refresh
+        if (ctl.stopped || !backdrop.isConnected) return;
+        detailApiFundCache[String(fund.code)] = Date.now();
+        const history = Array.isArray(payload.history) ? payload.history : [];
+        if (history.length > 0) {
+          ctl.status = 'SUCCESS';
+          finishSuccess(fund, backdrop, payload, history, ctl);
+          return;
+        }
+        const historyStatus = payload.data_status?.history;
+        // 后续轮询命中空历史：同样不判 EMPTY，继续等待（pending 显示正在同步，其它未知状态也继续等待）。
+        enterSyncing(fund, backdrop, ctl, payload);
+      } catch (err) {
+        if (ctl.stopped || !backdrop.isConnected) return;
+        retryOrFail(fund, backdrop, ctl, err && err.message);
+      }
+    }, delay);
+  }
+
+  // 抓取抛错时：尚有重试额度 → RETRYING 自动重试；耗尽 → FAILED（失败≠无数据，绝不判 EMPTY）。
+  function retryOrFail(fund, backdrop, ctl, message) {
+    if (ctl.attempt >= SYNC_MAX_ATTEMPTS || (ctl.waitStart && Date.now() - ctl.waitStart > SYNC_MAX_WAIT_MS)) {
+      ctl.status = 'FAILED';
+      finishFailed(fund, backdrop, ctl, message);
+      return;
+    }
+    enterRetrying(fund, backdrop, ctl, message);
+  }
+
+  function handlePayload(fund, backdrop, ctl, payload) {
+    const history = Array.isArray(payload.history) ? payload.history : [];
+    if (history.length > 0) {
+      ctl.status = 'SUCCESS';
+      finishSuccess(fund, backdrop, payload, history, ctl);
+      return;
+    }
+    const historyStatus = payload.data_status?.history;
+    // 后端 data_status.history 仅有 normal / pending，没有“永久无数据”信号。
+    // 因此 history 为空且非 pending 时，不能判定为 EMPTY（失败≠无数据），
+    // 一律按“尚未取得数据”继续等待/轮询（显示正在同步），绝不提前结束加载。
+    enterSyncing(fund, backdrop, ctl, payload);
+  }
+
+  // 统一入口：LOADING → SUCCESS / SYNCING / RETRYING / FAILED（空 history 不再判 EMPTY）。
+  function startLoad(fund, backdrop, options) {
+    options = options || {};
+    const ctl = attachController(backdrop);
+    ctl.status = 'LOADING';
+    const state = backdrop.querySelector('.detail-api-state');
+    if (state) state.textContent = '正在读取真实数据…';
+    const historyContent = backdrop.querySelector('.detail-history-content');
+    if (historyContent) historyContent.innerHTML = '<div class="detail-loading" aria-label="加载历史净值"></div>';
+
+    const initialRefresh = options.forceRefresh === true
+      ? true
+      : (() => {
+          const now = Date.now();
+          const last = detailApiFundCache[String(fund.code)] || 0;
+          return now - last > 5 * 60 * 1000;
+        })();
+
+    (async () => {
+      try {
+        const payload = await fetchFundPayload(fund.code, initialRefresh);
+        if (ctl.stopped || !backdrop.isConnected) return;
+        detailApiFundCache[String(fund.code)] = Date.now();
+        handlePayload(fund, backdrop, ctl, payload);
+      } catch (err) {
+        if (ctl.stopped || !backdrop.isConnected) return;
+        retryOrFail(fund, backdrop, ctl, err && err.message);
+      }
+    })();
   }
 
   document.addEventListener('click', event => {

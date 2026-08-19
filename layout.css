@@ -195,6 +195,98 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
     min-height: 60px !important;
   }
 
+  /* 基金详情：数据同步进度 UI（Phase 3.11） */
+  .detail-sync-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 20px 16px;
+    margin: 4px 0;
+    background: #f5f5f7;
+    border: 1px solid rgba(0,0,0,.06);
+    border-radius: 12px;
+  }
+  .detail-sync-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: #1d1d1f;
+    text-align: center;
+  }
+  .detail-sync-bar {
+    position: relative;
+    height: 6px;
+    width: 100%;
+    border-radius: 999px;
+    background: rgba(0,113,227,.12);
+    overflow: hidden;
+  }
+  .detail-sync-bar-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: #0071e3;
+    animation: detail-sync-indeterminate 1.2s ease-in-out infinite;
+  }
+  @keyframes detail-sync-indeterminate {
+    0%   { transform: translateX(-110%); }
+    100% { transform: translateX(260%); }
+  }
+  .detail-sync-stages {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .detail-sync-stages li { color: #86868b; }
+  .detail-sync-stages li.done { color: #34a853; }
+  .detail-sync-stages li.active { color: #0071e3; font-weight: 600; }
+  .detail-sync-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 11px;
+    color: #6e6e73;
+    flex-wrap: wrap;
+  }
+  .detail-sync-wait { color: #1d1d1f; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .detail-sync-hint {
+    font-size: 11px;
+    color: #86868b;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .detail-sync-status {
+    font-size: 12px;
+    color: #1d1d1f;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.5;
+  }
+  .detail-sync-empty { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .detail-sync-retry {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 8px 18px;
+    border: 0;
+    border-radius: 10px;
+    background: #0071e3;
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .detail-sync-retry:focus-visible { outline: 3px solid rgba(0,113,227,.28); outline-offset: 2px; }
+  .detail-sync-retry:hover { background: #0066cc; }
+
   .desktop-label { display: none !important; }
   .mobile-label { display: inline !important; }
   .desktop-tag-text { display: none !important; }
