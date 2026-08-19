@@ -44,33 +44,36 @@ async function latestHoldings(fundCode) {
   `, [fundCode, fundCode]);
 }
 
-function cachedQuote(stockCode, ttlMinutes = config.quoteTtlMinutes) {
-  const row = getDatabase().prepare(`
+// stock_price 读写统一走 dbAsync（生产 PostgreSQL / 本地 SQLite 回退）。
+// Phase 3.15 修复：此前 cachedQuote/quoteFor 经 getDatabase() 直接读写本地 SQLite，
+// 与 calibrateFund 读取的 PostgreSQL 分裂，导致生产 stock_price 恒为空、pairedSamples 恒为 0。
+async function cachedQuote(stockCode, ttlMinutes = config.quoteTtlMinutes) {
+  const row = await dbAsync.get(`
     SELECT stock_code, date, price, change_percent, updated_at
     FROM stock_price
     WHERE stock_code = ? AND date = ?
-  `).get(stockCode, shanghaiDate());
+  `, [stockCode, shanghaiDate()]);
   if (!row) return null;
-  const age = Date.now() - new Date(`${row.updated_at.replace(' ', 'T')}Z`).getTime();
+  const age = Date.now() - new Date(`${String(row.updated_at).replace(' ', 'T')}Z`).getTime();
   return age <= ttlMinutes * 60_000 ? row : null;
 }
 
 async function quoteFor(stockCode, options = {}) {
   const code = String(stockCode || '').trim();
   if (!options.force) {
-    const cached = cachedQuote(code);
+    const cached = await cachedQuote(code);
     if (cached) return { ...cached, source: 'stock-cache' };
   }
   const quote = await fetchStockQuote(code);
   if (!quote || !Number.isFinite(quote.change_percent)) return null;
-  getDatabase().prepare(`
+  await dbAsync.run(`
     INSERT INTO stock_price (stock_code, date, price, change_percent, updated_at)
-    VALUES (?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(stock_code, date) DO UPDATE SET
       price = excluded.price,
       change_percent = excluded.change_percent,
-      updated_at = datetime('now')
-  `).run(code, shanghaiDate(), Number(quote.price || 0), quote.change_percent);
+      updated_at = CURRENT_TIMESTAMP
+  `, [code, shanghaiDate(), Number(quote.price || 0), quote.change_percent]);
   return quote;
 }
 

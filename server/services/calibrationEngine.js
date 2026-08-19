@@ -59,7 +59,7 @@ async function calibrateFund(code, options = {}) {
     const existing = await getStoredCalibration(fundCode);
     if (existing) {
       return {
-        calibrated: existing.sample_size > 0,
+        calibrated: existing.sample_size >= 3, // Phase 3.15：>=3 才算真正可校准
         fund_code: fundCode,
         holdings_weight: existing.optimal_holdings_weight,
         sector_weight: existing.optimal_sector_weight,
@@ -67,7 +67,9 @@ async function calibrateFund(code, options = {}) {
         mae: existing.mae,
         rmse: existing.rmse,
         direction_accuracy: existing.direction_accuracy,
-        sample_size: existing.sample_size,
+        sample_size: existing.sample_size, // = pairedSamples 数量（非 NAV 数）
+        paired_sample_size: existing.sample_size,
+        nav_sample_size: null, // 表内无 NAV 样本列，仅计算分支可提供
         calibrated_at: existing.calibrated_at
       };
     }
@@ -98,7 +100,9 @@ async function calibrateFund(code, options = {}) {
       calibrated: false,
       ...defaultRecord,
       holdings_weight: defaultRecord.optimal_holdings_weight,
-      sector_weight: defaultRecord.optimal_sector_weight
+      sector_weight: defaultRecord.optimal_sector_weight,
+      nav_sample_size: navs.length,
+      paired_sample_size: 0
     };
   }
 
@@ -230,10 +234,12 @@ async function calibrateFund(code, options = {}) {
   await saveCalibration(record);
 
   return {
-    calibrated: pairedSamples.length > 0,
+    calibrated: pairedSamples.length >= 3, // Phase 3.15：>=3 才执行网格优化并视为已校准
     ...record,
     holdings_weight: record.optimal_holdings_weight,
     sector_weight: record.optimal_sector_weight,
+    nav_sample_size: samples.length, // 净值可用样本（相邻日变化数）
+    paired_sample_size: pairedSamples.length, // 真正用于校准的配对样本数
     calibrated_at: new Date().toISOString()
   };
 }
