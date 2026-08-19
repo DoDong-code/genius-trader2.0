@@ -307,6 +307,21 @@ async function handleFundApi(request, response, url) {
     }
   }
 
+  // 删除备份（仅限本人）
+  {
+    const deleteMatch = url.pathname.match(/^\/api\/account\/backups\/(\d+)$/);
+    if (deleteMatch && request.method === 'DELETE') {
+      const { userFromRequest } = require('../services/authService');
+      const { deleteBackup, listBackups } = require('../services/accountBackupService');
+      const user = await userFromRequest(request);
+      const userId = user ? Number(user.id) : 0;
+      await deleteBackup(userId, deleteMatch[1]);
+      const backups = await listBackups(userId);
+      sendJson(response, 200, { success: true, backups });
+      return true;
+    }
+  }
+
   if (url.pathname === '/api/portfolio/delete' && request.method === 'POST') {
     const body = await readJsonBody(request);
     const { clearSyncedAccount } = require('../services/portfolioService');

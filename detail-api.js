@@ -567,11 +567,12 @@
       const isSell = legacy ? String(item[1] || '').includes('减') : item?.type === 'sell';
       const date = legacy ? item[0] : item?.date;
       const label = legacy ? item[1] : (isSell ? '卖出' : '买入');
+      const investTag = (!legacy && item?.invest) ? '<span style="display:inline-block;background:#0071e3;color:#fff;border-radius:4px;font-size:10px;line-height:1;padding:2px 4px;margin-left:4px;vertical-align:middle;font-weight:600;">定</span>' : '';
       const amount = legacy
         ? item[2]
         : `${isSell ? '−' : '+'}${money(Math.abs(Number(item?.amount) || 0))}`;
       return `
-      <div><span>${escapeHtml(date || '')}</span><b>${escapeHtml(label || '')}</b><em>${escapeHtml(amount || '')}</em></div>
+      <div><span>${escapeHtml(date || '')}</span><b>${escapeHtml(label || '')}${investTag}</b><em>${escapeHtml(amount || '')}</em></div>
     `;
     }).join('')}</div>`;
   }
@@ -665,6 +666,13 @@
       '<label><span data-trade-fee-label>买入费率</span><input name="trade-fee" type="number" min="0" step="0.0001" value="0"></label>',
       '<label><span data-trade-time-label>买入时间</span><input name="trade-time" type="datetime-local" value="' + localDateTimeInputValue() + '"></label>',
       '</div>',
+      '<div class="holding-quick-ratios" style="display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap;">',
+      '<span style="font-size:12px;color:#86868b;">快捷金额</span>',
+      '<button type="button" data-quick-ratio="0.25" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/4</button>',
+      '<button type="button" data-quick-ratio="0.3333333333333333" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/3</button>',
+      '<button type="button" data-quick-ratio="0.5" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/2</button>',
+      '<button type="button" data-quick-ratio="1" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">全部</button>',
+      '</div>',
       '</div>',
       '<div class="holding-invest-fields" hidden>',
       '<div class="holding-edit-grid">',
@@ -687,6 +695,7 @@
     const form = overlay.querySelector('form');
     const tradeFields = form.querySelector('.holding-trade-fields');
     const investFields = form.querySelector('.holding-invest-fields');
+    const quickRow = form.querySelector('.holding-quick-ratios');
     const error = form.querySelector('.holding-editor-error');
     let mode = 'edit';
 
@@ -705,6 +714,7 @@
       error.textContent = '';
       tradeFields.hidden = mode === 'edit' || mode === 'invest';
       investFields.hidden = mode !== 'invest';
+      if (quickRow) quickRow.hidden = mode === 'edit' || mode === 'invest' || mode === 'liquidate';
       form.querySelectorAll('[data-holding-mode]').forEach(button => {
         button.classList.toggle('active', button.dataset.holdingMode === mode);
       });
@@ -724,6 +734,16 @@
 
     form.querySelectorAll('[data-holding-mode]').forEach(button => {
       button.addEventListener('click', () => setMode(button.dataset.holdingMode));
+    });
+
+    // 快捷比例：基于当前实际可交易持仓金额，自动计算交易金额（保留手动修改）
+    form.querySelectorAll('[data-quick-ratio]').forEach(button => {
+      button.addEventListener('click', () => {
+        const ratio = Number(button.dataset.quickRatio);
+        const base = Number(fund.amount) || 0;
+        const value = Math.round(base * ratio * 100) / 100;
+        form.querySelector('[name="trade-amount"]').value = value.toFixed(2);
+      });
     });
 
     overlay.addEventListener('click', event => {
@@ -791,7 +811,7 @@
         }
         const date = transactionDateLabel(investDate);
         fund.transactions = Array.isArray(fund.transactions) ? fund.transactions : [];
-        fund.transactions.unshift({ type: 'buy', amount: investAmount, fee: 0, date });
+        fund.transactions.unshift({ type: 'buy', amount: investAmount, fee: 0, date, invest: true });
         nextAmount += investAmount;
         // 计算下一次定投日期
         const nextDateBase = investDate ? new Date(investDate) : new Date();

@@ -50,9 +50,19 @@ async function getBackup(userId, backupId) {
   }
 }
 
+// 删除某个备份（仅限本人）
+async function deleteBackup(userId, backupId) {
+  const result = await run(
+    'DELETE FROM account_backups WHERE user_id = ? AND id = ?',
+    [userId, Number(backupId)]
+  );
+  return result;
+}
+
 module.exports = {
   createBackup,
   listBackups,
   getBackup,
+  deleteBackup,
   MAX_BACKUPS
 };

@@ -100,6 +100,104 @@
       }
     });
   }
+  function openBackupManager() {
+    var token = window.auth && window.auth.state && window.auth.state.token;
+    if (!token) {
+      var loginDialog = dialog('备份管理', '云端备份需要先登录账号。', '<button type="button" data-cancel>知道了</button>');
+      loginDialog.addEventListener('click', function (event) { if (event.target.closest('[data-cancel]')) closeDialog(loginDialog); });
+      return;
+    }
+    var overlay = document.createElement('div');
+    overlay.className = 'confirm-overlay data-dialog-overlay backup-manager-overlay';
+    overlay.innerHTML = '<section class="confirm-dialog data-dialog backup-manager" role="dialog" aria-modal="true">' +
+      '<h2>备份管理</h2>' +
+      '<p style="margin-top:-6px;font-size:12px;color:#86868b;">云端快照，最多保留 5 份</p>' +
+      '<div style="margin:10px 0;"><button type="button" data-backup-create style="background:#0071e3;color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;">立即备份</button></div>' +
+      '<div class="backup-manager-list" style="max-height:320px;overflow:auto;border-top:1px solid #e8e8ed;"></div>' +
+      '<div class="confirm-actions"><button type="button" data-backup-close>关闭</button></div>' +
+      '</section>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function () { overlay.classList.add('visible'); });
+
+    function renderBackups(backups) {
+      var list = overlay.querySelector('.backup-manager-list');
+      if (!list) return;
+      if (!Array.isArray(backups) || backups.length === 0) {
+        list.innerHTML = '<p style="padding:14px 4px;color:#86868b;font-size:13px;">暂无备份，点击「立即备份」创建。</p>';
+        return;
+      }
+      list.innerHTML = backups.map(function (b) {
+        var reasonLabel = b.reason === 'manual' ? '手动备份' : b.reason === 'logout' ? '退出前' : (b.reason || '备份');
+        var time = b.created_at ? new Date(b.created_at).toLocaleString() : '';
+        return '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 4px;border-bottom:1px solid #f2f2f7;">' +
+          '<div><div style="font-size:13px;color:#1d1d1f;">' + escapeHtml(reasonLabel) + ' <span style="color:#86868b;">#' + b.id + '</span></div>' +
+          '<div style="font-size:12px;color:#86868b;">' + (b.account_count || 0) + ' 个账户 · ' + escapeHtml(time || '') + '</div></div>' +
+          '<div style="display:flex;gap:8px;flex-shrink:0;">' +
+          '<button type="button" data-backup-restore="' + b.id + '" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">恢复</button>' +
+          '<button type="button" data-backup-delete="' + b.id + '" style="background:#f5f5f7;color:#ff3b30;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">删除</button>' +
+          '</div></div>';
+      }).join('');
+    }
+    function loadBackups() {
+      fetch('/api/account/backups', { headers: window.auth.authHeaders() })
+        .then(function (r) { return r.json(); })
+        .then(function (data) { renderBackups(data && data.backups); })
+        .catch(function () { renderBackups([]); });
+    }
+    function createBackupNow() {
+      window.createCloudBackup('manual')
+        .then(function () {
+          if (typeof window.showToast === 'function') window.showToast('已创建云端备份', 'success');
+          loadBackups();
+        })
+        .catch(function (err) {
+          if (typeof window.showToast === 'function') window.showToast('备份失败：' + ((err && err.message) || '网络错误'), 'error');
+        });
+    }
+    function confirmRestore(id) {
+      var confirm = dialog('恢复备份', '将用该备份替换当前本地账户数据（保留同步账户）。此操作不可撤销。', '<button type="button" data-cancel>取消</button><button type="button" class="confirm-delete" data-confirm>确认恢复</button>');
+      confirm.addEventListener('click', function (event) {
+        if (event.target === confirm || event.target.closest('[data-cancel]')) closeDialog(confirm);
+        if (event.target.closest('[data-confirm]')) {
+          closeDialog(confirm);
+          window.restoreCloudBackup(id)
+            .then(function (ok) {
+              if (typeof window.showToast === 'function') window.showToast(ok ? '已恢复备份' : '恢复失败', ok ? 'success' : 'error');
+            })
+            .catch(function (err) {
+              if (typeof window.showToast === 'function') window.showToast('恢复失败：' + ((err && err.message) || '网络错误'), 'error');
+            });
+        }
+      });
+    }
+    function confirmDelete(id) {
+      var confirm = dialog('删除备份', '确定删除该备份快照吗？删除后不可恢复。', '<button type="button" data-cancel>取消</button><button type="button" class="confirm-delete" data-confirm>确认删除</button>');
+      confirm.addEventListener('click', function (event) {
+        if (event.target === confirm || event.target.closest('[data-cancel]')) closeDialog(confirm);
+        if (event.target.closest('[data-confirm]')) {
+          closeDialog(confirm);
+          fetch('/api/account/backups/' + id, { method: 'DELETE', headers: window.auth.authHeaders() })
+            .then(function (r) { return r.json(); })
+            .then(function () {
+              if (typeof window.showToast === 'function') window.showToast('已删除备份', 'success');
+              loadBackups();
+            })
+            .catch(function () {
+              if (typeof window.showToast === 'function') window.showToast('删除失败', 'error');
+            });
+        }
+      });
+    }
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay || event.target.closest('[data-backup-close]')) closeDialog(overlay);
+      if (event.target.closest('[data-backup-create]')) createBackupNow();
+      var restoreBtn = event.target.closest('[data-backup-restore]');
+      if (restoreBtn) confirmRestore(Number(restoreBtn.dataset.backupRestore));
+      var deleteBtn = event.target.closest('[data-backup-delete]');
+      if (deleteBtn) confirmDelete(Number(deleteBtn.dataset.backupDelete));
+    });
+    loadBackups();
+  }
   function openMenu() {
     closeMenu();
     var menu = document.createElement('div');
@@ -107,7 +205,8 @@
     var isLoggedIn = !!(window.auth && window.auth.state && window.auth.state.user);
     var authLabel = isLoggedIn ? escapeHtml(window.auth.state.user.email) : '登录 / 注册';
     var logoutHtml = isLoggedIn ? '<button type="button" data-data-menu="logout"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(2px);" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="15 6 21 12 15 18"/></svg></span>退出登录</button>' : '';
-    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + logoutHtml;
+    var backupManagerHtml = isLoggedIn ? '<button type="button" data-data-menu="backups"><span>☁</span>备份管理</button>' : '';
+    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + backupManagerHtml + logoutHtml;
     document.body.appendChild(menu);
     var rect = moreButton.getBoundingClientRect();
     menu.style.top = (rect.bottom + 10) + 'px'; menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
@@ -130,6 +229,7 @@
       if (type === 'export') downloadData();
       if (type === 'import') fileInput.click();
       if (type === 'restore') restoreDefaults();
+      if (type === 'backups') openBackupManager();
       if (type === 'logout') {
         if (window.auth && window.auth.logout) window.auth.logout();
       }

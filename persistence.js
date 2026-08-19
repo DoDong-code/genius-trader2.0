@@ -234,4 +234,31 @@
   }
   window.backupToCloud=backupToCloud;
   window.restoreFromCloud=restoreFromCloud;
+  // 创建服务器备份快照（account_backups，后端最多保留 5 个，超出自动删最旧）
+  window.createCloudBackup=async function(reason){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
+    const response=await fetch('/api/account/backups',{
+      method:'POST',
+      headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
+      body:JSON.stringify({state:buildPersisted(),reason:reason||'manual'})
+    });
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    return true;
+  };
+  // 从服务器备份快照恢复账户（写回本地并持久化，保留当前同步账户）
+  window.restoreCloudBackup=async function(id){
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
+    const response=await fetch('/api/account/backups/'+Number(id)+'/restore',{
+      method:'POST',
+      headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders())
+    });
+    if(!response.ok)throw new Error('HTTP '+response.status);
+    const data=await response.json();
+    const applied=applyAccounts(data&&data.state);
+    if(applied){
+      save();
+      rerender();
+    }
+    return applied;
+  };
 })();
