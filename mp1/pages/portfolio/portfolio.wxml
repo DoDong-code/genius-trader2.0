@@ -111,7 +111,7 @@
             <!-- 数据标识徽章放【代码左边】（对齐网页端 live-estimates.js） -->
             <view style="display: flex; align-items: center; gap: 6rpx; min-width: 0;">
               <text wx:if="{{item.dataBadge}}" class="data-badge {{item.dataBadge.tone === 'blue' ? 'data-badge-blue' : 'data-badge-gray'}}">{{item.dataBadge.text}}</text>
-              <text style="font-size: 20rpx; color: #86868b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;">{{item.code}} · {{item.category || '其他'}}</text>
+              <text style="font-size: 20rpx; color: #86868b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;">{{item.code}} · {{item.sector || item.category || '其他'}}</text>
             </view>
           </view>
 

@@ -22,7 +22,10 @@
     '015736': '\u7eaf\u503a',
     '380006': '\u7eaf\u503a',
     '004103': '\u503a\u5238',
-    '009690': '\u7075\u6d3b\u914d\u7f6e'
+    '009690': '\u7075\u6d3b\u914d\u7f6e',
+    // 二次验收：与小程序 utils/fundSectors.js 的 FUND_SECTORS_BY_CODE 完全一致（双端同一板块表）
+    '000001': '\u6df7\u5408',
+    '008702': '\u57fa\u91d1'
   };
 
   function formatMoney(value) {
@@ -136,7 +139,8 @@
   function setFundMeta(row, fund) {
     var meta = row && row.querySelector('.fund-info small');
     if (!meta || !fund) return;
-    var sector = FUND_SECTORS[fund.code] || fund.sector || fund.category || '\u57fa\u91d1';
+    // 二次验收：兜底与小程序 fundSectors.sectorNameOf 统一为「其他」（双端板块显示一致）
+    var sector = FUND_SECTORS[fund.code] || fund.sector || fund.category || '\u5176\u4ed6';
     var text = fund.code + ' \u00b7 ' + sector;
     // This function is called by a DOM observer.  Do not rewrite an already
     // correct value, otherwise replaceChildren triggers the observer again.
@@ -192,8 +196,9 @@
 
     var mmddHyphen = formatMMDD(date);
     var mmddNoHyphen = mmddHyphen.replace('-', '');
-    var desktopText = '已更新' + (mmddNoHyphen || mmddHyphen || '');
-    var mobileText = mmddHyphen || ('已更新' + (mmddNoHyphen || ''));
+    // 二次验收：蓝徽章直接显示实际净值日期（0820），不带「已更新」前缀（双端一致）
+    var desktopText = mmddNoHyphen || mmddHyphen || '';
+    var mobileText = mmddHyphen || desktopText;
     var badge = meta.querySelector('.nav-updated-badge');
     if (!badge) {
       badge = document.createElement('span');
@@ -222,8 +227,9 @@
       badge = document.createElement('span');
       badge.className = 'nav-updated-badge';
     }
-    badge.innerHTML = '<span class="desktop-tag-text">' + label + mmddNoHyphen + '</span><span class="mobile-tag-text">' + mmddHyphen + '</span>';
-    badge.title = label + '净值更新至 ' + date;
+    // 二次验收：蓝徽章 = 实际净值日期（0820）；label（小倍/养基宝）放入 title 兜底
+    badge.innerHTML = '<span class="desktop-tag-text">' + mmddNoHyphen + '</span><span class="mobile-tag-text">' + mmddHyphen + '</span>';
+    badge.title = (label ? label + ' ' : '') + '净值更新至 ' + date;
     if (meta.firstChild !== badge) {
       meta.insertBefore(badge, meta.firstChild);
     }
@@ -246,29 +252,6 @@
     var text = label || '估算';
     badge.innerHTML = '<span class="desktop-tag-text">' + text + '</span><span class="mobile-tag-text">' + text + '</span>';
     badge.title = label ? label + '实时估值' : '今日估算数据';
-    if (meta.firstChild !== badge) {
-      meta.insertBefore(badge, meta.firstChild);
-    }
-  }
-
-  // 蓝色数据源标识（P0 估值状态修复）：有估值/数据源数据时显示蓝色徽章
-  // provider 名（小倍/养基宝）或「估算」；与 .nav-updated-badge 同色系（蓝），区别于灰色 .nav-estimate-badge
-  function markDataSourceBadge(row, fund, label) {
-    var meta = row.querySelector('.fund-info small');
-    if (!meta) return;
-    setFundMeta(row, fund || currentFund(row.dataset.code));
-
-    // 移除可能存在的灰色估值徽章
-    var estBadge = meta.querySelector('.nav-estimate-badge');
-    if (estBadge) estBadge.remove();
-
-    var badge = meta.querySelector('.nav-provider-badge');
-    if (!badge) {
-      badge = document.createElement('span');
-      badge.className = 'nav-provider-badge';
-    }
-    badge.innerHTML = '<span class="desktop-tag-text">' + label + '</span><span class="mobile-tag-text">' + label + '</span>';
-    badge.title = label + '实时估值（数据源）';
     if (meta.firstChild !== badge) {
       meta.insertBefore(badge, meta.firstChild);
     }
@@ -404,7 +387,7 @@
           fund.todayEstimate = profit;
           fund.estimateConfidence = estimate.confidence || null;
           clearNavUpdated(row);
-          markDataSourceBadge(row, fund, pLabel || '估算');
+          markEstimateBadge(row, fund, pLabel || '估值');
           updateTodayCell(row, change, profit);
           row.dataset.estimateState = 'ready';
           markEstimatesRefreshed();
@@ -523,11 +506,11 @@
         fund.estimateConfidence = estimate.confidence || null;
         updateTodayCell(row, change, profit);
 
-        // 数据标识徽章统一决策（对齐 mp1 computeDataBadge / P0 估值状态修复）
-        // 非“已更新”场景：有估值数据 → 蓝色数据源标识（provider 名 / 估算）；无数据 → 灰色“估值”
+        // 数据标识徽章统一决策（二次验收 P0：灰=未确认估值，蓝=已确认净值，数据源不决定颜色）
+        // 非“已更新”场景：有估值数据 → 灰色徽章（数据源名/估值）；无数据 → 灰色“估值”
         if (!officialUpdated && !(!isTrading && navDate)) {
           if (Number.isFinite(change)) {
-            markDataSourceBadge(row, fund, providerLabel || '估算');
+            markEstimateBadge(row, fund, providerLabel || '估值');
           } else {
             markEstimateBadge(row, fund, '估值');
           }
@@ -553,7 +536,7 @@
                   : (Number(fund.amount) || 0) * pChange;
                 updateTodayCell(row, fund.today, fund.todayEstimate);
                 clearNavUpdated(row);
-                markDataSourceBadge(row, fund, pLabel || '估算');
+                markEstimateBadge(row, fund, pLabel || '估值');
                 if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
               }).catch(function () {});
           }, 2500);

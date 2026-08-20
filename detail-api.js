@@ -1001,9 +1001,10 @@
           </div>
 
           <div class="detail-section">
+            <!-- 二次验收：数据更新状态在【校准按钮上方】右对齐，显示真实数据源（天天基金/小倍/养基宝） -->
+            <div class="detail-api-state-row"><span class="detail-api-state">正在读取真实数据…</span></div>
             <div class="detail-section-head">
               <div><p class="eyebrow">历史净值</p><h3 class="detail-history-title">近1年走势</h3></div>
-              <span class="detail-api-state">正在读取真实数据…</span>
               <button type="button" class="detail-calibrate-btn" data-calibrate>校准</button>
             </div>
             <!-- P2：校准结果（与小程序共用同一套校准数据/算法；样本数、权重、准确率等关键数据） -->
@@ -1230,10 +1231,20 @@
   function finishSuccess(fund, backdrop, payload, history, ctl) {
     if (ctl) ctl.stop();
     const state = backdrop.querySelector('.detail-api-state');
-    if (state) state.textContent = '✓ 数据已更新';
+    if (state) state.textContent = dataSourceStatusText(fund, payload);
     applyMetaSideEffects(fund, backdrop, payload);
     setupHistoryExplorer(backdrop, history, fund);
     backdrop.fundHistory = history;
+  }
+
+  // 二次验收：数据更新状态显示真实数据源（不写死）
+  // 估值 source 为小倍/养基宝时显示对应数据源；否则默认后端数据源（天天基金）
+  function dataSourceStatusText(fund, payload) {
+    const estimate = payload && payload.estimate;
+    const source = estimate && (estimate.source || estimate.estimate_source);
+    if (source === 'xiaobeiyangji' || source === 'xbyj') return '✓ 小倍数据';
+    if (source === 'yangjibao' || source === 'yjb') return '✓ 养基宝数据';
+    return '✓ ' + FUND_DATA_SOURCE_LABEL + '数据';
   }
 
   function finishFailed(fund, backdrop, ctl, message) {

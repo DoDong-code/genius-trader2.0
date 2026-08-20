@@ -823,21 +823,19 @@ Page({
             filePath,
             fileName,
             success: () => wx.showToast({ title: '请选择发送/保存位置', icon: 'none' }),
-            fail: () => this._fallbackCopyBackup(str)
+            // 二次验收：分享失败时如实提示（不再用剪贴板冒充「微信发送」）
+            fail: () => wx.showToast({ title: '微信发送失败，请重试', icon: 'none' })
           });
         } else {
-          this._fallbackCopyBackup(str);
+          // 二次验收：当前微信基础库不支持 shareFileMessage，如实提示（不静默降级为复制）
+          wx.showModal({
+            title: '无法分享',
+            content: '当前微信版本不支持文件分享导出，请升级微信后重试，或使用「备份到云端」功能。',
+            showCancel: false
+          });
         }
       },
       fail: () => wx.showToast({ title: '导出失败', icon: 'none' })
-    });
-  },
-
-  _fallbackCopyBackup(str) {
-    // 兜底方案：wx.shareFileMessage 不可用/失败时才复制到剪贴板（非最终方案）
-    wx.setClipboardData({
-      data: str,
-      success: () => wx.showToast({ title: '已复制到剪贴板（可粘贴保存）', icon: 'none' })
     });
   },
 

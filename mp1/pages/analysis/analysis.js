@@ -1,5 +1,6 @@
 // pages/analysis/analysis.js
 import { http } from '../../utils/request.js';
+import { pct } from '../../utils/format.js';
 const app = getApp();
 
 Page({
@@ -269,7 +270,7 @@ Page({
         amount: amt,
         amountStr: `¥${Math.round(amt).toLocaleString('zh-CN')}`,
         pct,
-        pctStr: pct.toFixed(2) + '%',
+        pctStr: pct(pct / 100, false),
         color: colorMap[cat] || colorMap['其他']
       };
     }).sort((x, y) => y.amount - x.amount);
@@ -410,7 +411,7 @@ Page({
         amount: Number(f.amount) || 0,
         amountStr: `¥${Math.round(f.amount).toLocaleString('zh-CN')}`,
         currentPct,
-        currentPctStr: currentPct.toFixed(2) + '%',
+        currentPctStr: pct(currentPct / 100, false),
         todayRate,
         isTodayPositive: todayRate >= 0,
         adviceText,

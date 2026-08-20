@@ -142,3 +142,12 @@
 .text-link-btn:active {
   opacity: 0.7;
 }
+
+/* 二次验收：备份列表项与页面整体灰色背景统一（无白色卡片背景） */
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12rpx 0;
+  background: transparent;
+}

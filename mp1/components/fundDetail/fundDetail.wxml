@@ -294,7 +294,7 @@
 
       <!-- 加仓/减仓/清仓 -->
       <block wx:if="{{editMode === 'add' || editMode === 'reduce' || editMode === 'liquidate'}}">
-        <view class="form-group" style="margin-top: 24rpx;">
+        <view class="form-group" style="margin-top: 24rpx; padding: 0 28rpx;">
           <text class="form-label">{{editMode === 'reduce' || editMode === 'liquidate' ? '卖出金额 (元)' : '买入金额 (元)'}}</text>
           <input class="form-input" type="digit" placeholder="0.00" placeholder-style="color:#636366" value="{{newTxAmount}}" bindinput="onInputNewTxAmount" cursor-spacing="20" adjust-position="{{true}}" />
         </view>
@@ -333,7 +333,7 @@
             </picker>
           </view>
         </view>
-        <view class="form-group">
+        <view class="form-group" style="padding: 0 28rpx;">
           <text class="form-label">定投开始日期</text>
           <picker mode="date" value="{{investDate}}" bindchange="onInvestDateChange">
             <view class="picker-selector">{{investDate}}</view>

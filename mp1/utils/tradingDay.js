@@ -77,42 +77,43 @@ export function providerDisplayName(source) {
 }
 
 /**
- * 计算数据徽章（四态状态机，对齐网页端 live-estimates.js）
+ * 计算数据徽章（五态状态机，二次验收对齐：灰=未确认估值，蓝=已确认净值，数据源不决定颜色）
  * @param {object} fund       - 持仓基金（必含 code、name）
  * @param {string|null} navDate - 后端返回的 latest_nav.date（yyyy-mm-dd）
  * @param {string|null} estimateSource - estimate 接口返回的 source（xiaobeiyangji/yangjibao/yjb/xbyj）
  * @param {Date} [now]        - 用于测试的时间
- * @param {number|null} officialChange - 官方涨跌幅（由 history 计算，对齐 Web 状态①需 finite）
+ * @param {number|null} officialChange - 官方涨跌幅（由 history 计算，对齐 Web 需 finite）
  * @param {boolean} [hasEstimateData] - 是否存在有效估值/数据源数据（有 navDate 或 有限 today/todayEstimate）
- * @returns {{text:string, tone:'blue'|'gray', kind:'updated'|'source'|'estimate', source?:string}}
+ * @returns {{text:string, tone:'blue'|'gray', kind:'updated'|'estimate', source?:string}}
  *
- * 判定（P0 估值状态修复）：
- *   ① 官方净值已更新到预期日期（QDII ? 前一交易日 : 今日）且有官方涨跌幅 → 蓝「已更新 MMDD」
- *   ② 非交易日（isTradingDay=false）但有 navDate → 蓝「已更新 MMDD」（最近交易日）
- *   ③ 有估值/数据源数据（hasEstimateData）→ 蓝「数据源标识」：provider 名（小倍/养基宝）或「估算」
- *   ④ 其他（无净值、无估值数据）→ 灰「估值」（唯一灰色场景）
+ * 判定（二次验收 P0）：
+ *   状态A/B/D 净值已确认（navDate===预期日期[QDII?前一交易日:今日] 且有官方涨跌幅，或 非交易日有 navDate）
+ *            → 蓝「MMDD」（实际净值日期，非当前日期）
+ *   状态C 非交易日（isTradingDay=false）有 navDate → 蓝「MMDD」（最近交易日实际净值日期）
+ *   状态E 无净值且无估值 → 灰「估值」（唯一兜底）
+ *   状态A 其余（交易日净值未更新，含盘中/盘后）→ 灰「估值 / 小倍 / 养基宝」（有估值数据时按数据源名，灰色）
  */
 export function computeDataBadge(fund, navDate, estimateSource, now = new Date(), officialChange = null, hasEstimateData = false) {
   const today = shanghaiDate(now);
   const trading = isTradingDay(now);
   const expected = isQdiiFund(fund) ? getPreviousTradingDay(today) : today;
-  // 状态①：对齐 Web live-estimates.js:422 —— navDate===expected 且官方涨跌幅为有限数
+  // 净值已确认：navDate === 预期日期 且 官方涨跌幅为有限数
   // 注意：用 Number.isFinite(officialChange) 而非 Number.isFinite(Number(officialChange))，
   // 因为 Number(null)=0 会误判无涨跌幅数据为「涨跌幅 0」；Number.isFinite(null) 正确返回 false。
-  const updated = Boolean(navDate && navDate === expected && Number.isFinite(officialChange));
+  const confirmed = Boolean(navDate && navDate === expected && Number.isFinite(officialChange));
 
-  if (updated) {
-    return { text: `已更新${formatMMDD(navDate).replace('-', '')}`, tone: 'blue', kind: 'updated' };
+  if (confirmed) {
+    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
   }
   if (!trading && navDate) {
-    return { text: `已更新${formatMMDD(navDate).replace('-', '')}`, tone: 'blue', kind: 'updated' };
+    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
   }
-  // ③ 有估值/数据源数据 → 蓝色数据源标识（provider 名 或 本地估算）
+  // 交易中净值未确认：有估值/数据源数据 → 灰色（数据源名 或「估值」）；数据源不决定颜色
   if (hasEstimateData) {
-    const label = providerDisplayName(estimateSource) || '估算';
-    return { text: label, tone: 'blue', kind: 'source', source: estimateSource || null };
+    const label = providerDisplayName(estimateSource) || '估值';
+    return { text: label, tone: 'gray', kind: 'estimate', source: estimateSource || null };
   }
-  // ④ 唯一灰色场景：无净值、无估值数据
+  // 无净值、无估值数据 → 灰色「估值」
   return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
 }
 

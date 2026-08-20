@@ -1,6 +1,7 @@
 // pages/index/index.js
 const app = getApp();
 import { http } from '../../utils/request.js';
+import { pct } from '../../utils/format.js';
 
 Page({
   data: {
@@ -171,7 +172,7 @@ Page({
             name: idx.name,
             // P1：指数点位最多 2 位小数、不强制补 0
             value: val.toLocaleString('zh-CN', { maximumFractionDigits: 2 }),
-            change: `${chg >= 0 ? '+' : ''}${chg.toFixed(2)}%`,
+            change: pct(chg / 100),
             profit: chg >= 0 ? 1 : 0
           };
         });
@@ -344,10 +345,10 @@ Page({
       totalAssetsStr: `¥${Math.round(totalAssets).toLocaleString('zh-CN')}`,
       todayProfit,
       todayProfitStr: `${todayProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(todayProfit)).toLocaleString('zh-CN')}`,
-      todayProfitPctStr: `${todayProfit >= 0 ? '+' : ''}${todayProfitPct.toFixed(2)}%`,
+      todayProfitPctStr: pct(todayProfitPct / 100),
       totalProfit,
       totalProfitStr: `${totalProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(totalProfit)).toLocaleString('zh-CN')}`,
-      totalProfitPctStr: `${totalProfit >= 0 ? '+' : ''}${totalProfitPct.toFixed(2)}%`
+      totalProfitPctStr: pct(totalProfitPct / 100)
     });
   },
 

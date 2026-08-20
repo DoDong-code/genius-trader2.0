@@ -186,37 +186,30 @@
         <h2>已登录</h2>
         <p class="apple-dialog-message">${escapeHtml(state.user ? state.user.email : '')}，数据已同步到云端。</p>
         <div style="display: flex; gap: 10px; margin: 4px 0 0;">
-          <button type="button" class="secondary-button" id="auth-backup-btn" style="flex: 1;">立即备份</button>
+          <button type="button" class="secondary-button" id="auth-backup-btn" style="flex: 1;">立即同步</button>
           <button type="button" class="secondary-button" id="auth-restore-btn" style="flex: 1;">恢复本地</button>
         </div>
-        <!-- P2：备份功能移入账号弹窗，两个按钮下方增加「备份列表」 -->
-        <div style="margin-top: 8px;">
-          <button type="button" class="secondary-button" id="auth-backups-btn" style="width: 100%;">备份列表</button>
-        </div>
+        <!-- 二次验收：「立即同步」点击直接备份（无二级弹窗），下方直接展示最近 5 条备份 -->
+        <div class="account-backup-list" style="margin-top: 12px; text-align: left;"></div>
       </div>
     `);
     const backupBtn = layer.querySelector('#auth-backup-btn');
     const restoreBtn = layer.querySelector('#auth-restore-btn');
-    const backupsBtn = layer.querySelector('#auth-backups-btn');
-    backupsBtn.addEventListener('click', () => {
-      if (typeof window.openBackupManager === 'function') {
-        window.openBackupManager();
-      } else {
-        window.showToast('备份功能暂不可用', 'warning');
-      }
-    });
+    const backupList = layer.querySelector('.account-backup-list');
+
     backupBtn.addEventListener('click', async () => {
       backupBtn.disabled = true;
-      backupBtn.textContent = '备份中…';
+      backupBtn.textContent = '同步中…';
       try {
-        const ok = await window.backupToCloud();
-        if (ok) window.showToast('已备份到云端');
+        const ok = await window.createCloudBackup('manual');
+        if (ok) window.showToast('已同步到云端');
         else window.showToast('请先登录账号', 'warning');
+        loadRecentBackups(layer);
       } catch (error) {
-        window.showToast('备份失败：' + (error.message || '网络错误'), 'error');
+        window.showToast('同步失败：' + (error.message || '网络错误'), 'error');
       } finally {
         backupBtn.disabled = false;
-        backupBtn.textContent = '立即备份';
+        backupBtn.textContent = '立即同步';
       }
     });
     restoreBtn.addEventListener('click', async () => {
@@ -241,6 +234,82 @@
         restoreBtn.textContent = '恢复本地';
       }
     });
+    loadRecentBackups(layer);
+  }
+
+  // 二次验收：账号弹窗内联最近 5 条备份（无二级弹窗）；恢复/删除能力与原有一致
+  function loadRecentBackups(layer) {
+    const list = layer.querySelector('.account-backup-list');
+    if (!list) return;
+    fetch('/api/account/backups', { headers: window.auth.authHeaders() })
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderRecentBackups(list, layer, data && data.backups); })
+      .catch(function () { renderRecentBackups(list, layer, []); });
+  }
+
+  function renderRecentBackups(list, layer, backups) {
+    const items = Array.isArray(backups) ? backups.slice(0, 5) : [];
+    if (items.length === 0) {
+      list.innerHTML = '<div style="font-size:12px;color:#86868b;padding:8px 0;border-top:1px solid #f2f2f7;">暂无备份，点击「立即同步」创建。</div>';
+      return;
+    }
+    let html = '<div style="font-size:12px;color:#86868b;padding:2px 0 6px;">最近备份</div>' +
+      '<div style="border-top:1px solid #f2f2f7;">';
+    items.forEach(function (b) {
+      const time = b.created_at ? new Date(b.created_at).toLocaleString() : '';
+      const reasonLabel = b.reason === 'manual' ? '手动备份' : b.reason === 'logout' ? '退出前' : (b.reason || '备份');
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #f2f2f7;">' +
+        '<div style="font-size:12px;color:#86868b;">' + escapeHtml(time || '') +
+        '<span style="margin-left:6px;color:#b0b0b6;">' + escapeHtml(reasonLabel) + '</span></div>' +
+        '<div style="display:flex;gap:14px;flex-shrink:0;">' +
+        '<button type="button" data-backup-restore="' + b.id + '" style="background:transparent;border:none;color:#0071e3;font-size:12px;cursor:pointer;padding:2px 4px;">恢复</button>' +
+        '<button type="button" data-backup-delete="' + b.id + '" style="background:transparent;border:none;color:#ff3b30;font-size:12px;cursor:pointer;padding:2px 4px;">删除</button>' +
+        '</div></div>';
+    });
+    html += '</div>';
+    list.innerHTML = html;
+    list.onclick = function (event) {
+      const restoreBtn = event.target.closest('[data-backup-restore]');
+      if (restoreBtn) confirmRestoreCloudBackup(Number(restoreBtn.dataset.backupRestore), layer);
+      const deleteBtn = event.target.closest('[data-backup-delete]');
+      if (deleteBtn) confirmDeleteCloudBackup(Number(deleteBtn.dataset.backupDelete), layer);
+    };
+  }
+
+  async function confirmRestoreCloudBackup(id, layer) {
+    const ok = await window.showAppleDialog({
+      title: '恢复备份',
+      message: '将用该备份替换当前本地账户数据（保留同步账户）。此操作不可撤销。',
+      okText: '恢复',
+      cancelText: '取消',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      const result = await window.restoreCloudBackup(id);
+      window.showToast(result ? '已恢复备份' : '恢复失败', result ? 'success' : 'error');
+    } catch (error) {
+      window.showToast('恢复失败：' + (error.message || '网络错误'), 'error');
+    }
+    loadRecentBackups(layer);
+  }
+
+  async function confirmDeleteCloudBackup(id, layer) {
+    const ok = await window.showAppleDialog({
+      title: '删除备份',
+      message: '确定删除该备份快照吗？删除后不可恢复。',
+      okText: '删除',
+      cancelText: '取消',
+      danger: true
+    });
+    if (!ok) return;
+    try {
+      await fetch('/api/account/backups/' + id, { method: 'DELETE', headers: window.auth.authHeaders() });
+      window.showToast('已删除备份', 'success');
+    } catch (error) {
+      window.showToast('删除失败', 'error');
+    }
+    loadRecentBackups(layer);
   }
 
   function escapeHtml(value) {

@@ -1,6 +1,6 @@
 import { http } from '../../utils/request.js';
 import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay } from '../../utils/tradingDay.js';
-import { assetClassOf } from '../../utils/fundSectors.js';
+import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct } from '../../utils/format.js';
 const app = getApp();
 
@@ -295,10 +295,10 @@ Page({
       totalAssetsStr: `¥${Math.round(totalAssets).toLocaleString('zh-CN')}`,
       todayProfit,
       todayProfitStr: `${todayProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(todayProfit)).toLocaleString('zh-CN')}`,
-      todayProfitPctStr: `${todayProfit >= 0 ? '+' : ''}${todayProfitPct.toFixed(2)}%`,
+      todayProfitPctStr: pct(todayProfitPct / 100),
       totalProfit,
       totalProfitStr: `${totalProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(totalProfit)).toLocaleString('zh-CN')}`,
-      totalProfitPctStr: `${totalProfit >= 0 ? '+' : ''}${totalProfitPct.toFixed(2)}%`
+      totalProfitPctStr: pct(totalProfitPct / 100)
     });
 
     this.updateSortUI();
@@ -600,6 +600,8 @@ Page({
 
       return {
         ...f,
+        // 二次验收：板块显示与网页端一致（FUND_SECTORS[code] → sector → category → 其他）
+        sector: sectorNameOf(f),
         amountStr: `¥${Math.round(amt).toLocaleString('zh-CN')}`,
         holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(profit)).toLocaleString('zh-CN')}`,
         holdingRateStr: pct(holdRate),
