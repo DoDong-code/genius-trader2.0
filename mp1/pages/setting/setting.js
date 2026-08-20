@@ -546,6 +546,7 @@ Page({
         // 后端已用 qrcode 包生成 base64 data URI（qr_data_url），小程序直接展示，不依赖任何第三方图片域名。
         const imgUrl = (res && res.qr_data_url) || '';
         this.setData({ yjbQrUrl: imgUrl, yjbQrId: qrId || '', yjbQrStatus: '', yjbQrError: '' });
+        console.log('[YJB QR] generate qr_id=' + (qrId || ''));
         this._startQrPoll(qrId);
       })
       .catch(err => {
@@ -563,16 +564,16 @@ Page({
       });
   },
 
-  // 轮询扫码状态（每 1.5s，最长 90s，与网页端一致）
+  // 轮询扫码状态（每 1.5s，最长 120s，与网页端一致；P3.19-F：90s→120s 给公众号确认留时间）
   _startQrPoll(qrId) {
     if (!qrId) return;
-    this._stopQrPoll(); // 防御：清除旧 timer，避免重复轮询
+    this._stopQrPoll(); // 防御：清除旧 timer，保证最多一个 polling timer（P3.19-F 十三）
     this._qrStartedAt = Date.now();
     this._qrPollErrors = 0;
+    console.log('[YJB QR] polling start qr_id=' + qrId);
     this._qrTimer = setInterval(() => {
-      if (Date.now() - this._qrStartedAt > 90000) {
-        this._stopQrPoll();
-        this.setData({ yjbQrStatus: 'expired' });
+      if (Date.now() - this._qrStartedAt > 120000) {
+        this._markExpired();
         return;
       }
       this._checkQrOnce();
@@ -586,36 +587,83 @@ Page({
     }
   },
 
-  // 返回小程序时：重启轮询（微信后台节流 setInterval，切前台后旧 timer 可能停摆）+ 立即查一次
+  // P3.19-F：120s 超时 → 停止轮询并标记 expired（禁止继续复用旧 qr_id）
+  _markExpired() {
+    this._stopQrPoll();
+    if (this.data.yjbQrStatus !== 'expired') {
+      this.setData({ yjbQrStatus: 'expired' });
+      console.log('[YJB QR] status=expired (120s timeout)');
+    }
+  },
+
+  _sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  },
+
+  // P3.19-F：返回小程序时的扫码状态恢复
+  // 规则：无 qr_id / expired → 重新生成新二维码（禁止复用旧 qr_id）；
+  //       waiting → 连续 3 次快速检查（800ms 间隔，严格串行）后仍 waiting 才恢复 1500ms polling
   _resumeQrPoll() {
-    const qrId = this.data.yjbQrId;
-    if (!qrId || !this.data.yjbQrShow) return;
+    if (!this.data.yjbQrShow) return;
     if (this.data.yjbQrStatus === 'confirmed') return;
-    this._stopQrPoll();      // 停掉可能已节流的旧 timer
-    this._checkQrOnce();     // 立即查一次（快速路径，用户一回来就看到结果）
-    this._startQrPoll(qrId); // 重启前台持续轮询
+    const qrId = this.data.yjbQrId;
+    if (!qrId || this.data.yjbQrStatus === 'expired') {
+      console.log('[YJB QR] lifecycle=show, expired/no-qr -> regenerate');
+      this.fetchYjbQrcode();
+      return;
+    }
+    console.log('[YJB QR] lifecycle=show, fast check x3');
+    this._fastCheckChain(qrId, 3);
+  },
+
+  // P3.19-F：连续最多 3 次快速检查（严格串行：await check → sleep 800 → check …）
+  // 不是 3 个 timer；同一时刻最多一个 status 请求
+  async _fastCheckChain(qrId, times) {
+    this._stopQrPoll(); // 快查期间不跑定时轮询，避免重复请求
+    for (let i = 0; i < times; i++) {
+      if (this.data.yjbQrStatus === 'confirmed' || this.data.yjbQrStatus === 'expired') return;
+      if (this.data.yjbQrId !== qrId) return; // 旧二维码异步结果不污染新二维码
+      const done = await this._checkQrOnce(qrId);
+      if (done) return;
+      if (i < times - 1) await this._sleep(800);
+    }
+    // 仍 waiting → 恢复 1500ms polling（仅当 qr_id 未变化且未终结）
+    if (this.data.yjbQrId === qrId &&
+        this.data.yjbQrStatus !== 'confirmed' &&
+        this.data.yjbQrStatus !== 'expired') {
+      this._startQrPoll(qrId);
+    }
   },
 
   // 查一次扫码状态；confirmed 时自动收起面板并刷新连接状态
-  _checkQrOnce() {
-    const qrId = this.data.yjbQrId;
-    if (!qrId || !this.data.yjbQrShow) return;
-    if (this.data.yjbQrStatus === 'confirmed') return;
-    http.get('/api/provider/yangjibao/status?qr_id=' + encodeURIComponent(qrId), null, { silent: true })
-      .then(st => {
-        if (st && st.state === 'confirmed') {
-          this._stopQrPoll();
-          this.setData({ yjbQrStatus: 'confirmed', yjbQrUrl: '' });
-          wx.showToast({ title: '养基宝登录成功', icon: 'success' });
-          this.loadProviderStatus();
-          // 1.2 秒后自动收起二维码面板
-          setTimeout(() => this.closeYjbQr(), 1200);
-        } else if (st && st.state === 'expired') {
-          this._stopQrPoll();
-          this.setData({ yjbQrStatus: 'expired' });
-        }
-      })
-      .catch(() => { /* 静默：轮询仍会继续尝试 */ });
+  // P3.19-F：旧 qr_id 的异步结果不得污染新二维码状态（返回 true=已终结）
+  async _checkQrOnce(qrId) {
+    const targetQrId = qrId || this.data.yjbQrId;
+    if (!targetQrId || !this.data.yjbQrShow) return false;
+    if (this.data.yjbQrStatus === 'confirmed') return true;
+    try {
+      const st = await http.get('/api/provider/yangjibao/status?qr_id=' + encodeURIComponent(targetQrId), null, { silent: true });
+      // 异步结果隔离：二维码已被刷新（yjbQrId 变化）时丢弃旧结果
+      if (this.data.yjbQrId !== targetQrId) return false;
+      if (st && st.state === 'confirmed') {
+        this._stopQrPoll();
+        this.setData({ yjbQrStatus: 'confirmed', yjbQrUrl: '' });
+        console.log('[YJB QR] status=confirmed -> refresh provider status');
+        wx.showToast({ title: '养基宝登录成功', icon: 'success' });
+        this.loadProviderStatus();
+        // 1.2 秒后自动收起二维码面板
+        setTimeout(() => this.closeYjbQr(), 1200);
+        return true;
+      }
+      if (st && st.state === 'expired') {
+        this._stopQrPoll();
+        this.setData({ yjbQrStatus: 'expired' });
+        console.log('[YJB QR] status=expired');
+        return true;
+      }
+      console.log('[YJB QR] status=waiting');
+    } catch (e) { /* 静默：轮询仍会继续尝试 */ }
+    return false;
   },
 
   closeYjbQr() {
@@ -624,9 +672,12 @@ Page({
   },
 
   onUnload() { this._stopQrPoll(); },
-  // 不停止轮询：用户长按识别二维码会跳转到养基宝 App（触发 onHide），若在此停轮询，
-  // 返回小程序后无法检测到 confirmed，导致用户需重复操作。onShow 会恢复检测。
-  onHide() { /* 保留轮询，见 onShow 恢复逻辑 */ },
+  // P3.19-F：onHide 必须停止轮询（微信后台 setInterval 被节流/挂起，不能假设前台节奏）
+  // 不清除 qr_id：用户只是暂时进入公众号/H5；onShow 恢复时按状态机处理（waiting→快查/expired→换新码）
+  onHide() {
+    this._stopQrPoll();
+    console.log('[YJB QR] lifecycle=hide, stop polling');
+  },
 
   onYjbImport() { this.syncProvider('yangjibao', false); },
   onYjbOverwrite() { this.syncProvider('yangjibao', true); },
