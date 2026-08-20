@@ -1,5 +1,5 @@
 import { http } from '../../utils/request.js';
-import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay } from '../../utils/tradingDay.js';
+import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate } from '../../utils/tradingDay.js';
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct } from '../../utils/format.js';
 const app = getApp();
@@ -441,7 +441,10 @@ Page({
               f.estimateSource = source;
               f.estimateUpdatedAt = new Date().toISOString();
               // P3.18-ESTIMATE-STATE：记录后端统一数据状态（徽章展示用）
-              f.dataStatus = est.data_status || null;
+              // 临时降级：后端未部署 data_status 时，前端用 estimate 响应自推（部署后后端接管）
+              let dataStatus = est.data_status || null;
+              if (!dataStatus) dataStatus = inferDataStatusFromEstimate(f, est);
+              f.dataStatus = dataStatus;
               updated += 1;
             }
           })

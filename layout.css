@@ -2114,22 +2114,30 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
 }
 .detail-calibration-metric[hidden] { display: none; }
 
-/* P3.18 布局：两行——第1行「历史净值」左+「✓ 数据源」右；第2行「近1年走势」左+「校准」右；左左对齐、右右对齐 */
+/* P3.18 布局：两行——第1行「历史净值」左+「✓ 数据源」右；第2行「近1年走势」左+「校准」右；
+   左列统一左对齐、右列统一右对齐；第1行基线对齐（小字），第2行垂直居中（标题+按钮） */
 .detail-section-head {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 2px;
 }
 .detail-head-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   min-width: 0;
+  gap: 16px;
+}
+.detail-head-row:first-child {
+  align-items: baseline; /* 「历史净值」与「✓ 天天基金数据」文字基线对齐 */
 }
 .detail-section-head .detail-api-state {
   line-height: 1.3;
   white-space: nowrap;
   margin-left: 16px;
+  flex: none;
 }
 
 /* P3.18：导出范围「全部/策略」可切换小 tab（置于「导出数据」按钮上方） */

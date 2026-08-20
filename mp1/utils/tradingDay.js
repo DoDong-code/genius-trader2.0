@@ -133,6 +133,28 @@ export function computeDataBadge(fund, navDate, estimateSource, now = new Date()
   return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
 }
 
+const PROVIDER_SOURCE_SET = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);
+
+/**
+ * P3.18-ESTIMATE-STATE 临时降级：后端未部署时，前端用 estimate 响应自推 data_status
+ *（部署后后端接管，行为等价）。纯前端只读 estimate 字段，不改后端。
+ * @param {object} fund - 持仓基金
+ * @param {object|null} estimate - estimate API 响应（含 trade_date / source / data_source_actual）
+ * @param {Date} [now]
+ * @returns {'PROVIDER_TODAY'|'PROVIDER_STALE'|'NO_DATA'|null}
+ */
+export function inferDataStatusFromEstimate(fund, estimate, now = new Date()) {
+  if (!estimate) return 'NO_DATA';
+  const actualSource = estimate.data_source_actual || estimate.source || estimate.estimate_source;
+  if (actualSource && actualSource === 'local') return 'NO_DATA'; // 本地估算不算 provider 当日
+  if (!actualSource || !PROVIDER_SOURCE_SET.has(String(actualSource))) return null; // 非 provider（让 computeDataBadge 走降级）
+  const tradeDate = estimate.trade_date || estimate.nav_date || null;
+  if (!tradeDate) return 'PROVIDER_STALE';
+  const today = shanghaiDate(now);
+  const expected = isQdiiFund(fund) ? getPreviousTradingDay(today) : today;
+  return tradeDate === expected ? 'PROVIDER_TODAY' : 'PROVIDER_STALE';
+}
+
 /**
  * 从 history 计算官方涨跌幅（navDate 当天 vs 前一交易日）
  */

@@ -111,6 +111,22 @@
     return null;
   }
 
+  // P3.18-ESTIMATE-STATE 临时降级：后端未部署 data_status 时，前端用 estimate 响应自推（部署后后端接管）
+  // 纯前端只读 estimate 字段，不改后端；与 mp1 inferDataStatusFromEstimate 同构
+  var INFER_PROVIDER_SET = { xiaobeiyangji: true, yangjibao: true, xbyj: true, yjb: true };
+  function inferDataStatusFromEstimate(fund, estimate) {
+    if (!estimate) return 'NO_DATA';
+    var actualSource = estimate.data_source_actual || estimate.source || estimate.estimate_source;
+    if (actualSource === 'local') return 'NO_DATA'; // 本地估算不算 provider 当日
+    if (!actualSource || !INFER_PROVIDER_SET[actualSource]) return null; // 非 provider（让决策块走降级）
+    var tradeDate = estimate.trade_date || estimate.nav_date || null;
+    if (!tradeDate) return 'PROVIDER_STALE';
+    var today = shanghaiDate(new Date());
+    var expected = isQdiiFund(fund) ? getPreviousTradingDay(today) : today;
+    return tradeDate === expected ? 'PROVIDER_TODAY' : 'PROVIDER_STALE';
+  }
+  window.inferDataStatusFromEstimate = inferDataStatusFromEstimate;
+
   // 已更新净值的缓存：code -> { day, navDate }，切换 tab 不重复请求，仅手动刷新时更新
   var updatedNavDates = {};
 
@@ -537,7 +553,9 @@
         // CONFIRMED_NAV → 蓝 MMDD（已在上方 officialUpdated 分支处理）
         // PROVIDER_TODAY → 蓝「小倍/养基宝」；PROVIDER_STALE → 灰「小倍/养基宝」；NO_DATA → 灰「估值」
         if (!officialUpdated && !(!isTrading && navDate)) {
-          const dataStatus = estimate && estimate.data_status;
+          // P3.18-ESTIMATE-STATE：后端 data_status 权威；缺失时前端用 estimate 响应自推（部署后后端接管）
+          let dataStatus = estimate && estimate.data_status;
+          if (!dataStatus) dataStatus = inferDataStatusFromEstimate(fund, estimate);
           if (dataStatus === 'PROVIDER_TODAY') {
             markProviderTodayBadge(row, fund, providerLabel || '小倍');
           } else if (dataStatus === 'PROVIDER_STALE') {
