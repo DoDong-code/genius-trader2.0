@@ -620,6 +620,8 @@ async function handleFundApi(request, response, url) {
         if (estimate && requestedSource) {
           estimate.estimate_source = requestedSource;
           estimate.source = requestedSource;
+          // P3.18-ESTIMATE-STATE：标记真实来源为本地（data_status 判定不误判为 provider 当日数据）
+          estimate.data_source_actual = 'local';
         }
       }
     } else if (mode === 'local') {
@@ -643,6 +645,20 @@ async function handleFundApi(request, response, url) {
         });
       });
     }
+    // P3.18-ESTIMATE-STATE：统一 data_status（状态判定放后端，Web/mp1 只负责展示）
+    const { resolveDataStatus, expectedNavDateFor, PROVIDER_SOURCES } = require('../services/estimateStatus');
+    const navLatest = await dbAsync.get('SELECT date FROM fund_nav WHERE fund_code = ? ORDER BY date DESC LIMIT 1', [match[0]]);
+    const fundRow = await dbAsync.get('SELECT fund_type, fund_name FROM fund WHERE fund_code = ?', [match[0]]);
+    const confirmedNavDate = navLatest && navLatest.date;
+    const expectedNavDate = expectedNavDateFor(fundRow);
+    const actualSource = estimate ? (estimate.data_source_actual || estimate.source || null) : null;
+    const providerTradeDate = estimate ? (estimate.trade_date || estimate.nav_date || null) : null;
+    estimate.data_status = resolveDataStatus({
+      confirmedNavDate,
+      expectedNavDate,
+      providerSource: actualSource && PROVIDER_SOURCES.has(String(actualSource)) ? String(actualSource) : null,
+      providerTradeDate
+    });
     sendJson(response, 200, { success: true, ...estimate });
     return true;
   }

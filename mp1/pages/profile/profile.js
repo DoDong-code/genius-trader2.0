@@ -110,17 +110,21 @@ Page({
   },
 
   refreshData() {
-    const userInfo = wx.getStorageSync('user_info') || { nickName: '未登录用户', avatarUrl: '/images/default_avatar.png' };
-    const openId = app.globalData.cloudOpenId || wx.getStorageSync('user_openid') || '';
-    const lastSync = wx.getStorageSync('cloud_last_sync') || 0;
     const auth = app.globalData.auth || {};
     const authUser = auth.user || null;
+    // P3.19：头像昵称按【当前业务账号】读取；未登录/退出 → 强制默认头像与「未登录」
+    const isLoggedIn = Boolean(authUser);
+    const userInfo = isLoggedIn
+      ? (app.getProfile() || {})
+      : { nickName: '未登录', avatarUrl: '/images/default_avatar.png' };
+    const openId = app.globalData.cloudOpenId || wx.getStorageSync('user_openid') || '';
+    const lastSync = wx.getStorageSync('cloud_last_sync') || 0;
     this.setData({
       userInfo,
       cloudOpenId: openId,
       maskedId: openId ? (openId.length > 8 ? openId.slice(-8) : openId) : '',
       useCloudDb: wx.getStorageSync('use_cloud_db') || false,
-      isLoggedIn: Boolean(authUser),
+      isLoggedIn,
       authUser,
       cloudReady: Boolean(app.globalData.cloudReady),
       lastSyncTime: lastSync ? this._formatTime(Number(lastSync)) : ''
@@ -136,22 +140,20 @@ Page({
     wx.navigateBack();
   },
 
-  // 修改头像（微信官方 chooseAvatar）
+  // 修改头像（微信官方 chooseAvatar）——P3.19：按当前业务账号保存
   onChooseAvatar(e) {
     const avatarUrl = e.detail.avatarUrl;
     if (!avatarUrl) return;
-    const userInfo = { ...this.data.userInfo, avatarUrl };
-    wx.setStorageSync('user_info', userInfo);
+    const userInfo = app.setProfile({ avatarUrl });
     this.setData({ userInfo });
     wx.showToast({ title: '头像已更新', icon: 'success' });
   },
 
-  // 修改昵称（微信官方 nickname 输入）
+  // 修改昵称（微信官方 nickname 输入）——P3.19：按当前业务账号保存
   onInputNickname(e) {
     const nickName = e.detail.value;
     if (!nickName) return;
-    const userInfo = { ...this.data.userInfo, nickName };
-    wx.setStorageSync('user_info', userInfo);
+    const userInfo = app.setProfile({ nickName });
     this.setData({ userInfo });
   },
 

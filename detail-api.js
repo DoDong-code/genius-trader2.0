@@ -1001,11 +1001,16 @@
           </div>
 
           <div class="detail-section">
-            <!-- 二次验收：数据更新状态在【校准按钮上方】右对齐，显示真实数据源（天天基金/小倍/养基宝） -->
-            <div class="detail-api-state-row"><span class="detail-api-state">正在读取真实数据…</span></div>
+            <!-- P3.18 布局：两行——第1行「历史净值」左 +「✓ 数据源」右；第2行「近1年走势」左 +「校准」右；左左对齐、右右对齐 -->
             <div class="detail-section-head">
-              <div><p class="eyebrow">历史净值</p><h3 class="detail-history-title">近1年走势</h3></div>
-              <button type="button" class="detail-calibrate-btn" data-calibrate>校准</button>
+              <div class="detail-head-row">
+                <p class="eyebrow">历史净值</p>
+                <span class="detail-api-state">正在读取真实数据…</span>
+              </div>
+              <div class="detail-head-row">
+                <h3 class="detail-history-title">近1年走势</h3>
+                <button type="button" class="detail-calibrate-btn" data-calibrate>校准</button>
+              </div>
             </div>
             <!-- P2：校准结果（与小程序共用同一套校准数据/算法；样本数、权重、准确率等关键数据） -->
             <div class="detail-calibration-result" hidden>

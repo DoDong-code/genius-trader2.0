@@ -440,6 +440,8 @@ Page({
               f.todayEstimate = Number.isFinite(Number(est.estimate_profit)) ? Number(est.estimate_profit) : amount * change;
               f.estimateSource = source;
               f.estimateUpdatedAt = new Date().toISOString();
+              // P3.18-ESTIMATE-STATE：记录后端统一数据状态（徽章展示用）
+              f.dataStatus = est.data_status || null;
               updated += 1;
             }
           })
@@ -580,7 +582,7 @@ Page({
       const hasEstimateData = Boolean(navDate)
         || Number.isFinite(Number(f.today))
         || Number.isFinite(Number(f.todayEstimate));
-      const badge = computeDataBadge(f, navDate, source, new Date(), cached ? cached.officialChange : null, hasEstimateData);
+      const badge = computeDataBadge(f, navDate, source, new Date(), cached ? cached.officialChange : null, hasEstimateData, f.dataStatus);
 
       // 与蓝色「已更新」徽章同源：最新 NAV 已是今天（QDII 为前一交易日）的正式净值时，
       // 今日收益/收益率改用官方当日涨跌幅，避免「蓝日期 + 收益按旧 NAV 算」错位。

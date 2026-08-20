@@ -77,23 +77,39 @@ export function providerDisplayName(source) {
 }
 
 /**
- * 计算数据徽章（五态状态机，二次验收对齐：灰=未确认估值，蓝=已确认净值，数据源不决定颜色）
+ * 计算数据徽章（P3.18-ESTIMATE-STATE：优先使用后端统一 data_status；缺失时降级本地判定）
  * @param {object} fund       - 持仓基金（必含 code、name）
  * @param {string|null} navDate - 后端返回的 latest_nav.date（yyyy-mm-dd）
  * @param {string|null} estimateSource - estimate 接口返回的 source（xiaobeiyangji/yangjibao/yjb/xbyj）
  * @param {Date} [now]        - 用于测试的时间
  * @param {number|null} officialChange - 官方涨跌幅（由 history 计算，对齐 Web 需 finite）
- * @param {boolean} [hasEstimateData] - 是否存在有效估值/数据源数据（有 navDate 或 有限 today/todayEstimate）
- * @returns {{text:string, tone:'blue'|'gray', kind:'updated'|'estimate', source?:string}}
+ * @param {boolean} [hasEstimateData] - 是否存在有效估值/数据源数据
+ * @param {string} [dataStatus] - 后端统一数据状态：CONFIRMED_NAV/PROVIDER_TODAY/PROVIDER_STALE/NO_DATA
+ * @returns {{text:string, tone:'blue'|'gray', kind:string, source?:string}}
  *
- * 判定（二次验收 P0）：
- *   状态A/B/D 净值已确认（navDate===预期日期[QDII?前一交易日:今日] 且有官方涨跌幅，或 非交易日有 navDate）
- *            → 蓝「MMDD」（实际净值日期，非当前日期）
- *   状态C 非交易日（isTradingDay=false）有 navDate → 蓝「MMDD」（最近交易日实际净值日期）
- *   状态E 无净值且无估值 → 灰「估值」（唯一兜底）
- *   状态A 其余（交易日净值未更新，含盘中/盘后）→ 灰「估值 / 小倍 / 养基宝」（有估值数据时按数据源名，灰色）
+ * data_status 展示规则（后端唯一权威）：
+ *   CONFIRMED_NAV  → 蓝「MMDD」（fund_nav 已确认净值日期）
+ *   PROVIDER_TODAY → 蓝「小倍/养基宝」（provider 当日数据）
+ *   PROVIDER_STALE → 灰「小倍/养基宝」（provider 旧数据）
+ *   NO_DATA        → 灰「估值」
+ * 缺失 data_status（旧后端/降级）→ 回退本地五态判定
  */
-export function computeDataBadge(fund, navDate, estimateSource, now = new Date(), officialChange = null, hasEstimateData = false) {
+export function computeDataBadge(fund, navDate, estimateSource, now = new Date(), officialChange = null, hasEstimateData = false, dataStatus = null) {
+  const providerLabel = providerDisplayName(estimateSource);
+
+  if (dataStatus === 'CONFIRMED_NAV' && navDate) {
+    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
+  }
+  if (dataStatus === 'PROVIDER_TODAY') {
+    return { text: providerLabel || '小倍', tone: 'blue', kind: 'provider-today', source: estimateSource || null };
+  }
+  if (dataStatus === 'PROVIDER_STALE') {
+    return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
+  }
+  if (dataStatus === 'NO_DATA') {
+    return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
+  }
+
   const today = shanghaiDate(now);
   const trading = isTradingDay(now);
   const expected = isQdiiFund(fund) ? getPreviousTradingDay(today) : today;
@@ -110,7 +126,7 @@ export function computeDataBadge(fund, navDate, estimateSource, now = new Date()
   }
   // 交易中净值未确认：有估值/数据源数据 → 灰色（数据源名 或「估值」）；数据源不决定颜色
   if (hasEstimateData) {
-    const label = providerDisplayName(estimateSource) || '估值';
+    const label = providerLabel || '估值';
     return { text: label, tone: 'gray', kind: 'estimate', source: estimateSource || null };
   }
   // 无净值、无估值数据 → 灰色「估值」

@@ -216,6 +216,33 @@ App({
     return { syncOk: true, done: true, backupOk };
   },
 
+  // P3.19：头像昵称按【业务账号】级读写（user_info_<email|id>），退出读 guest 默认；
+  // 兼容旧全局 user_info 作为兜底。微信身份（user_openid）仍仅展示用，不参与业务身份。
+  profileKey() {
+    const auth = this.globalData.auth || {};
+    const u = auth.user || null;
+    return u ? 'user_info_' + String(u.email || u.id || 'guest') : 'user_info_guest';
+  },
+  getProfile() {
+    try {
+      const perAccount = wx.getStorageSync(this.profileKey());
+      if (perAccount && typeof perAccount === 'object' && Object.keys(perAccount).length) return perAccount;
+      const legacy = wx.getStorageSync('user_info');
+      return legacy && typeof legacy === 'object' ? legacy : {};
+    } catch (e) {
+      return {};
+    }
+  },
+  setProfile(patch) {
+    const cur = this.getProfile();
+    const next = Object.assign({}, cur, patch || {});
+    try {
+      wx.setStorageSync(this.profileKey(), next);
+      wx.setStorageSync('user_info', next); // 兼容旧读取
+    } catch (e) { /* ignore */ }
+    return next;
+  },
+
   // 清理当前用户相关本地数据，恢复「未登录默认状态」。
   // 保留公共配置：api_base_url / ai 配置 / experimentalMode / estimate_source / columnOrder / user_info 等（与用户无关的数据不删）。
   _clearLocalUserData() {

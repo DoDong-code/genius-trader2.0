@@ -148,18 +148,17 @@ Page({
     const aiModelName = wx.getStorageSync('ai_model_name') || 'gpt-5-mini';
     const aiEngine = wx.getStorageSync('ai_engine') || '';
 
-    // Retrieve user profiles
+    // Retrieve user profiles（P3.19：头像昵称按【当前业务账号】读取；未登录强制默认）
     const openid = wx.getStorageSync('user_openid') || 'mock_openid_guest';
-    const userInfo = wx.getStorageSync('user_info') || {
-      nickName: '未登录用户 (Guest)',
-      avatarUrl: '/images/default_avatar.png'
-    };
-    // 真实微信身份（云端自动写入的 _openid）优先用于展示
-    const cloudOpenId = app.globalData.cloudOpenId || '';
-    const displayOpenId = cloudOpenId || (openid !== 'mock_openid_guest' ? openid : '');
     // 已登录 = 正式用户（邮箱登录）；游客 = user_id=0
     const authUser = (app.globalData.auth && app.globalData.auth.user) || null;
     const isLoggedIn = Boolean(authUser);
+    const userInfo = isLoggedIn
+      ? (app.getProfile() || {})
+      : { nickName: '未登录', avatarUrl: '/images/default_avatar.png' };
+    // 真实微信身份（云端自动写入的 _openid）优先用于展示
+    const cloudOpenId = app.globalData.cloudOpenId || '';
+    const displayOpenId = cloudOpenId || (openid !== 'mock_openid_guest' ? openid : '');
     const maskedId = displayOpenId ? (displayOpenId.slice(0, 6) + '****' + displayOpenId.slice(-4)) : '';
 
     this.setData({
@@ -206,12 +205,12 @@ Page({
         desc: '用于完善用户资料',
         success: (res) => {
           const userInfo = (res && res.userInfo) || fallbackUser;
-          wx.setStorageSync('user_info', userInfo);
+          app.setProfile(userInfo);
           this.setData({ userInfo });
           finish();
         },
         fail: () => {
-          wx.setStorageSync('user_info', fallbackUser);
+          app.setProfile(fallbackUser);
           finish();
         }
       });
@@ -219,17 +218,17 @@ Page({
       wx.getUserInfo({
         success: (res) => {
           const userInfo = (res && res.userInfo) || fallbackUser;
-          wx.setStorageSync('user_info', userInfo);
+          app.setProfile(userInfo);
           this.setData({ userInfo });
           finish();
         },
         fail: () => {
-          wx.setStorageSync('user_info', fallbackUser);
+          app.setProfile(fallbackUser);
           finish();
         }
       });
     } else {
-      wx.setStorageSync('user_info', fallbackUser);
+      app.setProfile(fallbackUser);
       finish();
     }
   },
@@ -256,12 +255,12 @@ Page({
     setTimeout(() => {
       wx.hideLoading();
       const mockOpenId = 'openid_mp_' + Math.random().toString(36).substring(2, 10);
-      const mockUser = wx.getStorageSync('user_info') || {
+      const mockUser = app.getProfile() || {
         nickName: '微信用户',
         avatarUrl: '/images/default_avatar.png'
       };
       wx.setStorageSync('user_openid', mockOpenId);
-      wx.setStorageSync('user_info', mockUser);
+      app.setProfile(mockUser);
       if (cloudUnavailable) {
         wx.showModal({
           title: '云端未启用',

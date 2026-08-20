@@ -262,6 +262,28 @@
     if (badge) badge.remove();
   }
 
+  // P3.18-ESTIMATE-STATE：PROVIDER_TODAY 蓝色数据源徽章（provider 当日数据=可信，蓝色）
+  // 与 CONFIRMED_NAV 的 .nav-updated-badge 同色系，文字为数据源名（小倍/养基宝）
+  function markProviderTodayBadge(row, fund, label) {
+    var meta = row.querySelector('.fund-info small');
+    if (!meta) return;
+    setFundMeta(row, fund || currentFund(row.dataset.code));
+
+    var estBadge = meta.querySelector('.nav-estimate-badge');
+    if (estBadge) estBadge.remove();
+
+    var badge = meta.querySelector('.nav-updated-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-updated-badge';
+    }
+    badge.innerHTML = '<span class="desktop-tag-text">' + label + '</span><span class="mobile-tag-text">' + label + '</span>';
+    badge.title = label + ' 已更新今日数据（当日估值）';
+    if (meta.firstChild !== badge) {
+      meta.insertBefore(badge, meta.firstChild);
+    }
+  }
+
   function shanghaiDate() {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
@@ -387,7 +409,12 @@
           fund.todayEstimate = profit;
           fund.estimateConfidence = estimate.confidence || null;
           clearNavUpdated(row);
-          markEstimateBadge(row, fund, pLabel || '估值');
+          // P3.18-ESTIMATE-STATE：provider 当日 → 蓝；旧 → 灰
+          if ((estimate && estimate.data_status) === 'PROVIDER_TODAY') {
+            markProviderTodayBadge(row, fund, pLabel || '小倍');
+          } else {
+            markEstimateBadge(row, fund, pLabel || '估值');
+          }
           updateTodayCell(row, change, profit);
           row.dataset.estimateState = 'ready';
           markEstimatesRefreshed();
@@ -506,10 +533,18 @@
         fund.estimateConfidence = estimate.confidence || null;
         updateTodayCell(row, change, profit);
 
-        // 数据标识徽章统一决策（二次验收 P0：灰=未确认估值，蓝=已确认净值，数据源不决定颜色）
-        // 非“已更新”场景：有估值数据 → 灰色徽章（数据源名/估值）；无数据 → 灰色“估值”
+        // 数据标识徽章统一决策（P3.18-ESTIMATE-STATE：后端 data_status 权威；缺失时降级旧逻辑）
+        // CONFIRMED_NAV → 蓝 MMDD（已在上方 officialUpdated 分支处理）
+        // PROVIDER_TODAY → 蓝「小倍/养基宝」；PROVIDER_STALE → 灰「小倍/养基宝」；NO_DATA → 灰「估值」
         if (!officialUpdated && !(!isTrading && navDate)) {
-          if (Number.isFinite(change)) {
+          const dataStatus = estimate && estimate.data_status;
+          if (dataStatus === 'PROVIDER_TODAY') {
+            markProviderTodayBadge(row, fund, providerLabel || '小倍');
+          } else if (dataStatus === 'PROVIDER_STALE') {
+            markEstimateBadge(row, fund, providerLabel || '小倍');
+          } else if (dataStatus === 'NO_DATA') {
+            markEstimateBadge(row, fund, '估值');
+          } else if (Number.isFinite(change)) {
             markEstimateBadge(row, fund, providerLabel || '估值');
           } else {
             markEstimateBadge(row, fund, '估值');
@@ -536,7 +571,12 @@
                   : (Number(fund.amount) || 0) * pChange;
                 updateTodayCell(row, fund.today, fund.todayEstimate);
                 clearNavUpdated(row);
-                markEstimateBadge(row, fund, pLabel || '估值');
+                // P3.18-ESTIMATE-STATE：provider 当日 → 蓝；旧 → 灰
+                if ((pv && pv.data_status) === 'PROVIDER_TODAY') {
+                  markProviderTodayBadge(row, fund, pLabel || '小倍');
+                } else {
+                  markEstimateBadge(row, fund, pLabel || '估值');
+                }
                 if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
               }).catch(function () {});
           }, 2500);

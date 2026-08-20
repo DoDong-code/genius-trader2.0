@@ -10,7 +10,10 @@
     return { version: 1, exportedAt: new Date().toISOString(), accounts: state.accounts, active: state.getActive() };
   }
   function closeMenu() { document.querySelector('.data-menu')?.remove(); }
-  // P2：导出范围（全部数据 / 投资策略），与小程序一致；「导出数据」上方先选范围
+  // P3.18：导出范围（全部/策略）改为「导出数据」按钮上方的两个可切换小 tab（记忆上次选择，去掉范围弹窗）
+  var exportKind = null;
+  try { exportKind = localStorage.getItem('data_export_kind') || 'all'; } catch (err) { exportKind = 'all'; }
+  if (exportKind !== 'all' && exportKind !== 'strategy') exportKind = 'all';
   function exportSnapshot(kind) {
     var payload;
     if (kind === 'strategy') {
@@ -34,12 +37,8 @@
     window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 0);
   }
   function downloadData() {
-    var overlay = dialog('导出数据', '请选择导出范围：', '<button type="button" class="secondary-button" data-export-all>全部数据</button><button type="button" class="secondary-button" data-export-strategy>投资策略</button>');
-    overlay.addEventListener('click', function (event) {
-      if (event.target === overlay) closeDialog(overlay);
-      if (event.target.closest('[data-export-all]')) { closeDialog(overlay); exportSnapshot('all'); }
-      if (event.target.closest('[data-export-strategy]')) { closeDialog(overlay); exportSnapshot('strategy'); }
-    });
+    // P3.18：不再弹范围选择弹窗，直接用上方 tab 选中的范围导出
+    exportSnapshot(exportKind === 'strategy' ? 'strategy' : 'all');
   }
   function validData(data) {
     if (!data || typeof data !== 'object' || !data.accounts || typeof data.accounts !== 'object') return null;
@@ -254,7 +253,10 @@
     var authLabel = isLoggedIn ? escapeHtml(window.auth.state.user.email) : '登录 / 注册';
     var logoutHtml = isLoggedIn ? '<button type="button" data-data-menu="logout"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(2px);" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="15 6 21 12 15 18"/></svg></span>退出登录</button>' : '';
     // P2：右上角三点移除「备份管理」，备份功能移入账号弹窗（openBackupManager 由 auth.js 复用）
-    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + logoutHtml;
+    // P3.18：导出范围做成「全部/策略」两个可切换小 tab，置于「导出数据」按钮上方；选中态高亮，点击即切换
+    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span>'
+      + '<div class="data-export-tabs"><button type="button" data-export-tab="all" class="' + (exportKind === 'all' ? 'active' : '') + '">全部</button><button type="button" data-export-tab="strategy" class="' + (exportKind === 'strategy' ? 'active' : '') + '">策略</button></div>'
+      + '<button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + logoutHtml;
     document.body.appendChild(menu);
     var rect = moreButton.getBoundingClientRect();
     menu.style.top = (rect.bottom + 10) + 'px'; menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
@@ -266,6 +268,18 @@
   }
   moreButton?.addEventListener('click', function (event) { event.stopPropagation(); document.querySelector('.data-menu') ? closeMenu() : openMenu(); });
   document.addEventListener('click', function (event) {
+    var exportTab = event.target.closest('[data-export-tab]');
+    if (exportTab) {
+      // P3.18：切换导出范围 tab（不关闭菜单，选中态立即更新）
+      exportKind = exportTab.dataset.exportTab === 'strategy' ? 'strategy' : 'all';
+      try { localStorage.setItem('data_export_kind', exportKind); } catch (err) { /* ignore */ }
+      var menuEl = document.querySelector('.data-menu');
+      if (menuEl) menuEl.querySelectorAll('[data-export-tab]').forEach(function (btn) {
+        btn.classList.toggle('active', btn.dataset.exportTab === exportKind);
+      });
+      event.stopPropagation();
+      return;
+    }
     var action = event.target.closest('[data-data-menu]');
     if (action) {
       var type = action.dataset.dataMenu; closeMenu();
