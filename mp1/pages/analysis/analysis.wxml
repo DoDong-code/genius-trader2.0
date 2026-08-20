@@ -1,0 +1,241 @@
+<!-- pages/analysis/analysis.wxml -->
+<view class="container" style="height: 100vh; overflow: hidden; padding-top: {{statusBarHeight + navBarHeight}}px; padding-bottom: calc(108rpx + env(safe-area-inset-bottom));">
+  
+  <!-- Custom Apple-style Sticky Topbar Navigation -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px; height: {{statusBarHeight + navBarHeight}}px;">
+    <view class="topbar-content" style="height: {{navBarHeight}}px;">
+      <view class="brand">Genius trader</view>
+    </view>
+  </view>
+
+  <!-- 接管页面滚动（隐藏 iOS 原生页面右侧滚动条） -->
+  <scroll-view scroll-y show-scrollbar="{{false}}" enhanced class="page-scroll">
+  
+  <!-- 1. 天才 Suggestion and Rebalance Q&A Panel -->
+  <view class="qa-card">
+
+    <!-- Standalone input -->
+    <textarea class="qa-textarea"
+              value="{{userQuery}}"
+              bindinput="onInputUserQuery"
+              placeholder="向天才提问，或直接输入调仓指令（如：易方达加仓2000元，或 输入“复盘”进行今日复盘）..."
+              maxlength="500">
+    </textarea>
+
+    <!-- Action buttons OUTSIDE the input box -->
+    <view class="qa-actions-row">
+      <button class="btn btn-trade" bindtap="onApplyTrade" disabled="{{isLoading}}">调仓</button>
+      <button class="btn btn-ask" bindtap="onAskAi" disabled="{{isLoading}}">提问</button>
+      <button class="btn btn-primary btn-diagnose" bindtap="onRunAiAnalysis" disabled="{{isLoading}}">
+        {{isLoading ? '计算中...' : '诊断'}}
+      </button>
+    </view>
+
+    <!-- Query restore/clear option -->
+    <view class="ai-query-restore-row" wx:if="{{lastUserQuery}}">
+      <text class="restore-text">当前提问：{{lastUserQuery}}</text>
+      <text class="btn-restore-link" bindtap="onClearAiQuestion">恢复默认诊断</text>
+    </view>
+
+    <!-- Loading prompt -->
+    <view class="ai-loading-box" wx:if="{{isLoading}}">
+      <view class="spinner"></view>
+      <text class="loading-msg">{{loadingText}}</text>
+    </view>
+
+    <!-- AI Q&A Answer View (No Splitter Line - Unified) -->
+    <view class="ai-answer-container" wx:if="{{aiAnswer && !isLoading}}">
+      <view class="ai-badge-row">
+        <text class="ai-badge">天才解答</text>
+        <text class="ai-time-label" wx:if="{{aiModelName}}">模型: {{aiModelName}}</text>
+      </view>
+      <scroll-view scroll-y show-scrollbar="{{false}}" class="ai-answer-scroll">
+        <text class="ai-answer-text">{{aiAnswer}}</text>
+      </scroll-view>
+    </view>
+
+    <!-- AI Diagnostic Summary (No Splitter Line - Unified) -->
+    <view class="ai-summary-container" wx:if="{{aiSummary && !aiAnswer && !isLoading}}">
+      <view class="ai-badge-row">
+        <text class="ai-badge bg-green">今日操作建议的总结</text>
+      </view>
+      <scroll-view scroll-y show-scrollbar="{{false}}" class="ai-answer-scroll">
+        <text class="ai-answer-text">{{aiSummary}}</text>
+      </scroll-view>
+    </view>
+  </view>
+
+  <!-- 2. Portfolio Health and Risk Index Section -->
+  <view class="section" wx:if="{{report}}">
+    <view class="section-head">
+      <text class="block-title">组合配比健康度与风险</text>
+    </view>
+
+    <view class="metrics-grid">
+      <!-- Health Score -->
+      <view class="metric-tile">
+        <text class="metric-label">组合配比健康度</text>
+        <text class="metric-value" style="color: {{report.healthColor}};">{{report.healthScore}}<text class="metric-unit">分</text></text>
+        <text class="metric-desc" style="color: {{report.healthColor}};">{{report.healthText}}</text>
+        <view class="ai-helper-texts" wx:if="{{aiAnalysisTime}}">
+          <text class="ai-helper-line">天才模型: {{aiModelName || '默认'}}</text>
+          <text class="ai-helper-line">诊断时间: {{aiAnalysisTime}}</text>
+        </view>
+      </view>
+
+      <!-- Risk Score -->
+      <view class="metric-tile">
+        <text class="metric-label">整体投资风险评分</text>
+        <text class="metric-value text-red">{{report.riskScore}}<text class="metric-unit">分</text></text>
+        <text class="metric-desc">整体风险级别: <text class="text-bold" style="color: {{report.riskScore >= 70 ? '#ff453a' : (report.riskScore >= 40 ? '#ff9500' : '#30d158')}};">{{report.riskLevel}}风险</text></text>
+      </view>
+    </view>
+
+    <!-- Suggestion Details -->
+    <view class="suggestion-inline">
+      <text class="suggestion-title">如何组合配比降低风险：</text>
+      <text class="suggestion-content">{{report.rebalanceSuggestion}}</text>
+    </view>
+
+    <!-- Deviation Overview -->
+    <view class="deviation-status-row">
+      <text class="status-dot" style="background-color: {{report.healthColor}};"></text>
+      <text class="status-text">{{report.deviationText}}</text>
+    </view>
+  </view>
+
+  <!-- 3. 持仓分析 (Previously 大类资产偏离状态) -->
+  <view class="section">
+    <view class="section-head">
+      <text class="block-title">持仓分析</text>
+    </view>
+
+    <view class="fund-advice-list" wx:if="{{report && report.rows.length > 0}}">
+      <block wx:for="{{report.rows}}" wx:key="code">
+        <view class="fund-advice-item">
+          <view class="advice-card-header">
+            <view class="fund-meta-left">
+              <text class="fund-name">{{item.name}}</text>
+              <view class="fund-code-tag-row">
+                <text class="fund-code">{{item.code}}</text>
+                <text class="category-tag">{{item.cat}}</text>
+              </view>
+            </view>
+            
+            <!-- Advice Action Tag with Dynamic Color styling -->
+            <view class="action-tag" style="background-color: {{item.adviceBg}}; color: {{item.adviceColor}};">
+              {{item.adviceText}}
+            </view>
+          </view>
+
+          <!-- Current holdings details -->
+          <view class="advice-holding-metrics">
+            <view class="holding-metric-item">
+              <text class="metric-lbl">当前持仓金额</text>
+              <text class="metric-val">{{item.amountStr}}</text>
+            </view>
+            <view class="holding-metric-item">
+              <text class="metric-lbl">组合占比</text>
+              <text class="metric-val">{{item.currentPctStr}}</text>
+            </view>
+            <view class="holding-metric-item" wx:if="{{item.todayRate !== undefined}}">
+              <text class="metric-lbl">日变动估算</text>
+              <text class="metric-val {{item.isTodayPositive ? 'text-red' : 'text-green'}}">{{item.isTodayPositive ? '+' : ''}}{{item.todayRate}}%</text>
+            </view>
+          </view>
+
+          <!-- Reason bubble explanation -->
+          <view class="advice-reason-bubble">
+            <text class="reason-bubble-title">操作建议理由：</text>
+            <text class="reason-bubble-desc">{{item.adviceReason}}</text>
+          </view>
+        </view>
+      </block>
+    </view>
+
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📈</view>
+      <text class="empty-text">当前账户无持仓，没有可生成的交易建议</text>
+    </view>
+  </view>
+
+  <!-- 4. Allocation Ratios Section -->
+  <view class="section">
+    <view class="section-head">
+      <text class="block-title">资产配比分析</text>
+    </view>
+    
+    <view class="allocation-list" wx:if="{{allocations.length > 0}}">
+      <block wx:for="{{allocations}}" wx:key="category">
+        <view class="allocation-item">
+          <view class="allocation-meta">
+            <text class="alloc-cat-name">{{item.category}}</text>
+            <view class="alloc-cat-vals">
+              <text class="alloc-cat-amount">{{item.amountStr}}</text>
+              <text class="alloc-cat-pct">{{item.pctStr}}</text>
+            </view>
+          </view>
+          
+          <!-- Visual Progress Bar Meter -->
+          <view class="progress-bar-bg">
+            <view class="progress-bar-fill" 
+                  style="width: {{item.pct}}%; background-color: {{item.color}};">
+            </view>
+          </view>
+        </view>
+      </block>
+    </view>
+    
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📊</view>
+      <text class="empty-text">当前账户无持仓，无法生成配置比例</text>
+    </view>
+  </view>
+
+  <!-- 5. Strategic Manifesto Bullets -->
+  <view class="section">
+    <view class="section-head">
+      <text class="block-title">投资操作策略</text>
+    </view>
+    
+    <view class="strategy-list" wx:if="{{strategy.length > 0}}">
+      <block wx:for="{{strategy}}" wx:key="*this">
+        <view class="strategy-bullet">
+          <view class="bullet-dot"></view>
+          <text class="bullet-text">{{item}}</text>
+        </view>
+      </block>
+    </view>
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">💡</view>
+      <text class="empty-text">未设立投资策略方针。可在设置中增加策略细则</text>
+    </view>
+  </view>
+
+  <!-- 6. Retired Transactions Timeline -->
+  <view class="section" wx:if="{{closedPositions.length > 0}}">
+    <view class="section-head">
+      <text class="block-title">已清仓退出记录</text>
+    </view>
+    
+    <view class="retired-list">
+      <block wx:for="{{closedPositions}}" wx:key="code">
+        <view class="retired-item">
+          <view class="retired-header">
+            <view class="retired-title-row">
+              <text class="retired-fund-name">{{item.name}}</text>
+              <text class="retired-fund-code">{{item.code}}</text>
+            </view>
+            <text class="retired-date">清仓时间: {{item.closedBefore || '近期'}}</text>
+          </view>
+          
+          <view class="retired-meta">
+            <text class="retired-amount" wx:if="{{item.amountStr}}">清仓金额: {{item.amountStr}}</text>
+            <text class="retired-reason-text">清仓理由: {{item.reasonStr}}</text>
+          </view>
+        </view>
+      </block>
+    </view>
+  </view>
+  </scroll-view>
+</view>

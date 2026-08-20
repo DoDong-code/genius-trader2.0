@@ -1,0 +1,21 @@
+<!-- custom-tab-bar/index.wxml -->
+<view class="tab-bar">
+  <view
+    class="tab-bar-item {{selected === index ? 'active' : ''}} {{item.hidden ? 'is-hidden' : ''}}"
+    wx:for="{{list}}"
+    wx:key="pagePath"
+    data-path="{{item.pagePath}}"
+    data-index="{{index}}"
+    bindtap="switchTab"
+    bindtouchstart="onTabTouchStart"
+    bindtouchend="onTabTouchEnd"
+    bindtouchcancel="onTabTouchEnd">
+    <view class="tab-icon-wrap">
+      <image class="tab-icon tab-icon-normal" src="/images/tabs/{{item.icon}}.svg" mode="aspectFit"></image>
+      <image class="tab-icon tab-icon-active" src="/images/tabs/{{item.icon}}_active.svg" mode="aspectFit"></image>
+    </view>
+    <view
+      class="tab-text"
+      style="color: {{selected === index ? selectedColor : color}}">{{item.text}}</view>
+  </view>
+</view>

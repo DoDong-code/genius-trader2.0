@@ -1,0 +1,530 @@
+/* pages/setting/setting.wxss */
+/* 对齐微信官方 WeUI 设计系统（weui-wxss v2.6 浅色主题）：
+   灰底分组 #ededed / 白卡 #fff / 主文字 rgba(0,0,0,.9) / 次文字 .55 /
+   分割线 rgba(0,0,0,.1) / 品牌绿 #07c160 / 链接 #576b95 / 警示红 #fa5151
+   所有类名与原 wxml 完全一致，仅视觉对齐，不改任何功能与事件。 */
+
+/* 微信原生 button 自带 ::after 边框，统一清除 */
+button::after {
+  border: none;
+}
+
+.wx-settings {
+  min-height: 100vh;
+  background: var(--weui-BG-0, #f5f5f7);
+  box-sizing: border-box;
+}
+
+/* 顶部安全占位：纯白、无标题、与账号栏融为一体 */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #ffffff;
+  z-index: 100;
+  border-bottom: none;
+  /* 纯装饰占位，禁止拦截下方内容的点击（避免顶部菜单/登录按钮无法点击） */
+  pointer-events: none;
+}
+.topbar-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 个人信息大卡（微信「我」页风格） */
+.wx-profile {
+  display: flex;
+  align-items: center;
+  background: #ffffff;
+  padding: 36rpx 32rpx;
+}
+.wx-profile-avatar {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 16rpx;
+  background: #e8e8ed;
+  flex: none;
+}
+.wx-profile-info {
+  flex: 1;
+  margin-left: 24rpx;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+.wx-profile-name {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.4;
+}
+.wx-profile-sub {
+  font-size: 22rpx;
+  color: #6e6e73;
+  margin-top: 8rpx;
+  line-height: 1.4;
+}
+.wx-profile-right {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+.wx-login-mini {
+  margin: 0 !important;
+}
+
+/* 顶部提示（WeUI cells__tips 风格） */
+.wx-hint {
+  font-size: 24rpx;
+  color: #6e6e73;
+  line-height: 1.5;
+  padding: 20rpx 32rpx;
+  background: transparent;
+}
+
+/* 分组白卡（WeUI cells：白底 + 上下发丝边 + 溢出隐藏圆角） */
+.wx-group {
+  background: #ffffff;
+  margin-top: 0;
+  overflow: hidden;
+}
+/* 6 个菜单分组间距为 0，用发丝线分隔相邻分组 */
+.wx-group + .wx-group {
+  border-top: 1rpx solid var(--weui-FG-3, rgba(0, 0, 0, 0.1));
+}
+/* 账号栏/提示下方首个分组保留间距，与微信「我」页分组间距一致 */
+.wx-profile + .wx-group,
+.wx-hint + .wx-group {
+  margin-top: 32rpx;
+}
+
+/* 分组折叠头：彩色图标 + 标题 + 右箭头（WeUI cell 风格） */
+.wx-row-head {
+  display: flex;
+  align-items: center;
+  padding: 32rpx;
+  background: #ffffff;
+}
+.wx-row-head:active {
+  background: #ececec;
+}
+.wx-icon {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 14rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-right: 24rpx;
+}
+.wx-icon-img {
+  width: 32rpx;
+  height: 32rpx;
+  display: block;
+}
+.ic-blue { background: rgba(25, 137, 250, 0.12); }
+.ic-blue2 { background: rgba(25, 137, 250, 0.12); }
+.ic-purple { background: rgba(95, 61, 196, 0.14); }
+.ic-orange { background: rgba(255, 149, 0, 0.14); }
+.ic-green { background: rgba(7, 193, 96, 0.14); }
+.ic-red { background: rgba(250, 81, 81, 0.12); }
+
+.wx-row-title {
+  flex: 1;
+  font-size: 32rpx;
+  font-weight: 500;
+  color: #1a1a1a;
+}
+/* WeUI 访问箭头：次文字灰，右指；折叠(rot)时向下 */
+.wx-chevron {
+  font-size: 32rpx;
+  color: #b2b2b2;
+  margin-left: 12rpx;
+  transition: transform 0.2s ease;
+  flex: none;
+}
+.wx-rot {
+  transform: rotate(90deg);
+}
+
+/* 折叠内容（WeUI cell 内部 padding 32rpx） */
+.wx-body {
+  padding: 4rpx 32rpx 32rpx;
+  box-sizing: border-box;
+}
+.wx-sub {
+  display: block;
+  font-size: 24rpx;
+  color: #6e6e73;
+  line-height: 1.5;
+  margin: 8rpx 0 24rpx;
+}
+
+/* 表单字段（WeUI form 风格：浅灰圆角输入框） */
+.wx-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24rpx;
+}
+.wx-label {
+  font-size: 28rpx;
+  color: #1a1a1a;
+  font-weight: 500;
+  margin-bottom: 12rpx;
+}
+.wx-input {
+  background: #f7f7f7;
+  border-radius: 12rpx;
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  color: #1a1a1a;
+  box-sizing: border-box;
+  min-height: 80rpx;
+  line-height: 1.4;
+}
+.wx-picker {
+  background: #f7f7f7;
+  border-radius: 12rpx;
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  color: #1a1a1a;
+  min-height: 80rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+}
+
+/* 浅灰子卡（接口列表 / 已接入清单） */
+.wx-subcard {
+  background: #f7f7f7;
+  border-radius: 12rpx;
+  padding: 24rpx;
+  margin-top: 24rpx;
+}
+.wx-subcard-title {
+  display: block;
+  font-size: 24rpx;
+  color: #6e6e73;
+  margin-bottom: 32rpx;
+}
+.wx-code-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10rpx 0;
+}
+.wx-code {
+  font-size: 24rpx;
+  color: #1a1a1a;
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.wx-code-desc {
+  font-size: 22rpx;
+  color: #6e6e73;
+}
+.wx-code-green .wx-code-green-text {
+  color: #07c160;
+}
+
+/* 连通性测试框（WeUI 品牌绿浅调） */
+.wx-test-box {
+  background: rgba(7, 193, 96, 0.05);
+  border: 1rpx solid rgba(7, 193, 96, 0.18);
+}
+.wx-test-title {
+  display: block;
+  font-size: 24rpx;
+  font-weight: 600;
+  color: #07c160;
+  margin-bottom: 8rpx;
+}
+.wx-test-desc {
+  display: block;
+  font-size: 22rpx;
+  color: #6e6e73;
+  line-height: 1.5;
+  margin-bottom: 20rpx;
+}
+.wx-input-row {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+.wx-input-row + .wx-input-row {
+  margin-top: 20rpx;
+}
+.wx-input-row .wx-input {
+  flex: 1;
+}
+.wx-input-row .wx-input-code {
+  flex: none;
+  width: 200rpx;
+}
+.btn-test {
+  flex: none;
+  height: 60rpx !important;
+  margin: 0 !important;
+  padding: 0 28rpx !important;
+}
+.wx-test-box-green {
+  background: rgba(7, 193, 96, 0.05);
+  border-color: rgba(7, 193, 96, 0.20);
+}
+.wx-test-title-green {
+  color: #07c160;
+}
+/* 绿色测试框的按钮复用 btn-primary（已作用 WeUI 绿） */
+.wx-test-btn-green {
+}
+.wx-test-result {
+  background: #ffffff;
+  border: 1rpx solid rgba(0, 0, 0, 0.06);
+  border-radius: 12rpx;
+  padding: 32rpx 20rpx;
+  margin-top: 32rpx;
+  max-height: 280rpx;
+  box-sizing: border-box;
+}
+.wx-test-result-text {
+  font-size: 22rpx;
+  color: #1a1a1a;
+  font-family: 'SF Mono', Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+/* 保存按钮 */
+.wx-save-btn {
+  margin-top: 24rpx !important;
+}
+
+/* 策略列表（WeUI 分割线） */
+.wx-rule-list {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 24rpx;
+}
+.wx-rule-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 1rpx solid var(--weui-FG-3, rgba(0, 0, 0, 0.1));
+}
+.wx-rule-item:last-child {
+  border-bottom: none;
+}
+.wx-rule-text {
+  flex: 1;
+  font-size: 28rpx;
+  color: #1a1a1a;
+  line-height: 1.5;
+  padding-right: 24rpx;
+}
+.wx-rule-del {
+  flex: none;
+  font-size: 24rpx;
+  color: #576b95;
+}
+.wx-empty {
+  font-size: 22rpx;
+  color: #6e6e73;
+  padding: 32rpx 0 24rpx;
+  line-height: 1.5;
+}
+.wx-add-btn {
+  flex: none;
+  height: 60rpx !important;
+  margin: 0 !important;
+}
+
+/* 第三方基金同步 provider（WeUI 分割线分组，增加呼吸感） */
+.wx-provider {
+  padding: 32rpx 0;
+  border-bottom: 1rpx solid var(--weui-FG-3, rgba(0, 0, 0, 0.1));
+}
+.wx-provider:last-child {
+  border-bottom: none;
+  padding-bottom: 8rpx;
+}
+.wx-provider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+}
+.wx-provider-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+.wx-provider-status {
+  font-size: 22rpx;
+  font-weight: 600;
+}
+.wx-provider-sync {
+  display: block;
+  font-size: 22rpx;
+  color: #6e6e73;
+  margin-bottom: 24rpx;
+}
+.wx-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 12rpx;
+}
+.wx-actions > .btn {
+  flex: 1;
+}
+.wx-actions-3 {
+  flex-wrap: wrap;
+}
+.wx-block-btn {
+  width: 100%;
+}
+
+/* 云端同步开关行 */
+.wx-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 0;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  margin: 8rpx 0 20rpx;
+}
+.wx-toggle-label {
+  font-size: 28rpx;
+  color: #1d1d1f;
+  font-weight: 500;
+}
+.wx-toggle-row switch {
+  transform: scale(0.9);
+}
+.wx-code-btn {
+  flex: none !important;
+}
+.wx-login-btn {
+  flex: none !important;
+}
+
+/* 养基宝内联扫码登录二维码面板 */
+.wx-qr-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24rpx 0 8rpx;
+}
+.wx-qr-img-wrap {
+  width: 320rpx;
+  height: 320rpx;
+  border-radius: 24rpx;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.06);
+}
+.wx-qr-img {
+  width: 300rpx;
+  height: 300rpx;
+}
+.wx-qr-placeholder {
+  font-size: 22rpx;
+  color: #6e6e73;
+  text-align: center;
+  padding: 0 24rpx;
+}
+.wx-qr-tip {
+  display: block;
+  font-size: 22rpx;
+  color: #6e6e73;
+  margin: 20rpx 0 24rpx;
+  text-align: center;
+}
+.wx-qr-error {
+  display: block;
+  font-size: 22rpx;
+  color: #ff3b30;
+  margin-top: 8rpx;
+  text-align: center;
+  line-height: 1.4;
+}
+.wx-qr-actions {
+  display: flex;
+  gap: 16rpx;
+  width: 100%;
+}
+.wx-qr-actions .btn {
+  flex: 1;
+}
+.wx-hint-inline {
+  display: block;
+  font-size: 20rpx;
+  color: #6e6e73;
+  line-height: 1.5;
+  margin-top: 32rpx;
+}
+
+/* 危险区域 */
+.wx-danger .wx-row-title {
+  color: #fa5151;
+}
+.wx-danger-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60rpx;
+  border-radius: 12rpx;
+  background: #fa5151;
+  margin-top: 8rpx;
+}
+.wx-danger-action:active {
+  background: #d93636;
+}
+.wx-danger-action-text {
+  font-size: 28rpx;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+/* 退出登录整行（已登录时，WeUI 警示红整行） */
+.wx-logout {
+  margin-top: 32rpx;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32rpx 0;
+}
+.wx-logout:active {
+  background: #ececec;
+}
+.wx-logout-text {
+  font-size: 32rpx;
+  color: #fa5151;
+  font-weight: 500;
+}
+
+/* ===== 设置页按钮对齐 WeUI：圆角矩形 + 品牌绿主操作 ===== */
+.wx-settings .btn {
+  border-radius: 12rpx;
+}
+.wx-settings .btn-primary {
+  background-color: var(--weui-BRAND, #07c160) !important;
+  color: #ffffff !important;
+}
+.wx-settings .btn-secondary {
+  background-color: #e8e8ed !important;
+  color: #1a1a1a !important;
+}
+.wx-settings .btn-danger {
+  background-color: rgba(250, 81, 81, 0.1) !important;
+  color: var(--weui-RED, #fa5151) !important;
+}

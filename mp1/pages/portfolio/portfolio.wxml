@@ -1,0 +1,246 @@
+<!-- pages/portfolio/portfolio.wxml -->
+<view class="container" style="height: 100vh; overflow: hidden; padding-top: {{statusBarHeight + navBarHeight}}px; padding-bottom: calc(108rpx + env(safe-area-inset-bottom));">
+
+  <!-- Custom Apple-style Sticky Topbar Navigation -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px; height: {{statusBarHeight + navBarHeight}}px;">
+    <view class="topbar-content" style="height: {{navBarHeight}}px; display: flex; align-items: center; justify-content: space-between;">
+      <view class="brand">Genius trader</view>
+    </view>
+  </view>
+
+  <!-- 接管页面滚动（隐藏 iOS 原生页面右侧滚动条） -->
+  <scroll-view scroll-y show-scrollbar="{{false}}" enhanced class="page-scroll">
+
+  <!-- 头部：账户 tab + 时间/刷新组（tab、时间组、刷新按钮同一行，水平对齐） -->
+  <view class="index-header">
+    <view class="header-main">
+      <!-- 账户 tab（内联：与时间组同一行，仅当未超过 2/3 屏宽） -->
+      <scroll-view wx:if="{{accountTabs.length > 1 && !accountTabFullRow}}" scroll-x enable-flex="{{true}}" class="account-segmented-scroll account-segmented-inline">
+        <view class="account-segmented">
+          <block wx:for="{{accountTabs}}" wx:key="key">
+            <view class="account-segment {{selectedAccountTab === item.key ? 'active' : ''}} {{item.isChild ? 'is-child' : ''}}"
+                  data-tab="{{item.key}}"
+                  bindtap="onAccountTabSelect">{{item.label}}</view>
+          </block>
+        </view>
+      </scroll-view>
+
+      <!-- 右对齐组：时间（上）绿点+日期（下）+ 刷新，点击时间组切换数据源 -->
+      <view class="header-right">
+        <view class="time-group" bindtap="onSwitchEstimateSource">
+          <text class="status-time">{{timeStr}}</text>
+          <view class="update-group">
+            <view class="active-dot"></view>
+            <text class="status-update">数据：{{dateStr}}</text>
+          </view>
+        </view>
+        <view class="refresh-circle-btn" bindtap="onRefreshClick">
+          <text class="refresh-arrow">↻</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 账户 tab（单独一行：tab 总长超过 2/3 屏宽时） -->
+    <scroll-view wx:if="{{accountTabs.length > 1 && accountTabFullRow}}" scroll-x enable-flex="{{true}}" class="account-segmented-scroll">
+      <view class="account-segmented">
+        <block wx:for="{{accountTabs}}" wx:key="key">
+          <view class="account-segment {{selectedAccountTab === item.key ? 'active' : ''}} {{item.isChild ? 'is-child' : ''}}"
+                data-tab="{{item.key}}"
+                bindtap="onAccountTabSelect">{{item.label}}</view>
+        </block>
+      </view>
+    </scroll-view>
+  </view>
+
+  <!-- 当前账户汇总卡（纯白）：只展示 总资产/今日收益/今日收益率 -->
+  <view class="account-summary-card" wx:if="{{activeAccountName}}">
+    <view class="asc-row">
+      <view class="asc-col">
+        <text class="asc-label">总资产</text>
+        <text class="asc-value asc-total-value">{{totalAssetsStr}}</text>
+      </view>
+      <view class="asc-col asc-col-right">
+        <text class="asc-label">今日收益</text>
+        <view class="asc-profit-line">
+          <text class="asc-value {{todayProfit > 0 ? 'positive' : (todayProfit < 0 ? 'negative' : '')}}">{{todayProfitStr}}</text>
+          <text class="asc-pct {{todayProfit > 0 ? 'positive' : (todayProfit < 0 ? 'negative' : '')}}">{{todayProfitPctStr}}</text>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- Holdings Header Area -->
+  <view class="section-head" style="margin-bottom: 24rpx; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+    <view>
+      <text class="eyebrow">持仓 / {{filteredFunds.length}} 项</text>
+      <view style="font-size: 34rpx; font-weight: 750; color: #1d1d1f; margin-top: 6rpx;">持仓列表</view>
+    </view>
+    <view style="display: flex; gap: 12rpx; align-items: center;">
+      <button class="btn btn-secondary" style="font-size: 24rpx;" bindtap="onShowCustomizeModal">自定义</button>
+      <button class="btn btn-primary" style="font-size: 24rpx;" bindtap="showAddModal">
+        增加基金
+      </button>
+    </view>
+  </view>
+
+  <!-- Dynamic Multi-column Table Header (点击表头即可排序) -->
+  <view class="holding-head" style="width: 100%; display: grid; grid-template-columns: {{gridTemplateColumns}}; column-gap: 12rpx; padding: 16rpx 12rpx; border-bottom: 1px solid rgba(0,0,0,0.06); font-size: 22rpx; color: #86868b; font-weight: 500;">
+    <text style="text-align: left;">基金</text>
+    <block wx:for="{{headerColumns}}" wx:key="key">
+      <view class="holding-sort-button {{item.active ? 'active' : ''}}" style="text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 4rpx;" data-column="{{item.column}}" bindtap="onSortChange">
+        <text>{{item.label}}</text>
+        <text style="font-size: 18rpx; color: #6e6e73;" wx:if="{{item.arrow}}">{{item.arrow}}</text>
+      </view>
+    </block>
+  </view>
+
+  <!-- Holdings Vertical Grid List -->
+  <view class="fund-list" style="width: 100%; display: flex; flex-direction: column; margin-bottom: 28rpx;">
+    <block wx:if="{{filteredFunds.length > 0}}">
+      <block wx:for="{{filteredFunds}}" wx:key="code">
+        <view class="fund-row-box"
+              style="display: grid; grid-template-columns: {{gridTemplateColumns}}; column-gap: 12rpx; align-items: center; padding: 28rpx 12rpx; border-bottom: 1px solid rgba(0, 0, 0, 0.05); background: transparent; width: 100%;"
+              data-code="{{item.code}}"
+              bindtap="openDetailDrawer">
+
+          <view class="fund-info" style="display: flex; flex-direction: column; gap: 6rpx; min-width: 0; text-align: left;">
+            <view style="display:flex; align-items:center; gap:8rpx; min-width:0;">
+              <text style="font-size: 26rpx; font-weight: 650; color: #1d1d1f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 32vw;">{{item.name}}</text>
+              <text wx:if="{{item.autoInvest.enabled}}" style="display:inline-block; background:#0071e3; color:#ffffff; border-radius:6rpx; font-size:20rpx; line-height:1; padding:4rpx 8rpx; flex-shrink:0;">定</text>
+            </view>
+            <!-- 数据标识徽章放【代码左边】（对齐网页端 live-estimates.js） -->
+            <view style="display: flex; align-items: center; gap: 6rpx; min-width: 0;">
+              <text wx:if="{{item.dataBadge}}" class="data-badge {{item.dataBadge.tone === 'blue' ? 'data-badge-blue' : 'data-badge-gray'}}">{{item.dataBadge.text}}</text>
+              <text style="font-size: 20rpx; color: #86868b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;">{{item.code}} · {{item.category || '其他'}}</text>
+            </view>
+          </view>
+
+          <block wx:for="{{headerColumns}}" wx:for-item="col" wx:key="key">
+            <view wx:if="{{col.key === 'holdingProfit'}}" class="fund-est" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx;">
+              <strong style="font-size: 26rpx; font-weight: 650;" class="{{item.holdingProfit >= 0 ? 'positive' : 'negative'}}">{{item.holdingProfitStr}}</strong>
+              <text style="font-size: 20rpx;" class="{{item.holdingProfit >= 0 ? 'positive' : 'negative'}}">{{item.holdingRateStr}}</text>
+            </view>
+
+            <view wx:elif="{{col.key === 'todayProfit'}}" class="fund-today" style="display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx;">
+              <strong style="font-size: 26rpx; font-weight: 650;" class="{{item.todayProfit >= 0 ? 'positive' : 'negative'}}">{{item.todayProfitStr}}</strong>
+              <text style="font-size: 20rpx;" class="{{item.todayProfit >= 0 ? 'positive' : 'negative'}}">{{item.todayProfitPctStr}}</text>
+            </view>
+
+            <view wx:elif="{{col.key === 'amount'}}" class="fund-amount" style="display: flex; flex-direction: column; align-items: flex-end; justify-content: center; text-align: right;">
+              <strong style="font-size: 26rpx; font-weight: 650; color: #1d1d1f;">{{item.amountStr}}</strong>
+            </view>
+          </block>
+
+        </view>
+      </block>
+    </block>
+    <block wx:else>
+      <view class="empty-container" style="padding: 120rpx 0; display: flex; flex-direction: column; align-items: center;">
+        <view class="empty-icon" style="font-size: 80rpx; margin-bottom: 24rpx;">📂</view>
+        <view class="empty-text" style="font-size: 26rpx; color: #86868b;">还没有基金持仓，添加你的第一只吧</view>
+        <view class="empty-add-btn" style="margin-top: 32rpx; padding: 16rpx 48rpx; background: #0071e3; color: #ffffff; font-size: 28rpx; font-weight: 600; border-radius: 40rpx;" bindtap="showAddModal">＋ 添加基金</view>
+      </view>
+    </block>
+  </view>
+  </scroll-view>
+
+  <!-- 基金详情抽屉（全屏右侧滑入） -->
+  <view class="drawer-backdrop" wx:if="{{showDrawer}}" bindtap="closeDrawer">
+    <view class="drawer-panel {{drawerVisible ? 'visible' : ''}} {{drawerSettled ? 'settled' : ''}}" style="padding-top: {{drawerTopPad}}px;" catchtap="preventBubble"
+          bindtouchstart="onDrawerTouchStart" bindtouchend="onDrawerTouchEnd">
+      <!-- 用普通 view + overflow-y:auto 替代原生 scroll-view：
+           原生 scroll-view 会裁剪内部 position:fixed 弹窗（修改持仓白边根因），普通 view 不裁剪 -->
+      <view class="drawer-scroll">
+        <fund-detail code="{{drawerCode}}" embedded="{{true}}" visible="{{drawerVisible}}" safeTop="{{drawerTopPad}}" bind:close="closeDrawer" bind:changed="onDrawerChanged" bind:deleted="onDrawerDeleted" />
+      </view>
+    </view>
+  </view>
+
+  <!-- Add Fund Drawer Modal -->
+  <view class="modal-overlay" wx:if="{{showAddModal}}" bindtap="hideAddModal">
+    <view class="modal-content" catchtap="preventBubble">
+      <view class="modal-title">导入/添加基金持仓</view>
+
+      <view class="form-group" style="margin-bottom: 24rpx;">
+        <text class="form-label" style="display: block; font-size: 24rpx; color: #6e6e73; margin-bottom: 12rpx;">基金代码 (6位数字)</text>
+        <input class="form-input"
+               type="number"
+               maxlength="6"
+               placeholder="例如：019633"
+               placeholder-style="color:#86868b"
+               value="{{newFundCode}}"
+               bindinput="onInputFundCode"
+               focus="{{showAddModal}}" />
+        <text class="fund-lookup-status {{lookupSuccess ? 'positive' : ''}}" style="display: block; font-size: 20rpx; color: #86868b; margin-top: 8rpx;">{{lookupStatus}}</text>
+      </view>
+
+      <view class="form-group" style="margin-bottom: 24rpx;">
+        <text class="form-label" style="display: block; font-size: 24rpx; color: #6e6e73; margin-bottom: 12rpx;">基金名称</text>
+        <input class="form-input"
+               placeholder="自动联网获取，或在此手动输入"
+               placeholder-style="color:#86868b"
+               value="{{newFundName}}"
+               bindinput="onInputFundName" />
+      </view>
+
+      <view style="display: grid; grid-template-columns: 1fr 1fr; gap: 16rpx; margin-bottom: 36rpx;">
+        <view class="form-group">
+          <text class="form-label" style="display: block; font-size: 24rpx; color: #6e6e73; margin-bottom: 12rpx;">当前持有金额 (元)</text>
+          <input class="form-input"
+                 type="digit"
+                 placeholder="例如：10000"
+                 placeholder-style="color:#86868b"
+                 value="{{newFundAmount}}"
+                 bindinput="onInputFundAmount" />
+        </view>
+        <view class="form-group">
+          <text class="form-label" style="display: block; font-size: 24rpx; color: #6e6e73; margin-bottom: 12rpx;">累计持有收益 (元)</text>
+          <input class="form-input"
+                 type="digit"
+                 placeholder="盈亏，负值输入 -"
+                 placeholder-style="color:#86868b"
+                 value="{{newFundProfit}}"
+                 bindinput="onInputFundProfit" />
+        </view>
+      </view>
+
+      <view class="modal-actions-row">
+        <button class="btn btn-primary" bindtap="submitAddFund">添加</button>
+        <button class="btn btn-secondary" bindtap="hideAddModal">取消</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- Customize Header Order Modal -->
+  <view class="modal-overlay" wx:if="{{showCustomizeModal}}" bindtap="onCancelCustomize">
+    <view class="modal-content customize-modal" catchtap="preventBubble">
+      <view class="modal-title">自定义表头顺序</view>
+
+      <view class="customize-list">
+        <view class="customize-item fixed">
+          <text class="item-icon">🔒</text>
+          <text class="item-label">基金</text>
+          <text class="item-status">固定</text>
+        </view>
+
+        <view class="customize-items" catchtouchmove="onDragMove" bindtouchend="onDragEnd" style="display: flex; flex-direction: column; gap: 32rpx;">
+          <block wx:for="{{tempColumnOrder}}" wx:key="*this">
+            <view class="customize-item customize-draggable {{draggingIndex === index ? 'dragging' : ''}}"
+                  style="transform: translateY({{ draggingIndex === index ? dragOffsetY : (itemOffsets[index] || 0) }}px); transition: {{ draggingIndex === -1 ? 'transform 200ms ease' : (draggingIndex === index ? 'none' : 'transform 200ms ease') }};"
+                  data-index="{{index}}"
+                  bindlongpress="onDragStart"
+                  catchtouchend="onDragEnd">
+              <text class="item-icon">☰</text>
+              <text class="item-label">{{columnLabels[item]}}</text>
+            </view>
+          </block>
+        </view>
+      </view>
+
+      <view style="display: flex; flex-direction: column; gap: 16rpx; margin-top: 36rpx;">
+        <button class="btn btn-primary" style="width: 100%; border-radius: 999rpx; padding: 0 32rpx; font-size: 28rpx; font-weight: 500;" bindtap="onSaveCustomize">完成</button>
+      </view>
+    </view>
+  </view>
+
+</view>

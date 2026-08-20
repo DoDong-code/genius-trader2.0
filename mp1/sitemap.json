@@ -1,0 +1,7 @@
+{
+  "desc": "About page document indexing rules",
+  "rules": [{
+    "action": "allow",
+    "page": "*"
+  }]
+}

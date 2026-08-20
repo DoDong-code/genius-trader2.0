@@ -1,0 +1,28 @@
+<view class="login-page" style="padding-top: {{statusBarHeight + navBarHeight + 24}}px;">
+  <view class="login-card">
+    <text class="login-title">Genius Trader</text>
+    <text class="login-subtitle">注册新账号</text>
+
+    <view class="field">
+      <text class="field-label">邮箱</text>
+      <input class="field-input" type="text" placeholder="you@example.com" placeholder-class="field-placeholder" value="{{email}}" bindinput="onInputEmail" />
+    </view>
+
+    <view class="field">
+      <text class="field-label">密码</text>
+      <!-- 自定义掩码（type=text + JS ●）：iOS 原生 password 输入会调起安全键盘并屏蔽第三方输入法 -->
+      <input class="field-input" type="text" value="{{passwordDisplay}}" placeholder="至少 6 位" placeholder-class="field-placeholder" bindinput="onInputPassword" cursor-spacing="20" />
+    </view>
+
+    <view class="field">
+      <text class="field-label">确认密码</text>
+      <input class="field-input" type="text" value="{{confirmDisplay}}" placeholder="再次输入密码" placeholder-class="field-placeholder" bindinput="onInputConfirm" cursor-spacing="20" />
+    </view>
+
+    <view class="error" wx:if="{{error}}">{{error}}</view>
+
+    <button class="submit-btn" bindtap="onSubmit" disabled="{{loading}}">{{loading ? '注册中…' : '注册'}}</button>
+
+    <view class="switch" bindtap="goLogin">已有账号？去登录</view>
+  </view>
+</view>

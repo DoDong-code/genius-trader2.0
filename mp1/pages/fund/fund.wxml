@@ -1,0 +1,18 @@
+<!-- pages/fund/fund.wxml -->
+<view class="container" style="padding-top: {{statusBarHeight + navBarHeight}}px;">
+
+  <!-- Custom Apple-style Sticky Topbar Navigation with Back Button -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px; height: {{statusBarHeight + navBarHeight}}px;">
+    <view class="topbar-content" style="height: {{navBarHeight}}px; display: flex; align-items: center; justify-content: flex-start; padding-left: 28rpx;">
+      <view class="back-button" bindtap="onBackClick" style="font-size: 30rpx; color: #0071e3; font-weight: 500; display: flex; align-items: center; margin-right: 18rpx; padding: 10rpx 0;">
+        <text style="font-size: 40rpx; margin-right: 4rpx; font-weight: 300;">‹</text>返回
+      </view>
+      <view class="brand">Genius trader</view>
+    </view>
+  </view>
+
+  <view style="margin-top: 14rpx;">
+    <fund-detail code="{{code}}" embedded="{{false}}" />
+  </view>
+
+</view>

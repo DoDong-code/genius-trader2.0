@@ -1,0 +1,500 @@
+/* pages/portfolio/portfolio.wxss */
+
+/* 根容器改白底：消除底部灰底在白 tab 栏上方露出的灰色遮挡 */
+.container {
+  background-color: #ffffff;
+}
+
+/* User & Clock Ticking Row */
+.user-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10rpx;
+  margin-bottom: 24rpx;
+  width: 100%;
+}
+
+.user-pill {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background-color: #e8e8ed;
+  padding: 6rpx 18rpx 6rpx 8rpx;
+  border-radius: 999rpx;
+}
+
+.avatar-circle {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background-color: #1d1d1f;
+  color: #ffffff;
+  font-size: 18rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-name {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.status-clock {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.clock-time {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+  font-family: monospace;
+}
+
+.active-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background-color: #34a853;
+  box-shadow: 0 0 8rpx rgba(52, 168, 83, 0.4);
+}
+
+.clock-date {
+  font-size: 22rpx;
+  color: #86868b;
+}
+
+.refresh-circle-btn {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background-color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.02);
+  transition: transform 0.15s ease;
+}
+
+.refresh-circle-btn:active {
+  transform: scale(0.92);
+  background-color: #f5f5f7;
+}
+
+.refresh-arrow {
+  font-size: 24rpx;
+  color: #1d1d1f;
+  font-weight: bold;
+}
+
+/* 当前账户汇总卡（纯白卡片） */
+.account-summary-card {
+  width: 100%;
+  box-sizing: border-box;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 18rpx;
+  padding: 28rpx;
+  margin: 18rpx 0 28rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.03);
+}
+
+/* 两列主区：左=总资产，右=今日收益+收益率 */
+.asc-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.asc-col {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  min-width: 0;
+}
+
+.asc-col-right {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.asc-total-value {
+  font-size: 48rpx;
+  font-weight: 800;
+  letter-spacing: -0.5rpx;
+  color: #1d1d1f;
+}
+
+.asc-profit-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12rpx;
+}
+
+.asc-label {
+  font-size: 20rpx;
+  color: #86868b;
+  font-weight: 500;
+}
+
+.asc-value {
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+  font-variant-numeric: tabular-nums;
+}
+
+.asc-pct {
+  font-size: 20rpx;
+  font-weight: 600;
+  opacity: 0.85;
+}
+
+/* 接管页面滚动的 scroll-view（隐藏 iOS 原生页面滚动条） */
+.page-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---------- Modal 弹窗：覆盖自定义 tabBar ---------- */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+}
+
+.modal-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ffffff;
+  border-top-left-radius: 32rpx;
+  border-top-right-radius: 32rpx;
+  width: auto;
+  max-height: 82vh;
+  padding: 40rpx 28rpx calc(160rpx + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  box-shadow: 0 -8rpx 32rpx rgba(0, 0, 0, 0.05);
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  box-sizing: border-box;
+}
+
+.modal-title {
+  font-size: 34rpx;
+  font-weight: 750;
+  color: #1d1d1f;
+  margin-bottom: 16rpx;
+  text-align: center;
+}
+
+.form-group {
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.form-input {
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16rpx;
+  padding: 24rpx;
+  font-size: 28rpx;
+  color: #1d1d1f;
+  height: 88rpx;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ---------- 自定义表头顺序弹窗 ---------- */
+.customize-hint {
+  font-size: 26rpx;
+  color: #6e6e73;
+  margin-bottom: 16rpx;
+  display: block;
+  line-height: 1.5;
+}
+
+.customize-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.customize-item {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 20rpx;
+  padding: 36rpx 24rpx;
+  font-size: 28rpx;
+  color: #1d1d1f;
+  font-weight: 500;
+}
+
+.customize-item.fixed {
+  background: #ffffff;
+  color: #86868b;
+}
+
+.customize-item.dragging {
+  background: #ffffff;
+  border-color: var(--brand-blue);
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.08);
+  opacity: 0.95;
+}
+
+.customize-draggable .item-icon {
+  color: #86868b;
+  font-size: 28rpx;
+}
+
+.item-status {
+  margin-left: auto;
+  font-size: 22rpx;
+  color: #86868b;
+  font-weight: 500;
+}
+
+/* ---------- 基金详情抽屉（右侧滑入） ---------- */
+.drawer-backdrop {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.drawer-panel {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: var(--bg-primary);
+  transform: translateX(100%);
+  transition: transform 0.28s cubic-bezier(0.32, 0.72, 0, 1);
+  box-shadow: -8rpx 0 32rpx rgba(0, 0, 0, 0.12);
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-panel.visible {
+  transform: translateX(0);
+}
+
+/* 滑入动画完成后移除 transform，避免 transform 让 fundDetail 内 position:fixed 弹窗
+   （如"修改持仓"modal）相对 drawer 定位而非视口，导致左右漏出 backdrop 灰边 */
+.drawer-panel.settled {
+  transform: none;
+}
+
+.drawer-scroll {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  padding: 0 28rpx 48rpx;
+  box-sizing: border-box;
+  /* 普通 view 滚动容器（替代原生 scroll-view）：不裁剪内部 fixed 弹窗，且滚动条可被全局 CSS 隐藏 */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Category Tabs Hide Scrollbar */
+.category-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+/* 头部：账户 tab + 时间/刷新组（tab、时间组、刷新按钮同一行，水平对齐） */
+.index-header {
+  width: 100%;
+}
+
+.header-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-top: 14rpx;
+  margin-bottom: 18rpx;
+}
+
+.header-right {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-left: auto;
+}
+
+.time-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4rpx;
+}
+
+.status-time {
+  font-size: 24rpx;
+  color: #1d1d1f;
+  font-weight: 700;
+}
+
+.update-group {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.status-update {
+  font-size: 18rpx;
+  color: #86868b;
+}
+
+/* Account Segmented Tabs — iOS-style pill control (与首页同款) */
+.account-segmented-scroll {
+  width: 100%;
+  white-space: nowrap;
+  margin-bottom: 24rpx;
+  align-self: flex-start;
+}
+
+/* 账户 tab 内联态：与时间组同一行，最多占 2/3 屏宽（超出由 JS 判定单独成行） */
+.account-segmented-inline {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 66.66%;
+  width: auto;
+  margin-bottom: 0;
+  align-self: flex-end;
+}
+
+.account-segmented {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 8rpx;
+  overflow-x: visible;
+  white-space: nowrap;
+  scrollbar-width: none;
+  background: #e8e8ed;
+  border-radius: 999rpx;
+  padding: 8rpx;
+}
+
+.account-segmented-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.account-segment {
+  flex: 0 0 auto;
+  padding: 8rpx 28rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  line-height: 1.25;
+  height: 44rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #1d1d1f;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.account-segment.active {
+  background-color: #1d1d1f;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.18);
+}
+
+/* 子账户 tab：加前缀圆点标识，区别于根账户 */
+.account-segment.is-child::before {
+  content: '';
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background-color: currentColor;
+  opacity: 0.45;
+  margin-right: 8rpx;
+}
+
+/* 数据源切换胶囊（持仓页右上） */
+.estimate-source-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8rpx;
+  background-color: rgba(0, 0, 0, 0.04);
+  border-radius: 999rpx;
+  padding: 4rpx 14rpx;
+  font-size: 20rpx;
+  color: #6e6e73;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.estimate-source-pill.on {
+  background-color: rgba(0, 113, 227, 0.10);
+  color: #0071e3;
+}
+.estimate-source-pill:active {
+  opacity: 0.7;
+}
+.estimate-source-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background-color: #86868b;
+  flex: none;
+}
+.estimate-source-pill.on .estimate-source-dot {
+  background-color: #0071e3;
+}
+
+/* 持仓行「数据标识」徽章（灰色 = 本地估算；蓝色 = 养基宝/小倍实时） */
+.data-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 18rpx;
+  font-weight: 600;
+  padding: 2rpx 8rpx;
+  border-radius: 4rpx;
+  margin-top: 2rpx;
+  line-height: 1.2;
+}
+.data-badge-gray {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: #6e6e73;
+}
+.data-badge-blue {
+  background-color: rgba(0, 113, 227, 0.12);
+  color: #0071e3;
+}
+
+/* 持仓列表顶部计数：灰色辅助文案，降低字重 */
+.eyebrow {
+  color: #86868b;
+  font-weight: 500;
+  letter-spacing: 1rpx;
+}

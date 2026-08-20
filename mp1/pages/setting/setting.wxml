@@ -1,0 +1,224 @@
+<!-- pages/setting/setting.wxml -->
+<view class="wx-settings" style="padding-top: {{statusBarHeight + navBarHeight}}px; padding-bottom: calc(160rpx + env(safe-area-inset-bottom));">
+
+  <!-- 顶部安全占位（纯白、无标题、与下方账号栏融为一体） -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px; height: {{statusBarHeight + navBarHeight}}px;">
+    <view class="topbar-content" style="height: {{navBarHeight}}px;"></view>
+  </view>
+
+  <!-- 个人信息大卡（微信「我」页风格） -->
+  <view class="wx-profile" bindtap="{{isLoggedIn ? 'goProfile' : ''}}">
+    <image class="wx-profile-avatar" src="{{userInfo.avatarUrl}}" mode="aspectFill" />
+    <view class="wx-profile-info">
+      <text class="wx-profile-name">{{authUser ? authUser.email : userInfo.nickName}}</text>
+      <text class="wx-profile-sub">
+        <block wx:if="{{authUser}}">已登录 · 账号 #{{authUser.id}}</block>
+        <block wx:else>未登录，数据仅保存在本机</block>
+      </text>
+    </view>
+    <view class="wx-profile-right">
+      <button wx:if="{{!isLoggedIn}}" class="btn btn-primary wx-login-mini" bindtap="goLogin">登录 / 注册</button>
+      <text wx:else class="wx-chevron">›</text>
+    </view>
+  </view>
+
+  <view wx:if="{{!useCloudDb}}" class="wx-hint">登录后可同步账户数据</view>
+
+  <!-- 分组：数据源接口配置 -->
+  <view class="wx-group">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="datasource">
+      <view class="wx-icon ic-blue"><image class="wx-icon-img" src="/images/icons/datasource.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">数据源接口配置</text>
+      <text class="wx-chevron {{collapsed.datasource ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.datasource}}" class="wx-body">
+      <view class="wx-field">
+        <text class="wx-label">接口基地址 (API Base URL)</text>
+        <input class="wx-input" value="{{apiBaseUrl}}" bindinput="onInputApiBase" placeholder="留空默认走 CloudBase 公网域名；本地开发可填 http://localhost:3000" />
+      </view>
+
+      <view class="wx-subcard">
+        <text class="wx-subcard-title">系统已接入的数据源接口：</text>
+        <view class="wx-code-row"><text class="wx-code">[GET] /api/funds</text><text class="wx-code-desc">全量持仓基金同步</text></view>
+        <view class="wx-code-row"><text class="wx-code">[GET] /api/fund/{code}</text><text class="wx-code-desc">净值及单支基金详情</text></view>
+        <view class="wx-code-row"><text class="wx-code">[GET] /api/fund/import/{code}</text><text class="wx-code-desc">导入新增上市基金</text></view>
+        <view class="wx-code-row"><text class="wx-code">[GET] /api/fund/{code}/estimate</text><text class="wx-code-desc">基金实时净值测算</text></view>
+        <view class="wx-code-row"><text class="wx-code">[GET] /api/stock/{code}</text><text class="wx-code-desc">股票行情即时获取</text></view>
+      </view>
+
+      <view class="wx-subcard wx-test-box">
+        <text class="wx-test-title">接口连通性测试</text>
+        <view class="wx-input-row">
+          <input class="wx-input wx-input-code" value="{{testFundCode}}" bindinput="onInputTestFundCode" placeholder="000001" maxlength="6" />
+          <button class="btn btn-primary btn-test" bindtap="onTestApi" disabled="{{isTestingApi}}">{{isTestingApi ? '测试中...' : '一键测试'}}</button>
+        </view>
+        <scroll-view scroll-y show-scrollbar="{{false}}" wx:if="{{testApiResult}}" class="wx-test-result"><text class="wx-test-result-text">{{testApiResult}}</text></scroll-view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 分组：实验接口配置（仅实验功能开启时显示） -->
+  <view class="wx-group" wx:if="{{experimentalEnabled}}">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="experimental">
+      <view class="wx-icon ic-purple"><image class="wx-icon-img" src="/images/icons/ai.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">实验接口配置</text>
+      <text class="wx-chevron {{collapsed.experimental ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.experimental}}" class="wx-body">
+      <view class="wx-field">
+        <text class="wx-label">天才接口商 (天才 Provider)</text>
+        <picker mode="selector" range="{{aiProviders}}" value="{{aiProviderIndex}}" bindchange="onAiProviderChange">
+          <view class="wx-picker">{{aiProvider}}</view>
+        </picker>
+      </view>
+
+      <view class="wx-field">
+        <text class="wx-label">API Base URL</text>
+        <input class="wx-input" value="{{aiBaseUrl}}" bindinput="onInputAiBaseUrl" placeholder="留空默认使用官方基地址" />
+      </view>
+
+      <view class="wx-field">
+        <text class="wx-label">API Key</text>
+        <input class="wx-input" password value="{{aiApiKey}}" bindinput="onInputAiApiKey" placeholder="sk-xxxxxxxx" />
+      </view>
+
+      <view class="wx-field">
+        <text class="wx-label">Model 名称 (Model Name)</text>
+        <input class="wx-input" value="{{aiModelName}}" bindinput="onInputAiModelName" placeholder="例如: gpt-5-mini" />
+      </view>
+
+      <button class="btn btn-primary wx-save-btn" bindtap="onSaveAiConfig">保存</button>
+
+      <view class="wx-subcard">
+        <text class="wx-subcard-title">系统已接入的天才接口：</text>
+        <view class="wx-code-row wx-code-green"><text class="wx-code wx-code-green-text">[POST] /api/ai/analyze</text><text class="wx-code-desc">基金持仓智能分析</text></view>
+        <view class="wx-code-row wx-code-green"><text class="wx-code wx-code-green-text">[POST] /api/ai/chat</text><text class="wx-code-desc">通用天才对话</text></view>
+        <view class="wx-code-row wx-code-green"><text class="wx-code wx-code-green-text">[GET] /api/ai/models</text><text class="wx-code-desc">获取可用模型列表</text></view>
+      </view>
+
+      <view class="wx-subcard wx-test-box wx-test-box-green">
+        <text class="wx-test-title wx-test-title-green">天才服务连通性测试</text>
+        <view class="wx-input-row">
+          <input class="wx-input" value="{{testAiQuestion}}" bindinput="onInputTestAiQuestion" placeholder="请分析当前基金市场风险" />
+          <button class="btn btn-primary btn-test wx-test-btn-green" bindtap="onTestAi" disabled="{{isTestingAi}}">{{isTestingAi ? '测试中...' : '一键测试'}}</button>
+        </view>
+        <scroll-view scroll-y show-scrollbar="{{false}}" wx:if="{{testAiResult}}" class="wx-test-result"><text class="wx-test-result-text">{{testAiResult}}</text></scroll-view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 分组：投资策略方针 -->
+  <view class="wx-group">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="strategy">
+      <view class="wx-icon ic-orange"><image class="wx-icon-img" src="/images/icons/strategy.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">投资策略方针</text>
+      <text class="wx-chevron {{collapsed.strategy ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.strategy}}" class="wx-body">
+      <text class="wx-sub">规范投资纪律的自定义核心策略条目</text>
+
+      <view class="wx-rule-list" wx:if="{{strategy.length > 0}}">
+        <view class="wx-rule-item" wx:for="{{strategy}}" wx:key="*this">
+          <text class="wx-rule-text">{{item}}</text>
+          <text class="wx-rule-del" data-index="{{index}}" bindtap="onDeleteStrategy">删除</text>
+        </view>
+      </view>
+      <view class="wx-empty" wx:else>暂无策略方针，可在下方添加以规范投资纪律</view>
+
+      <view class="wx-input-row">
+        <input class="wx-input" placeholder="例如：定投沪深300，每次投入500元..." placeholder-style="color:#86868b" value="{{newStrategyText}}" bindinput="onInputNewStrategy" />
+        <button class="btn btn-primary wx-add-btn" bindtap="onAddStrategy">添加</button>
+      </view>
+    </view>
+  </view>
+
+  <!-- 分组：第三方基金同步 -->
+  <view class="wx-group">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="providers">
+      <view class="wx-icon ic-green"><image class="wx-icon-img" src="/images/icons/sync.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">第三方基金同步</text>
+      <text class="wx-chevron {{collapsed.providers ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.providers}}" class="wx-body">
+      <text class="wx-sub">养基宝 / 小倍养基一键导入持仓，自动同步估值</text>
+
+      <!-- 养基宝 -->
+      <view class="wx-provider">
+        <view class="wx-provider-head">
+          <text class="wx-provider-name">养基宝</text>
+          <text class="wx-provider-status" style="color: {{yjbConnected ? '#30d158' : '#86868b'}};">{{yjbConnected ? '已连接' : '未登录'}}</text>
+        </view>
+        <view wx:if="{{!yjbConnected}}">
+          <view wx:if="{{yjbQrShow}}" class="wx-qr-box">
+            <view class="wx-qr-img-wrap">
+              <image wx:if="{{yjbQrUrl}}" class="wx-qr-img" src="{{yjbQrUrl}}" mode="aspectFit" show-menu-by-longpress="{{true}}" />
+              <view wx:elif="{{yjbQrStatus === 'loading'}}" class="wx-qr-placeholder">正在获取二维码…</view>
+              <view wx:elif="{{yjbQrStatus === 'error'}}" class="wx-qr-placeholder">
+                <text>获取失败</text>
+                <text wx:if="{{yjbQrError}}" class="wx-qr-error">{{yjbQrError}}</text>
+                <text wx:else>请点击刷新</text>
+              </view>
+            </view>
+            <text class="wx-qr-tip">{{ yjbQrStatus === 'expired' ? '二维码已过期，请点击刷新' : (yjbQrStatus === 'confirmed' ? '登录成功' : '请用「养基宝」App 扫此码（不要点微信的「识别二维码」，那只会打开公众号）。或用另一台手机扫码') }}</text>
+            <view class="wx-qr-actions">
+              <button class="btn btn-primary wx-block-btn" bindtap="onYjbQrcode">刷新二维码</button>
+              <button class="btn btn-secondary wx-block-btn" bindtap="closeYjbQr">关闭</button>
+            </view>
+          </view>
+          <button wx:else class="btn btn-primary wx-block-btn" bindtap="onYjbQrcode">扫码登录</button>
+        </view>
+        <view wx:else>
+          <text class="wx-provider-sync">最后同步：{{yjbLastSync}}</text>
+          <view class="wx-actions">
+            <button class="btn btn-primary" bindtap="onYjbImport">同步持仓</button>
+            <button class="btn btn-secondary" bindtap="onYjbOverwrite">覆盖重导</button>
+            <button class="btn btn-danger" bindtap="onYjbLogout">退出登录</button>
+          </view>
+        </view>
+      </view>
+
+      <!-- 小倍养基 -->
+      <view class="wx-provider">
+        <view class="wx-provider-head">
+          <text class="wx-provider-name">小倍养基</text>
+          <text class="wx-provider-status" style="color: {{xbyjConnected ? '#30d158' : '#86868b'}};">{{xbyjConnected ? '已连接' : '未登录'}}</text>
+        </view>
+        <view wx:if="{{!xbyjConnected}}">
+          <view class="wx-input-row">
+            <input class="wx-input" type="number" placeholder="手机号" value="{{xbyjPhone}}" bindinput="onInputXbyjPhone" />
+            <button class="btn btn-secondary wx-code-btn" bindtap="onXbyjSms">验证码</button>
+          </view>
+          <view class="wx-input-row">
+            <input class="wx-input" placeholder="短信验证码" value="{{xbyjCode}}" bindinput="onInputXbyjCode" />
+            <button class="btn btn-primary wx-login-btn" bindtap="onXbyjLogin">登录</button>
+          </view>
+          <text class="wx-hint-inline">收不到验证码？请确认手机号已在「小倍养基」App 注册，并避免频繁点击发送。</text>
+        </view>
+        <view wx:else>
+          <text class="wx-provider-sync">最后同步：{{xbyjLastSync}}</text>
+          <view class="wx-actions">
+            <button class="btn btn-primary" bindtap="onXbyjImport">同步全部</button>
+            <button class="btn btn-secondary" bindtap="onXbyjOverwrite">覆盖重导</button>
+            <button class="btn btn-danger" bindtap="onXbyjLogout">退出登录</button>
+          </view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <!-- 分组：数据备份与恢复 -->
+  <view class="wx-group">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="backup">
+      <view class="wx-icon ic-blue2"><image class="wx-icon-img" src="/images/icons/backup.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">数据备份与恢复</text>
+      <text class="wx-chevron {{collapsed.backup ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.backup}}" class="wx-body">
+      <text class="wx-sub">本地/微信消息导入导出；云端备份管理请到「账号 → 备份与恢复」</text>
+      <view class="wx-actions wx-actions-2">
+        <button class="btn btn-secondary" bindtap="onCopyBackup">导出备份</button>
+        <button class="btn btn-secondary" bindtap="onImportBackup">导入备份</button>
+      </view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,120 @@
+/* login.wxss — 按设计规范（微信绿主按钮 + 圆角矩形 + 全宽） */
+.login-page {
+  position: relative;
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  box-sizing: border-box;
+  padding: 0 48rpx 48rpx;
+}
+
+/* 左上角返回按钮（custom navigation 下系统无返回键，需自建） */
+.back-btn {
+  position: absolute;
+  left: 24rpx;
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 52rpx;
+  line-height: 1;
+  font-weight: 600;
+  color: #1a1a1a;
+  z-index: 10;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-title {
+  font-size: 56rpx;
+  font-weight: 750;
+  color: var(--text-primary);
+}
+
+.login-subtitle {
+  font-size: 26rpx;
+  color: var(--text-secondary);
+  margin-top: 8rpx;
+  margin-bottom: 56rpx;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 32rpx;
+}
+
+.field-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12rpx;
+}
+
+.field-input {
+  /* iOS 真机兼容（原生 input 样式极简化）：
+     ① 文字色硬编码 #1a1a1a，禁用 -webkit-text-fill-color（iOS WKWebView 原生 input 上会致文字透明）
+     ② 取消自定义字体/letter-spacing/text-indent/transform/行高/vertical-align，统一 line-height:normal、text-align:left
+     ③ 垂直方向不用 padding（改由 height 撑高），避免 iOS 原生 input 文字定位异常 */
+  background-color: #ffffff;
+  border: 1rpx solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  height: 96rpx;
+  padding: 0 24rpx;
+  box-sizing: border-box;
+  color: #1a1a1a;
+  caret-color: #1a1a1a;
+  font-size: 32rpx;
+  font-weight: 400;
+  font-family: sans-serif;
+  line-height: normal;
+  text-align: left;
+  letter-spacing: normal;
+  opacity: 1;
+}
+
+.field-placeholder {
+  color: #8a8a8e; /* 明显可见的占位文字（iOS 系统灰，硬编码避免 CSS 变量在原生 input 上失效） */
+  font-weight: 400;
+}
+
+.error {
+  font-size: 24rpx;
+  color: var(--brand-red);
+  margin-bottom: 20rpx;
+}
+
+.submit-btn {
+  margin-top: 8rpx;
+  background-color: #07c160; /* WeUI 微信绿 */
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 500;
+  border-radius: 12rpx; /* 圆角矩形，非胶囊 */
+  width: 100%; /* 全宽，避免变成小圆 */
+  height: 96rpx;
+  line-height: 96rpx;
+  border: none;
+  text-align: center;
+  padding: 0;
+}
+
+.submit-btn[disabled] {
+  background-color: #a5dcb4; /* 微信绿 disabled 态 */
+  color: #ffffff;
+}
+
+.submit-btn::after {
+  border: none;
+}
+
+.switch {
+  margin-top: 32rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: var(--brand-blue);
+  font-weight: 500;
+}

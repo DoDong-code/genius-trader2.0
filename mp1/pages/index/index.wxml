@@ -1,0 +1,237 @@
+<!-- pages/index/index.wxml -->
+<view class="container" style="height: 100vh; overflow: hidden; padding-top: {{statusBarHeight + navBarHeight}}px; padding-bottom: calc(108rpx + env(safe-area-inset-bottom));">
+  
+  <!-- Custom Apple-style Sticky Topbar Navigation -->
+  <view class="topbar" style="padding-top: {{statusBarHeight}}px; height: {{statusBarHeight + navBarHeight}}px;">
+    <view class="topbar-content" style="height: {{navBarHeight}}px; display: flex; align-items: center; justify-content: space-between;">
+      <view class="brand">Genius trader</view>
+    </view>
+  </view>
+
+  <!-- 接管页面滚动（隐藏 iOS 原生页面右侧滚动条） -->
+  <scroll-view scroll-y show-scrollbar="{{false}}" enhanced class="page-scroll">
+
+  <!-- Intro H1 Header matching Web -->
+  <view class="intro" style="display: flex; justify-content: space-between; align-items: center; margin-top: 14rpx; margin-bottom: 24rpx; width: 100%;">
+    <view>
+      <text class="page-title" style="font-size: 44rpx; font-weight: 750; color: #1d1d1f;">天才交易员上线</text>
+    </view>
+    <view style="display: flex; align-items: center; gap: 12rpx;">
+      <!-- 右对齐组：时间（上）绿点+日期（下） -->
+      <view style="display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx;">
+        <text class="status-time" style="font-size: 24rpx; color: #1d1d1f; font-weight: 700;">{{timeStr}}</text>
+        <view style="display: flex; align-items: center; gap: 8rpx;">
+          <view class="active-dot" style="width: 10rpx; height: 10rpx; background: #30d158; border-radius: 50%;"></view>
+          <text class="status-update" style="font-size: 18rpx; color: #86868b;">{{dataUpdatedText || dateStr}}</text>
+        </view>
+      </view>
+      <!-- 刷新按钮：单独右侧，与组水平居中 -->
+      <view class="refresh-circle-btn" bindtap="onRefreshClick" style="display: inline-flex; align-items: center; justify-content: center; margin-left: 6rpx;">
+        <text class="refresh-arrow" style="font-size: 22rpx; color: #0071e3;">↻</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Account Segmented Tabs — iOS-style pill control -->
+  <scroll-view scroll-x enable-flex="{{true}}" class="account-segmented-scroll" wx:if="{{accountTabs.length > 1}}">
+    <view class="account-segmented">
+      <block wx:for="{{accountTabs}}" wx:key="key">
+        <view class="account-segment {{selectedAccountTab === item.key ? 'active' : ''}}"
+              data-tab="{{item.key}}"
+              bindtap="onAccountTabSelect">{{item.label}}</view>
+      </block>
+    </view>
+  </scroll-view>
+
+  <!-- Total Account Summary Dashboard Card (.kpis) -->
+  <view class="kpis" bindtap="navigateToPortfolio">
+    <!-- Card 1: Total Assets -->
+    <view class="kpi">
+      <text class="kpi-label">{{selectedAccountTab === 'all' ? '全部账户总资产' : '当前账户总资产'}}</text>
+      <strong class="kpi-value">{{totalAssetsStr}}</strong>
+      <text class="kpi-sub">{{summaryAccountName}}</text>
+    </view>
+    
+    <!-- Yesterday (Hidden on mobile via CSS) -->
+    <view class="kpi daily-kpi">
+      <text class="kpi-label">昨日收益</text>
+      <strong class="kpi-value">¥0.00</strong>
+      <text class="kpi-sub">0.00%</text>
+    </view>
+
+    <!-- Today's Estimated Profit -->
+    <view class="kpi">
+      <text class="kpi-label">今日估算收益</text>
+      <strong class="kpi-value {{todayProfit >= 0 ? 'positive' : 'negative'}}">{{todayProfitStr}}</strong>
+      <view class="kpi-sub {{todayProfit >= 0 ? 'positive' : 'negative'}}">
+        <text class="estimate-state updated">估算</text>
+        <text>{{todayProfitPctStr}}</text>
+      </view>
+    </view>
+
+    <!-- Holding Profit -->
+    <view class="kpi">
+      <text class="kpi-label">持有收益</text>
+      <strong class="kpi-value {{totalProfit >= 0 ? 'positive' : 'negative'}}">{{totalProfitStr}}</strong>
+      <text class="kpi-sub {{totalProfit >= 0 ? 'positive' : 'negative'}}">{{totalProfitPctStr}}</text>
+    </view>
+
+    <!-- Cumulative Profit -->
+    <view class="kpi">
+      <text class="kpi-label">累计收益</text>
+      <strong class="kpi-value {{totalProfit >= 0 ? 'positive' : 'negative'}}">{{totalProfitStr}}</strong>
+      <text class="kpi-sub {{totalProfit >= 0 ? 'positive' : 'negative'}}">{{totalProfitPctStr}}</text>
+    </view>
+  </view>
+
+  <!-- Market Indices Section（仅「全部」Tab 显示；双击折叠/展开，纯 UI 状态） -->
+  <view class="market-indices" wx:if="{{selectedAccountTab === 'all' && marketIndices.length > 0}}" bindtap="onMarketDoubleTap">
+    <view class="market-indices-grid">
+      <block wx:for="{{marketCollapsed ? marketCollapsedItems : marketIndices}}" wx:key="name">
+        <view class="market-index-item">
+          <text class="market-index-name">{{item.name}}</text>
+          <text class="market-index-price">{{item.value}}</text>
+          <text class="market-index-change {{item.profit ? 'market-up' : 'market-down'}}">{{item.change}}</text>
+        </view>
+      </block>
+    </view>
+  </view>
+
+  <!-- Today's Advice Module (only when a specific account tab is selected) -->
+  <view class="today-advice-section card" wx:if="{{selectedAccountTab !== 'all'}}">
+    <view class="today-advice-head">
+      <view class="today-advice-title-row">
+        <text class="today-advice-title">今日操作建议</text>
+      </view>
+      <view class="today-advice-head-right">
+        <view class="today-advice-meta">
+          <text class="today-advice-meta-line">每个交易日 14:40 自动更新</text>
+          <text class="today-advice-meta-line" wx:if="{{todayAdviceUpdated}}"> · 今日 {{todayAdviceUpdated}} 已更新</text>
+        </view>
+        <view class="today-advice-arrow" bindtap="goAnalysis">›</view>
+      </view>
+    </view>
+    <view wx:if="{{todayAdviceSummary}}" class="today-advice-summary">
+      <text class="today-advice-summary-label">今日操作建议的总结：</text>
+      <text class="today-advice-summary-text">{{todayAdviceSummary}}</text>
+    </view>
+    <view wx:else class="today-advice-empty">
+      <text>今日操作建议总结尚未生成，点击右上角 › 前往分析页运行 AI 诊断</text>
+    </view>
+  </view>
+
+  <!-- Accounts Management List (only when 全部 tab selected) -->
+  <block wx:if="{{selectedAccountTab === 'all'}}">
+    <view class="section-head" style="margin-top: 12rpx; margin-bottom: 24rpx; display: flex; justify-content: space-between; align-items: center; width: 100%;">
+      <view>
+        <text class="eyebrow">账户管理</text>
+        <view style="font-size: 34rpx; font-weight: 750; color: #1d1d1f; margin-top: 6rpx;">选择组合账户</view>
+      </view>
+      <view class="header-actions" style="display: flex; gap: 12rpx; align-items: center;">
+        <button class="btn btn-secondary" style="font-size: 24rpx;" bindtap="onMoveAccounts" wx:if="{{isEditing && hasSelections}}">移动</button>
+        <button class="btn btn-danger" style="font-size: 24rpx;" bindtap="deleteSelected" wx:if="{{isEditing && hasSelections}}">删除所选</button>
+        <button class="btn btn-secondary" style="font-size: 24rpx;" bindtap="toggleEdit">
+          {{isEditing ? '完成' : '编辑'}}
+        </button>
+        <button class="btn btn-primary" style="font-size: 24rpx;" bindtap="showAddModal" wx:if="{{!isEditing}}">
+          + 账户
+        </button>
+      </view>
+    </view>
+
+    <!-- Accounts Vertical List -->
+    <view class="accounts-list" style="width: 100%; display: flex; flex-direction: column; gap: 20rpx; margin-bottom: 40rpx;">
+      <block wx:for="{{accountList}}" wx:key="name">
+        <view class="account-card {{activeAccountName === item.name ? 'active-border' : ''}} {{isEditing ? 'editing-item' : ''}}" 
+              style="display: flex; align-items: center; justify-content: space-between; background: #ffffff; border: 1px solid {{activeAccountName === item.name ? '#0071e3' : 'rgba(0, 0, 0, 0.06)'}}; border-radius: 28rpx; padding: 28rpx 32rpx; box-shadow: 0 4rpx 12rpx rgba(0,0,0,0.01); width: 100%;"
+              data-name="{{item.name}}" 
+              bindtap="onAccountClick">
+          
+          <!-- Selection Checkbox inside Edit mode -->
+          <view class="checkbox-container" style="margin-right: 18rpx;" wx:if="{{isEditing}}" data-name="{{item.name}}" catchtap="onCheckboxClick">
+            <view class="custom-checkbox {{selectedAccounts[item.name] ? 'checked' : ''}}" 
+                  style="width: 36rpx; height: 36rpx; border-radius: 50%; border: 1.5px solid {{selectedAccounts[item.name] ? '#ff3b30' : 'rgba(0,0,0,0.2)'}}; background: {{selectedAccounts[item.name] ? '#ff3b30' : 'transparent'}}; display: flex; align-items: center; justify-content: center; color: #ffffff; font-size: 22rpx; font-weight: bold;">
+              <text wx:if="{{selectedAccounts[item.name]}}">✓</text>
+            </view>
+          </view>
+
+          <!-- Account Core Details -->
+          <view style="display: flex; justify-content: space-between; align-items: center; flex: 1; min-width: 0;">
+            <view style="display: flex; flex-direction: column; gap: 6rpx; min-width: 0; flex: 1;">
+              <view style="display: flex; align-items: center; gap: 12rpx;">
+                <text style="font-size: 28rpx; font-weight: 650; color: #1d1d1f; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{item.name}}</text>
+                <view style="background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 18rpx; font-weight: 700; padding: 2rpx 10rpx; border-radius: 6rpx; white-space: nowrap;" wx:if="{{item.isSync && !isEditing}}">同步</view>
+                <view style="background: rgba(0, 113, 227, 0.08); color: #0071e3; font-size: 18rpx; font-weight: 700; padding: 2rpx 10rpx; border-radius: 6rpx; white-space: nowrap;" wx:if="{{activeAccountName === item.name && !isEditing}}">当前</view>
+                <view style="background: rgba(0,0,0,0.05); color: #86868b; font-size: 18rpx; font-weight: 700; padding: 2rpx 10rpx; border-radius: 6rpx; white-space: nowrap;" wx:if="{{item.children.length}}">{{item.children.length}} 子账户</view>
+              </view>
+              <text style="font-size: 22rpx; color: #86868b;">{{item.count}} 笔基金持仓</text>
+            </view>
+            
+            <view style="display: flex; flex-direction: column; align-items: flex-end; gap: 6rpx;" wx:if="{{!isEditing}}">
+              <text style="font-size: 28rpx; font-weight: 650; color: #1d1d1f;">{{item.totalStr}}</text>
+              <text style="font-size: 22rpx; font-weight: 500;" class="{{item.todayProfit >= 0 ? 'positive' : 'negative'}}">{{item.todayProfitStr}}</text>
+            </view>
+            <view style="display: flex; align-items: center; color: #86868b; font-size: 32rpx; padding-left: 20rpx;" wx:else>
+              <text>›</text>
+            </view>
+          </view>
+
+        </view>
+
+        <!-- 编辑态下：父账户操作链接（改名 / 新建子账户 / 按板块拆分） -->
+        <view style="display: flex; gap: 28rpx; padding: 8rpx 12rpx 0 12rpx;" wx:if="{{isEditing}}">
+          <text class="link-btn" style="font-size: 22rpx; color: #0071e3; font-weight: 600;" data-name="{{item.name}}" catchtap="onRenameAccount">改名</text>
+          <text class="link-btn" style="font-size: 22rpx; color: #0071e3; font-weight: 600;" data-parent="{{item.name}}" catchtap="onAddSubAccount">＋ 新建子账户</text>
+          <text class="link-btn" style="font-size: 22rpx; color: #0071e3; font-weight: 600;" data-parent="{{item.name}}" catchtap="onSplitBySector" wx:if="{{item.count > 0}}">按板块拆分</text>
+        </view>
+
+        <!-- 子账户列表（与网页一致：嵌套在父账户下，编辑态可删除） -->
+        <block wx:for="{{item.children}}" wx:for-item="child" wx:key="name">
+          <view class="sub-account-card" 
+                style="display: flex; align-items: center; justify-content: space-between; background: #fafafa; border: 1px solid rgba(0,0,0,0.04); border-radius: 20rpx; padding: 20rpx 24rpx; margin: 12rpx 0 0 24rpx;"
+                data-name="{{child.name}}" 
+                bindtap="onAccountClick">
+            <view style="display: flex; flex-direction: column; gap: 4rpx; min-width: 0; flex: 1;">
+              <text style="font-size: 26rpx; font-weight: 600; color: #1d1d1f;">{{child.name}}</text>
+              <text style="font-size: 20rpx; color: #86868b;">{{child.count}} 笔基金持仓</text>
+            </view>
+            <view style="display: flex; align-items: center; gap: 16rpx;">
+              <view style="display: flex; flex-direction: column; align-items: flex-end; gap: 4rpx;">
+                <text style="font-size: 26rpx; font-weight: 600; color: #1d1d1f;">{{child.totalStr}}</text>
+                <text style="font-size: 20rpx; font-weight: 500; color: #86868b;">{{child.todayProfitStr}}</text>
+              </view>
+              <view style="display: flex; align-items: center; gap: 20rpx;" wx:if="{{isEditing}}">
+                <text class="link-btn" style="font-size: 22rpx; color: #0071e3; font-weight: 600;" data-name="{{child.name}}" catchtap="onRenameAccount">改名</text>
+                <text class="link-btn danger-link" style="font-size: 22rpx; color: #ff3b30; font-weight: 600;" data-child="{{child.name}}" data-parent="{{item.name}}" catchtap="onDeleteSubAccount">删除</text>
+              </view>
+            </view>
+          </view>
+        </block>
+      </block>
+    </view>
+  </block>
+  </scroll-view>
+
+  <!-- Create Account Drawer Modal -->
+  <view class="modal-overlay" wx:if="{{showAddModal}}" bindtap="hideAddModal">
+    <view class="modal-content" catchtap="preventBubble">
+      <view class="modal-title">创建新配置账户</view>
+      
+      <view class="form-group">
+        <text class="form-label">账户名称</text>
+        <input class="form-input" 
+               placeholder="例如：全球轮动、安心收息账户" 
+               placeholder-style="color:#86868b"
+               value="{{newAccountName}}"
+               bindinput="onInputAccountName"
+               focus="{{showAddModal}}" />
+      </view>
+      
+      <view class="modal-actions-row">
+        <button class="btn btn-primary" bindtap="submitAddAccount">创建账户</button>
+        <button class="btn btn-secondary" bindtap="hideAddModal">取消</button>
+      </view>
+    </view>
+  </view>
+
+</view>

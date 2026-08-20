@@ -1,0 +1,285 @@
+/* pages/index/index.wxss */
+
+/* 根容器改白底：消除底部灰底在白 tab 栏上方露出的灰色遮挡 */
+.container {
+  background-color: #ffffff;
+}
+
+/* 页面内 eyebrow 统一为灰色辅助文案样式（行情 / 账户管理） */
+.eyebrow {
+  font-size: 20rpx;
+  font-weight: 500;
+  color: #86868b;
+}
+
+/* 接管页面滚动的 scroll-view（在 .container flex column 中 flex:1 撑高，iOS 隐藏原生页面滚动条） */
+.page-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* User & Clock Ticking Row */
+.user-status-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10rpx;
+  margin-bottom: 24rpx;
+  width: 100%;
+}
+
+.user-pill {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  background-color: #e8e8ed;
+  padding: 6rpx 18rpx 6rpx 8rpx;
+  border-radius: 999rpx;
+}
+
+.avatar-circle {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background-color: #1d1d1f;
+  color: #ffffff;
+  font-size: 18rpx;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.user-name {
+  font-size: 22rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+}
+
+.status-clock {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.clock-time {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #1d1d1f;
+  font-family: monospace;
+}
+
+.active-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background-color: #34a853;
+  box-shadow: 0 0 8rpx rgba(52, 168, 83, 0.4);
+}
+
+.clock-date {
+  font-size: 22rpx;
+  color: #86868b;
+}
+
+.refresh-circle-btn {
+  width: 44rpx;
+  height: 44rpx;
+  border-radius: 50%;
+  background-color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.02);
+  transition: transform 0.15s ease;
+}
+
+.refresh-circle-btn:active {
+  transform: scale(0.92);
+  background-color: #f5f5f7;
+}
+
+.refresh-arrow {
+  font-size: 24rpx;
+  color: #1d1d1f;
+  font-weight: bold;
+}
+
+/* Modal (Create Account) — keep content above custom tabBar */
+.modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 2000;
+}
+
+.modal-content {
+  background-color: #ffffff;
+  border-top-left-radius: 32rpx;
+  border-top-right-radius: 32rpx;
+  width: 100%;
+  max-height: 82vh;
+  padding: 40rpx 40rpx calc(160rpx + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  box-shadow: 0 -8rpx 32rpx rgba(0, 0, 0, 0.05);
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  box-sizing: border-box;
+}
+
+/* Page title */
+.modal-title {
+  font-size: 34rpx;
+  font-weight: 750;
+  color: #1d1d1f;
+  margin-bottom: 16rpx;
+  text-align: center;
+}
+
+.form-group {
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.form-input {
+  background-color: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16rpx;
+  padding: 24rpx;
+  font-size: 28rpx;
+  color: #1d1d1f;
+  height: 88rpx;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Account Segmented Tabs — iOS-style pill control */
+.account-segmented-scroll {
+  width: 100%;
+  white-space: nowrap;
+  margin-bottom: 24rpx;
+  align-self: flex-start;
+}
+
+.account-segmented {
+  display: inline-flex;
+  flex-direction: row;
+  gap: 8rpx;
+  overflow-x: visible;
+  white-space: nowrap;
+  scrollbar-width: none;
+  background: #e8e8ed;
+  border-radius: 999rpx;
+  padding: 8rpx;
+}
+
+.account-segmented-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.account-segment {
+  flex: 0 0 auto;
+  padding: 8rpx 28rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+  line-height: 1.25;
+  height: 44rpx;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  font-weight: 500;
+  color: #3a3a3c;
+  background: transparent;
+  border: none;
+  transition: all 0.18s ease;
+}
+
+.account-segment:active {
+  transform: scale(0.96);
+}
+
+.account-segment.active {
+  background: #1d1d1f;
+  color: #ffffff;
+}
+
+/* Today's Advice Module (matches Web) */
+.today-advice-section {
+  padding: 24rpx 24rpx 36rpx !important;
+  margin-bottom: 28rpx;
+}
+
+.today-advice-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20rpx;
+}
+
+.today-advice-title {
+  font-size: 30rpx;
+  font-weight: 750;
+  color: #1d1d1f;
+}
+
+.today-advice-head-right {
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.today-advice-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.today-advice-meta-line {
+  font-size: 18rpx;
+  color: #86868b;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.today-advice-arrow {
+  font-size: 44rpx;
+  color: #0071e3;
+  font-weight: 300;
+  line-height: 1;
+  width: 44rpx;
+  height: 44rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.today-advice-summary {
+  font-size: 26rpx;
+  color: #1d1d1f;
+  line-height: 1.6;
+}
+
+.today-advice-summary-label {
+  font-weight: 700;
+  margin-right: 6rpx;
+}
+
+.today-advice-empty {
+  font-size: 24rpx;
+  color: #86868b;
+  line-height: 1.6;
+}

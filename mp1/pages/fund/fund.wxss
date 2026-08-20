@@ -1,0 +1,502 @@
+/* pages/fund/fund.wxss */
+
+.fund-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 40rpx 0 24rpx;
+}
+
+.header-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.fund-tags {
+  display: flex;
+  gap: 12rpx;
+  align-items: center;
+  margin-bottom: 8rpx;
+}
+
+.tag-category {
+  font-size: 16rpx;
+  font-weight: 700;
+  color: #ffffff;
+  background-color: var(--brand-blue);
+  padding: 4rpx 12rpx;
+  border-radius: 4rpx;
+  text-transform: uppercase;
+}
+
+.tag-code {
+  font-size: 18rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+  background-color: rgba(0, 0, 0, 0.04);
+  padding: 2rpx 10rpx;
+  border-radius: 4rpx;
+}
+
+.fund-title {
+  font-size: 38rpx;
+  font-weight: 800;
+  color: var(--text-primary);
+  line-height: 1.3;
+}
+
+.edit-fund-btn {
+  font-size: 24rpx !important;
+  height: 60rpx !important;
+  padding: 0 28rpx !important;
+  margin-left: 20rpx;
+  border-radius: 999rpx !important;
+  background: transparent !important;
+  color: var(--brand-blue) !important;
+  font-weight: 500 !important;
+}
+
+/* Big KPIs Metrics Card - Modern light design */
+.detail-kpis-card {
+  background: #ffffff;
+  border-radius: var(--border-radius-lg);
+  padding: 16rpx;
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10rpx 36rpx rgba(0, 0, 0, 0.025);
+  margin-bottom: 28rpx;
+}
+
+.detail-kpi-main {
+  text-align: center;
+  padding-bottom: 28rpx;
+  border-bottom: 1px solid var(--border-color-faint);
+  margin-bottom: 24rpx;
+}
+
+.detail-kpi-label {
+  font-size: 20rpx;
+  color: var(--text-secondary);
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 1rpx;
+}
+
+.detail-kpi-val {
+  font-size: 60rpx;
+  font-weight: 800;
+  color: var(--text-primary);
+  display: block;
+  margin: 6rpx 0;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1rpx;
+}
+
+.detail-kpi-pct {
+  font-size: 22rpx;
+  font-weight: 600;
+}
+
+.detail-kpi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  text-align: center;
+}
+
+.detail-kpi-sub:not(:last-child) {
+  border-right: 1px solid var(--border-color-faint);
+}
+
+.detail-sub-val {
+  font-size: 32rpx;
+  font-weight: 750;
+  color: var(--text-primary);
+  margin-top: 6rpx;
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-sub-pct {
+  font-size: 18rpx;
+  font-weight: 600;
+  margin-top: 4rpx;
+  display: block;
+}
+
+/* Canvas Vector Chart styling */
+.chart-section {
+  padding: 16rpx !important;
+  margin-bottom: 28rpx;
+}
+
+.chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20rpx;
+}
+
+.chart-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.chart-stat {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+  font-family: monospace;
+}
+
+.canvas-wrapper {
+  position: relative;
+  width: 100%;
+  height: 320rpx;
+  background-color: rgba(0, 0, 0, 0.01);
+  border-radius: var(--border-radius-sm);
+  margin-bottom: 20rpx;
+}
+
+.nav-chart {
+  width: 100%;
+  height: 320rpx;
+  display: block;
+}
+
+.chart-loading {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--border-radius-sm);
+  z-index: 10;
+  gap: 16rpx;
+}
+
+.chart-loading text {
+  font-size: 20rpx;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 40rpx;
+  height: 40rpx;
+  border: 4rpx solid rgba(0, 0, 0, 0.1);
+  border-left-color: var(--brand-blue);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* Range Select Tabs styling */
+.range-tabs {
+  display: flex;
+  justify-content: center;
+  gap: 8rpx;
+  background-color: rgba(0, 0, 0, 0.03);
+  padding: 6rpx;
+  border-radius: 999rpx;
+  border: 1px solid var(--border-color-faint);
+}
+
+.range-tab {
+  flex: 1;
+  text-align: center;
+  font-size: 20rpx;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 10rpx 0;
+  border-radius: 999rpx;
+  transition: all 0.15s ease;
+}
+
+.range-tab.active {
+  background-color: #ffffff;
+  color: var(--brand-blue);
+  box-shadow: 0 4rpx 12rpx rgba(0, 0, 0, 0.05);
+}
+
+/* Detailed Ledger sub-tab selectors */
+.detail-ledger-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 16rpx;
+  padding: 0 12rpx;
+}
+
+.ledger-tab {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 20rpx 24rpx;
+  position: relative;
+  transition: all 0.15s ease;
+}
+
+.ledger-tab.active {
+  color: var(--text-primary);
+}
+
+.ledger-tab.active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 24rpx;
+  right: 24rpx;
+  height: 4rpx;
+  background-color: var(--brand-blue);
+  border-radius: 2rpx;
+}
+
+/* Ledger Content Lists */
+.ledger-content {
+  background-color: var(--card-dark);
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  margin-bottom: 40rpx;
+}
+
+.list-item-header {
+  display: flex;
+  justify-content: space-between;
+  padding: 20rpx 28rpx;
+  border-bottom: 1px solid var(--border-color-faint);
+  background-color: rgba(0, 0, 0, 0.01);
+}
+
+.list-item-header text {
+  font-size: 18rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.list-item-header text.right {
+  text-align: right;
+}
+
+.ledger-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24rpx 28rpx;
+  border-bottom: 1px solid var(--border-color-faint);
+}
+
+.ledger-row:last-child {
+  border-bottom: 0;
+}
+
+.ledger-row-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.ledger-row-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.bold-text {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.sub-text {
+  font-size: 18rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.weight-text {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--brand-blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.amount-text {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.fee-text {
+  font-size: 16rpx;
+  color: var(--text-secondary);
+  margin-top: 4rpx;
+}
+
+/* Ledger Content performance specific */
+.performance-list-view .ledger-row {
+  padding: 28rpx;
+}
+
+/* Form modifications inside modal */
+.border-separator {
+  height: 1px;
+  background-color: var(--border-color-faint);
+  margin: 16rpx 0;
+}
+
+.form-subsection-title {
+  font-size: 24rpx;
+  font-weight: 750;
+  color: var(--text-primary);
+  margin-bottom: 18rpx;
+  display: block;
+}
+
+.tx-type-selector {
+  display: flex;
+  gap: 16rpx;
+  background-color: rgba(0, 0, 0, 0.03);
+  padding: 6rpx;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color-faint);
+}
+
+.tx-type-option {
+  flex: 1;
+  text-align: center;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--text-secondary);
+  padding: 14rpx 0;
+  border-radius: var(--border-radius-sm);
+  transition: all 0.1s ease;
+}
+
+.tx-type-option.active-buy {
+  background-color: rgba(255, 59, 48, 0.1);
+  color: var(--brand-red);
+  border: 1px solid rgba(255, 59, 48, 0.2);
+}
+
+.tx-type-option.active-sell {
+  background-color: rgba(52, 168, 83, 0.1);
+  color: var(--brand-green);
+  border: 1px solid rgba(52, 168, 83, 0.2);
+}
+
+/* Chart fallback overlay (今日估值 intraday unavailable offline) */
+.chart-fallback {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(245, 245, 247, 0.92);
+  border-radius: var(--border-radius-sm);
+  font-size: 20rpx;
+  color: var(--text-secondary);
+  z-index: 5;
+}
+
+/* 历史净值 table */
+.nav-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.nav-table .list-item-header {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+}
+
+.nav-table .list-item-header text.center {
+  text-align: center;
+}
+
+.nav-table .list-item-header text.right {
+  text-align: right;
+}
+
+.nav-row {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr 1fr 1fr;
+  align-items: center;
+  padding: 20rpx 28rpx;
+  border-bottom: 1px solid var(--border-color-faint);
+}
+
+.nav-row:last-child {
+  border-bottom: 0;
+}
+
+.nav-date {
+  font-size: 18rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.nav-val {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 定投计划横幅 */
+.auto-invest-banner {
+  background: rgba(0, 113, 227, 0.08);
+  border: 1px solid rgba(0, 113, 227, 0.18);
+  color: var(--brand-blue);
+  font-size: 22rpx;
+  font-weight: 600;
+  padding: 20rpx 24rpx;
+  border-radius: var(--border-radius-sm);
+  margin-bottom: 20rpx;
+}
+
+/* 操作方式切换（直接修改/加仓/减仓/清仓/定投） */
+.holding-action-switch {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8rpx;
+  background-color: rgba(0, 0, 0, 0.03);
+  padding: 6rpx;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color-faint);
+}
+
+.action-switch-btn {
+  min-height: 64rpx;
+  border: 0;
+  border-radius: 10rpx;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 22rpx;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.action-switch-btn.active {
+  background: #ffffff;
+  color: var(--brand-blue);
+  box-shadow: 0 1rpx 4rpx rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 520px) {
+  .holding-action-switch { grid-template-columns: repeat(5, 1fr); }
+}

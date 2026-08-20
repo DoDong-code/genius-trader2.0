@@ -1,0 +1,94 @@
+/* register.wxss — 与 login.wxss 保持一致（WeChat 绿 + 圆角矩形 + 全宽） */
+.login-page {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  box-sizing: border-box;
+  padding: 0 48rpx 48rpx;
+}
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.login-title {
+  font-size: 56rpx;
+  font-weight: 750;
+  color: var(--text-primary);
+}
+
+.login-subtitle {
+  font-size: 26rpx;
+  color: var(--text-secondary);
+  margin-top: 8rpx;
+  margin-bottom: 56rpx;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 32rpx;
+}
+
+.field-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12rpx;
+}
+
+.field-input {
+  background-color: var(--weui-BG-2);
+  border: 1rpx solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 30rpx 28rpx;
+  font-size: 28rpx;
+  font-weight: 500;
+  /* iOS 真机兼容：禁用 -webkit-text-fill-color（原生 input 在 WKWebView 上解析 CSS 变量会致文字透明），
+     文字色用硬编码 color 最稳。 */
+  color: #1a1a1a;
+  caret-color: #1a1a1a;
+}
+
+.field-placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.error {
+  font-size: 24rpx;
+  color: var(--brand-red);
+  margin-bottom: 20rpx;
+}
+
+.submit-btn {
+  margin-top: 8rpx;
+  background-color: #07c160;
+  color: #ffffff;
+  font-size: 30rpx;
+  font-weight: 500;
+  border-radius: 12rpx;
+  width: 100%;
+  height: 96rpx;
+  line-height: 96rpx;
+  border: none;
+  text-align: center;
+  padding: 0;
+}
+
+.submit-btn[disabled] {
+  background-color: #a5dcb4;
+  color: #ffffff;
+}
+
+.submit-btn::after {
+  border: none;
+}
+
+.switch {
+  margin-top: 32rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: var(--brand-blue);
+  font-weight: 500;
+}

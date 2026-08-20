@@ -1,0 +1,453 @@
+/* app.wxss */
+
+page {
+  --bg-primary: #f5f5f7; /* grouped page background */
+  --card-dark: #ffffff;
+  --card-dark-secondary: #f7f7f7;
+  --border-color: rgba(0, 0, 0, 0.1); /* WeUI FG-3 divider */
+  --border-color-faint: rgba(0, 0, 0, 0.04);
+  
+  --brand-blue: #0071e3;
+  --brand-green: #07c160; /* WeUI green (down) */
+  --brand-red: #fa5151; /* WeUI red (up) */
+  --brand-gold: #ffd60a;
+  
+  --text-primary: #1a1a1a; /* WeUI FG-0 ≈ rgba(0,0,0,.9) */
+  --text-secondary: #6e6e73; /* WeUI FG-1 ≈ rgba(0,0,0,.55) */
+  --text-tertiary: #b2b2b2; /* WeUI FG-2 ≈ rgba(0,0,0,.3) */
+
+  /* WeUI 官方设计 token（weui-wxss 浅色主题），供各页面/组件统一引用 */
+  --weui-BRAND: #07c160;
+  --weui-LINK: #576b95;
+  --weui-FG-0: rgba(0, 0, 0, 0.9);
+  --weui-FG-1: rgba(0, 0, 0, 0.55);
+  --weui-FG-2: rgba(0, 0, 0, 0.3);
+  --weui-FG-3: rgba(0, 0, 0, 0.1);
+  --weui-FG-4: rgba(0, 0, 0, 0.15);
+  --weui-RED: #fa5151;
+  --weui-GREEN: #07c160;
+  --weui-BG-0: #f5f5f7;
+  --weui-BG-1: #f7f7f7;
+  --weui-BG-2: #ffffff;
+
+  --border-radius-sm: 12rpx;
+  --border-radius-md: 20rpx;
+  --border-radius-lg: 32rpx;
+
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  box-sizing: border-box;
+}
+
+view, text, scroll-view, input, button, picker {
+  box-sizing: border-box;
+}
+
+/* 全局隐藏滚动条（WeChat webview）—— page 与 scroll-view 都要覆盖 */
+page::-webkit-scrollbar,
+scroll-view::-webkit-scrollbar,
+view::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  color: transparent;
+  -webkit-appearance: none !important;
+  appearance: none !important;
+}
+
+page, scroll-view, view {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  overscroll-behavior: none; /* iOS: 抑制下拉/上滑时的系统指示器 */
+}
+
+.container {
+  padding: 0 28rpx 48rpx;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+}
+
+/* Card layout wrapper */
+.card {
+  background-color: var(--card-dark);
+  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+  box-shadow: 0 4rpx 16rpx rgba(0, 0, 0, 0.02);
+}
+
+/* Base Headings & Titles */
+.eyebrow {
+  font-size: 20rpx;
+  font-weight: 700;
+  color: var(--brand-blue);
+  letter-spacing: 2rpx;
+  text-transform: uppercase;
+  display: block;
+}
+
+/* Buttons styling with absolute precision */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  font-weight: 500;
+  height: 60rpx;
+  padding: 0 32rpx;
+  transition: opacity 0.15s ease, transform 0.1s ease;
+  line-height: 1.4;
+  border: none;
+  box-sizing: border-box;
+}
+
+.btn:active {
+  opacity: 0.8;
+  transform: scale(0.98);
+}
+
+/* 去除微信原生按钮默认描边 */
+button::after {
+  border: none;
+}
+
+.btn-primary {
+  background-color: var(--brand-blue);
+  color: #ffffff;
+  border: none;
+}
+
+.btn-secondary {
+  background-color: #e8e8ed;
+  color: var(--text-primary);
+  border: none;
+}
+
+.btn-danger {
+  background-color: rgba(255, 59, 48, 0.1);
+  color: var(--brand-red);
+  border: none;
+}
+
+/* Indicators and Positive/Negative Rates */
+.positive {
+  color: var(--brand-red) !important; /* Chinese stock market standard: RED for UP */
+}
+
+.negative {
+  color: var(--brand-green) !important; /* Chinese stock market standard: GREEN for DOWN */
+}
+
+/* Forms layout */
+.form-group {
+  margin-bottom: 24rpx;
+  display: flex;
+  flex-direction: column;
+}
+
+.form-label {
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12rpx;
+  display: block;
+}
+
+.form-input {
+  background-color: #f5f5f7;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  color: var(--text-primary);
+  height: 80rpx;
+  width: 100%;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20rpx;
+}
+
+.picker-selector {
+  background-color: #f5f5f7;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 20rpx 24rpx;
+  font-size: 28rpx;
+  color: var(--text-primary);
+  height: 80rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.picker-selector::after {
+  content: "▾";
+  color: var(--text-secondary);
+  font-size: 24rpx;
+  margin-left: 12rpx;
+}
+
+/* Empty placeholder container */
+.empty-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64rpx 32rpx;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 64rpx;
+  margin-bottom: 16rpx;
+}
+
+.empty-text {
+  font-size: 24rpx;
+  color: var(--text-secondary);
+}
+
+/* Modal layout elements */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 999;
+}
+
+.modal-content {
+  background-color: #ffffff;
+  border-top-left-radius: var(--border-radius-lg);
+  border-top-right-radius: var(--border-radius-lg);
+  width: 100%;
+  max-height: 90vh;
+  padding: 40rpx 40rpx calc(40rpx + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  box-shadow: 0 -8rpx 32rpx rgba(0, 0, 0, 0.05);
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.modal-title {
+  font-size: 34rpx;
+  font-weight: 750;
+  color: var(--text-primary);
+  margin-bottom: 16rpx;
+  text-align: center;
+}
+
+/* Modal action buttons — standard horizontal two-button row */
+.modal-actions-row {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.modal-actions-row .btn {
+  flex: 1;
+  margin: 0;
+}
+
+.modal-delete-link {
+  margin-top: 16rpx;
+  text-align: center;
+  color: var(--brand-red);
+  font-size: 26rpx;
+  font-weight: 500;
+  padding: 16rpx 0;
+}
+
+/* Custom Apple-style Sticky Topbar Navigation */
+.topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.topbar-content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  padding: 0 28rpx;
+  height: 88rpx; /* 44px standard height */
+}
+
+.brand {
+  font-size: 32rpx;
+  font-weight: 650;
+  color: #1d1d1f;
+  letter-spacing: -0.5rpx;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-spacer {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Custom .kpis Container (Apple design: white card, black text, smooth shadow, grid layout) */
+.kpis {
+  background: #ffffff;
+  color: #1d1d1f;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 44rpx;
+  box-shadow: 0 10rpx 36rpx rgba(0, 0, 0, 0.025);
+  padding: 44rpx 24rpx 36rpx;
+  margin-top: 14rpx;
+  margin-bottom: 16rpx;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24rpx 12rpx;
+  width: 100%;
+}
+
+.kpis .kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  text-align: center;
+}
+
+/* First KPI is Total Assets (Full-width, centered, bold) */
+.kpis .kpi:first-child {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  padding-bottom: 24rpx;
+  margin-bottom: 4rpx;
+}
+
+.kpis .kpi-label {
+  font-size: 22rpx;
+  font-weight: 300;
+  color: #86868b;
+  margin-bottom: 6rpx;
+  white-space: nowrap;
+}
+
+.kpis .kpi-value {
+  font-size: 64rpx;
+  font-weight: 750;
+  line-height: 1.2;
+  color: #1d1d1f;
+  white-space: nowrap;
+}
+
+.kpis .kpi:not(:first-child) .kpi-value {
+  font-size: 32rpx;
+  font-weight: 650;
+}
+
+.kpis .kpi-sub {
+  font-size: 20rpx;
+  font-weight: 300;
+  color: #86868b;
+  margin-top: 4rpx;
+  white-space: nowrap;
+}
+
+.kpis .estimate-state.updated {
+  color: #0071e3 !important;
+  font-weight: 600;
+  background: rgba(0, 113, 227, 0.05);
+  padding: 2rpx 10rpx;
+  border-radius: 6rpx;
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6rpx;
+  font-size: 18rpx;
+}
+
+/* Hidden yesterday's profit on mobile screen width size */
+.kpis .daily-kpi {
+  display: none !important;
+}
+
+/* Market Indices Styles */
+.market-indices {
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 36rpx;
+  box-shadow: 0 10rpx 36rpx rgba(0, 0, 0, 0.025);
+  padding: 24rpx;
+  margin-bottom: 36rpx;
+  width: 100%;
+}
+.market-indices-head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  margin-bottom: 24rpx;
+}
+.market-indices-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+.market-index-item {
+  background: #f5f5f7;
+  border: 1px solid rgba(0, 0, 0, 0.02);
+  border-radius: 24rpx;
+  padding: 24rpx;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  min-width: 0;
+}
+.market-index-name {
+  font-size: 24rpx;
+  color: #86868b;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.market-index-price {
+  font-size: 34rpx;
+  font-weight: 750;
+  color: #1d1d1f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.market-index-change {
+  font-size: 24rpx;
+  font-weight: 600;
+}
+.market-up {
+  color: #ff3b30 !important;
+}
+.market-down {
+  color: #34a853 !important;
+}
+.market-flat {
+  color: #1d1d1f !important;
+}
+
+

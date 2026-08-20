@@ -1,0 +1,144 @@
+/* pages/profile/profile.wxss */
+.container {
+  min-height: 100vh;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar-content {
+  display: flex;
+  align-items: center;
+  padding: 0 28rpx;
+}
+
+.back-btn {
+  width: 64rpx;
+  height: 64rpx;
+  font-size: 44rpx;
+  line-height: 64rpx;
+  color: #1d1d1f;
+  font-weight: 500;
+  text-align: left;
+}
+
+.title {
+  font-size: 32rpx;
+  font-weight: 650;
+  color: #1d1d1f;
+  margin-left: 8rpx;
+}
+
+.avatar-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 40rpx 0 32rpx;
+}
+
+.avatar-btn {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12rpx;
+  line-height: 1.4;
+}
+.avatar-btn::after {
+  border: none;
+}
+
+.avatar-img {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 50%;
+  background-color: #e8e8ed;
+}
+
+.avatar-edit-hint {
+  font-size: 22rpx;
+  color: #86868b;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  padding: 24rpx 28rpx;
+  background: #ffffff;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.field-label {
+  font-size: 22rpx;
+  color: #86868b;
+}
+
+.field-input {
+  font-size: 30rpx;
+  color: #1d1d1f;
+  height: 60rpx;
+  line-height: 60rpx;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 28rpx;
+  background: #ffffff;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.status-label {
+  font-size: 28rpx;
+  color: #1d1d1f;
+}
+
+.status-value {
+  font-size: 24rpx;
+  color: #86868b;
+}
+
+.actions {
+  display: flex;
+  gap: 16rpx;
+  padding: 32rpx 28rpx 0;
+}
+.actions .btn {
+  flex: 1;
+  border-radius: 12rpx;
+}
+
+.danger-zone {
+  padding: 32rpx 28rpx;
+}
+.danger-zone .btn {
+  width: 100%;
+  border-radius: 12rpx;
+}
+
+/* P1：纯文字按钮（恢复/删除）：无背景、无胶囊底色，仅文字 */
+.text-link-btn {
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 8rpx 0;
+  font-size: 26rpx;
+  font-weight: 500;
+  line-height: 1.4;
+  color: #0071e3;
+  border-radius: 0;
+}
+.text-link-btn::after {
+  border: none;
+}
+.text-link-btn.danger {
+  color: #ff453a;
+}
+.text-link-btn:active {
+  opacity: 0.7;
+}

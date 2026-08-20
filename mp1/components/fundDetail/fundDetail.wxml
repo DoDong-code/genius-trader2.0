@@ -1,0 +1,351 @@
+<!-- components/fundDetail/fundDetail.wxml -->
+<view class="fund-detail-root">
+  <!-- Page Header -->
+  <view class="fund-detail-header">
+    <view class="header-top-row">
+      <view class="fund-tags">
+        <text class="tag-category">{{fund.category}}</text>
+        <text class="tag-code">{{fund.code}}</text>
+      </view>
+    </view>
+    <view class="header-title-row">
+      <text class="fund-title">{{fund.name}}</text>
+      <view class="header-actions">
+        <view class="edit-fund-btn" catchtap="showEditModal">编辑</view>
+        <view class="drawer-close" wx:if="{{embedded}}" catchtap="onClose">×</view>
+      </view>
+    </view>
+
+    <view class="header-nav-row" wx:if="{{currentNavDate}}">
+      <text class="header-nav-label">当日净值</text>
+      <text class="header-nav-val">{{currentNav}}</text>
+      <text class="header-nav-date">净值日期 {{currentNavDate}}</text>
+    </view>
+  </view>
+
+  <!-- Big KPIs Metrics Grid -->
+  <view class="detail-kpis-card">
+    <view class="detail-kpi-main">
+      <text class="detail-kpi-label">当前金额</text>
+      <text class="detail-kpi-val">{{fund.amountStr}}</text>
+    </view>
+
+    <view class="detail-kpi-grid">
+      <view class="detail-kpi-sub">
+        <text class="detail-kpi-label">今日收益</text>
+        <text class="detail-sub-val {{fund.todayProfit >= 0 ? 'positive' : 'negative'}}">{{fund.todayProfitStr}}</text>
+        <text class="detail-sub-pct {{fund.todayProfit >= 0 ? 'positive' : 'negative'}}">{{fund.todayProfitPctStr}}</text>
+      </view>
+      <view class="detail-kpi-sub">
+        <text class="detail-kpi-label">持有收益</text>
+        <text class="detail-sub-val {{fund.holdingProfit >= 0 ? 'positive' : 'negative'}}">{{fund.holdingProfitStr}}</text>
+        <text class="detail-sub-pct {{fund.holdingProfit >= 0 ? 'positive' : 'negative'}}">{{fund.holdingRateStr}}</text>
+      </view>
+      <view class="detail-kpi-sub">
+        <text class="detail-kpi-label">持有收益率</text>
+        <text class="detail-sub-val {{fund.holdingRate >= 0 ? 'positive' : 'negative'}}">{{fund.holdingRateStr}}</text>
+        <text class="detail-sub-pct">账户占比</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- Dynamic Vector Line Chart Section -->
+  <view class="chart-section card">
+    <view class="chart-header">
+      <text class="chart-title">历史净值</text>
+      <view class="chart-header-right">
+        <text class="chart-status" wx:if="{{dataStatusLabel}}">{{dataStatusLabel}}</text>
+        <text class="chart-stat" wx:if="{{chartMinMaxStr}}">{{chartMinMaxStr}}</text>
+        <view class="calibrate-btn" bindtap="onCalibrate">{{isCalibrating ? '校准中' : (calibration && calibration.calibrated ? '重校准' : '校准')}}</view>
+      </view>
+    </view>
+
+    <!-- 校准结果 -->
+    <view class="calibration-result" wx:if="{{calibration}}">
+      <text class="calibration-status">{{calibration.calibrated ? '已校准' : '样本不足'}}</text>
+      <block wx:if="{{calibration.calibrated}}">
+        <text class="calibration-metric">样本 {{calibration.sampleSize}} 日</text>
+        <text class="calibration-metric">方向准确率 {{calibration.directionAccuracy}}</text>
+        <text class="calibration-metric">MAE {{calibration.mae}}</text>
+      </block>
+    </view>
+
+    <view class="canvas-wrapper">
+      <block wx:if="{{chartStatus === 'loading'}}">
+        <view class="chart-loading"><view class="spinner"></view><text>正在加载历史净值数据...</text></view>
+      </block>
+      <block wx:elif="{{chartStatus === 'syncing'}}">
+        <view class="detail-sync-panel">
+          <view class="detail-sync-title">正在同步历史净值…</view>
+          <view class="detail-sync-bar"><view class="detail-sync-bar-fill"></view></view>
+          <view class="detail-sync-meta"><text>数据源：{{syncDataSource}}</text><text>已等待 {{syncWaitSeconds}} 秒</text></view>
+          <view class="detail-sync-status">{{syncStatusText}}</view>
+        </view>
+      </block>
+      <block wx:elif="{{chartStatus === 'retrying'}}">
+        <view class="detail-sync-panel">
+          <view class="detail-sync-title">数据源暂时不可用</view>
+          <view class="detail-sync-bar"><view class="detail-sync-bar-fill"></view></view>
+          <view class="detail-sync-meta"><text>数据源：{{syncDataSource}}</text><text>第 {{syncAttempt}} 次尝试 · 已等待 {{syncWaitSeconds}} 秒</text></view>
+          <view class="detail-sync-status">正在自动重试，数据恢复后自动显示</view>
+        </view>
+      </block>
+      <block wx:elif="{{chartStatus === 'failed'}}">
+        <view class="detail-sync-panel">
+          <view class="detail-sync-title">数据获取较慢</view>
+          <view class="detail-sync-status">{{syncStatusText}}</view>
+          <button class="retry-btn" size="mini" catchtap="onRetryChart">继续获取</button>
+        </view>
+      </block>
+      <block wx:else>
+        <canvas type="2d" id="chartCanvas" class="nav-chart" hidden="{{showEditModal}}"
+                bindtouchstart="onChartTouchStart" bindtouchmove="onChartTouchMove" bindtouchend="onChartTouchEnd"></canvas>
+      </block>
+      <view class="chart-fallback" wx:if="{{todayChartFallback}}">
+        <text>实时估值走势图暂不可用</text>
+      </view>
+
+      <!-- 交互指示器：竖虚线 + 高亮点 -->
+      <view class="chart-indicator-line" wx:if="{{chartIndicator.show}}" style="left: {{chartIndicator.left}}px;"></view>
+      <view class="chart-indicator-dot" wx:if="{{chartIndicator.show}}" style="left: {{chartIndicator.left}}px; top: {{chartIndicator.top}}px;"></view>
+
+      <!-- 交互提示框 -->
+      <view class="chart-tooltip {{chartTooltip.above ? 'tooltip-below' : 'tooltip-above'}}"
+            wx:if="{{chartTooltip.show}}"
+            style="left: {{chartTooltip.left}}px; top: {{chartTooltip.top}}px;">
+        <view class="tooltip-date">{{chartTooltip.date}}</view>
+        <view class="tooltip-row"><text class="tooltip-label">单位净值</text><text class="tooltip-val">{{chartTooltip.nav}}</text></view>
+        <view class="tooltip-row"><text class="tooltip-label">累计净值</text><text class="tooltip-val">{{chartTooltip.acc}}</text></view>
+        <view class="tooltip-row"><text class="tooltip-label">日涨跌幅</text><text class="tooltip-val {{chartTooltip.changePct >= 0 ? 'positive' : 'negative'}}">{{chartTooltip.changePctStr}}</text></view>
+      </view>
+    </view>
+
+    <!-- 图例：仅在有成本线/交易点时显示 -->
+    <view class="chart-legend" wx:if="{{chartLegend.cost || chartLegend.buy || chartLegend.sell}}">
+      <view class="legend-item" wx:if="{{chartLegend.cost}}"><view class="legend-swatch cost"></view><text>成本线</text></view>
+      <view class="legend-item" wx:if="{{chartLegend.buy}}"><view class="legend-swatch buy"></view><text>买入</text></view>
+      <view class="legend-item" wx:if="{{chartLegend.sell}}"><view class="legend-swatch sell"></view><text>卖出</text></view>
+    </view>
+
+    <view class="range-tabs">
+      <block wx:for="{{ranges}}" wx:key="key">
+        <view class="range-tab {{activeRange === item.key ? 'active' : ''}}"
+              data-range="{{item.key}}"
+              catchtap="onRangeSelect">
+          {{item.label}}
+        </view>
+      </block>
+    </view>
+  </view>
+
+  <!-- 定投计划横幅 -->
+  <view class="auto-invest-banner" wx:if="{{autoInvestBanner}}">{{autoInvestBanner}}</view>
+
+  <!-- Detailed Ledger Tabs（P2：Tab 顺序与网页端对齐：历史净值｜历史业绩｜前十大持仓｜交易记录） -->
+  <view class="detail-ledger-tabs">
+    <view class="ledger-tab {{activeTab === 'nav' ? 'active' : ''}}" data-tab="nav" catchtap="onTabSelect">历史净值</view>
+    <view class="ledger-tab {{activeTab === 'performance' ? 'active' : ''}}" data-tab="performance" catchtap="onTabSelect">历史业绩</view>
+    <view class="ledger-tab {{activeTab === 'holdings' ? 'active' : ''}}" data-tab="holdings" catchtap="onTabSelect">前十大持仓</view>
+    <view class="ledger-tab {{activeTab === 'transactions' ? 'active' : ''}}" data-tab="transactions" catchtap="onTabSelect">交易记录</view>
+  </view>
+
+  <!-- Tab Content: 历史净值 -->
+  <view class="ledger-content" wx:if="{{activeTab === 'nav'}}">
+    <view class="nav-table" wx:if="{{navRows.length > 0}}">
+      <view class="list-item-header">
+        <text>日期</text>
+        <text class="center">单位净值</text>
+        <text class="center">累计净值</text>
+        <text class="right">日涨跌幅</text>
+      </view>
+      <block wx:for="{{navRows}}" wx:key="date">
+        <view class="ledger-row nav-row">
+          <text class="sub-text nav-date">{{item.date}}</text>
+          <text class="center nav-val">{{item.navStr}}</text>
+          <text class="center nav-val">{{item.accStr}}</text>
+          <text class="right weight-text {{item.changePct >= 0 ? 'positive' : 'negative'}}">{{item.changePctStr}}</text>
+        </view>
+      </block>
+    </view>
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📈</view>
+      <text class="empty-text">{{ chartStatus === 'success' ? '暂未同步到历史净值' : '正在同步历史净值…' }}</text>
+    </view>
+  </view>
+
+  <!-- Tab Content: 前十大持仓 -->
+  <view class="ledger-content" wx:if="{{activeTab === 'holdings'}}">
+    <view class="holdings-list-view" wx:if="{{holdingsStatus === 'success'}}">
+      <view class="list-item-header">
+        <text>主要成份(股/债/黄金)</text>
+        <text class="center">权重</text>
+        <text class="right">今日涨幅</text>
+      </view>
+      <block wx:for="{{majorHoldings}}" wx:key="stock_code">
+        <view class="ledger-row">
+          <view class="ledger-row-left">
+            <text class="bold-text">{{item.stock_name}}</text>
+            <text class="sub-text">{{item.stock_code}}</text>
+          </view>
+          <view class="ledger-row-right">
+            <text class="weight-text">{{item.weightPctStr}}</text>
+            <text class="change-text {{item.changePercent > 0 ? 'positive' : item.changePercent < 0 ? 'negative' : ''}}">{{item.changePctStr}}</text>
+          </view>
+        </view>
+      </block>
+    </view>
+    <view class="empty-container" wx:elif="{{holdingsStatus === 'syncing'}}">
+      <view class="empty-icon">📁</view>
+      <text class="empty-text">正在获取前十大持仓……</text>
+    </view>
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📁</view>
+      <text class="empty-text">该基金无主要成份公开披露</text>
+    </view>
+  </view>
+
+  <!-- Tab Content: 历史业绩 -->
+  <view class="ledger-content" wx:if="{{activeTab === 'performance'}}">
+    <view class="performance-list-view">
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">近1月收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.month1 >= 0 ? 'positive' : 'negative'}}">{{perf.month1Str}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">近3月收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.month3 >= 0 ? 'positive' : 'negative'}}">{{perf.month3Str}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">近6月收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.month6 >= 0 ? 'positive' : 'negative'}}">{{perf.month6Str}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">近1年收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.year1 >= 0 ? 'positive' : 'negative'}}">{{perf.year1Str}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">近3年收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.year3 >= 0 ? 'positive' : 'negative'}}">{{perf.year3Str}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">今年以来收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.yearYtd >= 0 ? 'positive' : 'negative'}}">{{perf.yearYtdStr}}</text></view>
+      </view>
+      <view class="ledger-row">
+        <view class="ledger-row-left"><text class="bold-text">成立以来收益率</text></view>
+        <view class="ledger-row-right"><text class="weight-text {{perf.sinceStart >= 0 ? 'positive' : 'negative'}}">{{perf.sinceStartStr}}</text></view>
+      </view>
+    </view>
+  </view>
+
+  <!-- Tab Content: 交易记录 -->
+  <view class="ledger-content" wx:if="{{activeTab === 'transactions'}}">
+    <view class="transactions-list-view" wx:if="{{transactions.length > 0}}">
+      <view class="list-item-header">
+        <text>交易类型与时间</text>
+        <text class="right">交易金额</text>
+      </view>
+      <block wx:for="{{transactions}}" wx:key="index">
+        <view class="ledger-row">
+          <view class="ledger-row-left">
+            <text class="bold-text {{item.type === 'buy' ? 'positive' : 'negative'}}">{{item.typeStr}}</text>
+            <text wx:if="{{item.invest}}" style="display:inline-block; background:#0071e3; color:#ffffff; border-radius:6rpx; font-size:20rpx; line-height:1; padding:4rpx 8rpx; margin-left:8rpx; vertical-align:middle;">定</text>
+            <text class="sub-text">{{item.date}}</text>
+          </view>
+          <view class="ledger-row-right">
+            <text class="amount-text">{{item.amountStr}}</text>
+            <text class="fee-text" wx:if="{{item.fee > 0}}">手续费 ¥{{item.feeStr || item.fee}}</text>
+          </view>
+        </view>
+      </block>
+    </view>
+    <view class="empty-container" wx:else>
+      <view class="empty-icon">📝</view>
+      <text class="empty-text">暂无任何交易记录</text>
+    </view>
+  </view>
+
+  <!-- Edit / Trade / 定投 Modal -->
+  <view class="modal-overlay" wx:if="{{showEditModal}}" catchtap="hideEditModal">
+    <view class="modal-content" catchtap="preventBubble">
+      <view class="modal-title">修改持仓</view>
+
+      <view class="form-grid">
+        <view class="form-group">
+          <text class="form-label">当前金额</text>
+          <input class="form-input" type="digit" value="{{editAmount}}" bindinput="onInputEditAmount" cursor-spacing="20" adjust-position="{{true}}" />
+        </view>
+        <view class="form-group">
+          <text class="form-label">当前收益</text>
+          <input class="form-input" type="digit" value="{{editProfit}}" bindinput="onInputEditProfit" cursor-spacing="20" adjust-position="{{true}}" />
+        </view>
+      </view>
+
+      <view class="border-separator"></view>
+
+      <text class="form-subsection-title">操作方式</text>
+      <view class="holding-action-switch">
+        <view class="action-switch-btn {{editMode === 'edit' ? 'active' : ''}}" data-mode="edit" catchtap="onSelectEditMode">修改</view>
+        <view class="action-switch-btn {{editMode === 'add' ? 'active' : ''}}" data-mode="add" catchtap="onSelectEditMode">加仓</view>
+        <view class="action-switch-btn {{editMode === 'reduce' ? 'active' : ''}}" data-mode="reduce" catchtap="onSelectEditMode">减仓</view>
+        <view class="action-switch-btn {{editMode === 'liquidate' ? 'active' : ''}}" data-mode="liquidate" catchtap="onSelectEditMode">清仓</view>
+        <view class="action-switch-btn {{editMode === 'invest' ? 'active' : ''}}" data-mode="invest" catchtap="onSelectEditMode">定投</view>
+      </view>
+
+      <!-- 加仓/减仓/清仓 -->
+      <block wx:if="{{editMode === 'add' || editMode === 'reduce' || editMode === 'liquidate'}}">
+        <view class="form-group" style="margin-top: 24rpx;">
+          <text class="form-label">{{editMode === 'reduce' || editMode === 'liquidate' ? '卖出金额 (元)' : '买入金额 (元)'}}</text>
+          <input class="form-input" type="digit" placeholder="0.00" placeholder-style="color:#636366" value="{{newTxAmount}}" bindinput="onInputNewTxAmount" cursor-spacing="20" adjust-position="{{true}}" />
+        </view>
+        <!-- 快捷比例：仅加仓/减仓显示（以当前持仓金额为基准，保留手动修改）；P1 删除「快捷」文案 -->
+        <view class="quick-ratio-row" wx:if="{{editMode === 'add' || editMode === 'reduce'}}" style="display: flex; align-items: center; gap: 12rpx; margin-top: 12rpx; flex-wrap: wrap; padding: 0 28rpx;">
+          <view class="quick-ratio-btn" data-ratio="0.25" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/4</view>
+          <view class="quick-ratio-btn" data-ratio="0.3333333333333333" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/3</view>
+          <view class="quick-ratio-btn" data-ratio="0.5" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/2</view>
+          <view class="quick-ratio-btn" data-ratio="1" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">全部</view>
+        </view>
+        <view class="form-grid">
+          <view class="form-group">
+            <text class="form-label">{{editMode === 'reduce' || editMode === 'liquidate' ? '卖出费率 %' : '买入费率 %'}}</text>
+            <input class="form-input" type="digit" placeholder="0.00" placeholder-style="color:#636366" value="{{newTxFee}}" bindinput="onInputNewTxFee" cursor-spacing="20" adjust-position="{{true}}" />
+          </view>
+          <view class="form-group">
+            <text class="form-label">{{editMode === 'reduce' || editMode === 'liquidate' ? '卖出日期' : '买入日期'}}</text>
+            <picker mode="date" value="{{newTxDate}}" bindchange="onTxDateChange">
+              <view class="picker-selector">{{newTxDate}}</view>
+            </picker>
+          </view>
+        </view>
+      </block>
+
+      <!-- 定投 -->
+      <block wx:if="{{editMode === 'invest'}}">
+        <view class="form-grid" style="margin-top: 24rpx;">
+          <view class="form-group">
+            <text class="form-label">每期定投金额 (元)</text>
+            <input class="form-input" type="digit" placeholder="0.00" placeholder-style="color:#636366" value="{{investAmount}}" bindinput="onInputInvestAmount" cursor-spacing="20" adjust-position="{{true}}" />
+          </view>
+          <view class="form-group">
+            <text class="form-label">定投周期</text>
+            <picker range="{{investFrequencies}}" value="{{investFrequencyIndex}}" bindchange="onInvestFrequencyChange">
+              <view class="picker-selector">{{investFrequencies[investFrequencyIndex]}}</view>
+            </picker>
+          </view>
+        </view>
+        <view class="form-group">
+          <text class="form-label">定投开始日期</text>
+          <picker mode="date" value="{{investDate}}" bindchange="onInvestDateChange">
+            <view class="picker-selector">{{investDate}}</view>
+          </picker>
+        </view>
+      </block>
+
+      <view class="modal-actions-row">
+        <button class="btn btn-primary" catchtap="submitEditHolding">保存</button>
+        <button class="btn btn-secondary" catchtap="hideEditModal">取消</button>
+      </view>
+      <view class="modal-delete-link" catchtap="deletePosition">删除此持仓</view>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,582 @@
+/* pages/analysis/analysis.wxss */
+
+/* 根容器改白底：消除底部灰底在白 tab 栏上方露出的灰色遮挡 */
+.container {
+  background-color: #ffffff;
+}
+
+.account-title {
+  font-size: 46rpx;
+  font-weight: 800;
+  color: var(--text-primary);
+  display: block;
+  margin-top: 6rpx;
+  letter-spacing: -1rpx;
+}
+
+/* ── WeChat-style grouped white cards ──
+   grey page background + white group cards with light borders,
+   generous inner padding & line-height for breathing room. */
+.qa-card,
+.section {
+  background-color: #ffffff;
+  border-radius: 24rpx;
+  border: 1px solid var(--border-color);
+  padding: 24rpx;
+  margin-bottom: 16rpx;
+  box-shadow: 0 2rpx 12rpx rgba(0, 0, 0, 0.015);
+}
+
+/* 提问模块（首个卡片）距离顶栏 24rpx */
+.qa-card {
+  margin-top: 24rpx;
+}
+
+.section-head {
+  margin-bottom: 28rpx;
+}
+
+.block-title {
+  font-size: 32rpx;
+  font-weight: 700;
+  color: var(--text-primary);
+  display: block;
+}
+
+.block-subtitle {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+  display: block;
+  margin-top: 10rpx;
+  line-height: 1.5;
+}
+
+/* Allocation bars list style */
+.allocation-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.allocation-item {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  padding: 24rpx 0;
+  border-bottom: 1px solid var(--border-color-faint);
+}
+
+.allocation-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.allocation-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.alloc-cat-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.alloc-cat-vals {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.alloc-cat-amount {
+  font-size: 24rpx;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.alloc-cat-pct {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--brand-blue);
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-bar-bg {
+  background-color: rgba(0, 0, 0, 0.05);
+  height: 14rpx;
+  border-radius: 999rpx;
+  width: 100%;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  border-radius: 999rpx;
+  transition: width 0.3s ease-out;
+}
+
+/* Strategy manifest lists style */
+.strategy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+}
+
+.strategy-bullet {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+}
+
+.bullet-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background-color: var(--brand-blue);
+  margin-top: 14rpx;
+  flex-shrink: 0;
+}
+
+.bullet-text {
+  font-size: 28rpx;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+/* Retired/Closed positions — WeChat cell list (divider separated) */
+.retired-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.retired-item {
+  padding: 24rpx 0;
+  border-bottom: 1px solid var(--border-color-faint);
+}
+
+.retired-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.retired-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 14rpx;
+}
+
+.retired-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.retired-fund-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.retired-fund-code {
+  font-size: 20rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.retired-date {
+  font-size: 20rpx;
+  color: var(--text-secondary);
+}
+
+.retired-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.retired-amount {
+  font-size: 24rpx;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.retired-reason-text {
+  font-size: 24rpx;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ── AI Q&A Panel: input + buttons broken apart ── */
+.qa-textarea {
+  width: 100% !important;
+  height: 140rpx;
+  font-size: 26rpx;
+  color: var(--text-primary);
+  line-height: 1.5;
+  padding: 20rpx;
+  box-sizing: border-box;
+  background-color: #f5f5f7;
+  border: 1px solid var(--border-color-faint);
+  border-radius: var(--border-radius);
+}
+
+/* Action buttons OUTSIDE the input — equal-width full row */
+.qa-actions-row {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 20rpx;
+}
+
+.qa-actions-row .btn {
+  flex: 1;
+  margin: 0 !important;
+  font-size: 26rpx !important;
+  padding: 0 !important;
+  height: 60rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-trade {
+  background-color: var(--brand-green) !important;
+  color: #ffffff !important;
+}
+
+.btn-ask {
+  background-color: var(--brand-blue) !important;
+  color: #ffffff !important;
+}
+
+.btn-diagnose {
+  background-color: #e8e8ed !important;
+  color: var(--text-primary) !important;
+}
+
+/* AI Restore row */
+.ai-query-restore-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 20rpx;
+  font-size: 22rpx;
+}
+
+.restore-text {
+  color: var(--text-secondary);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 16rpx;
+}
+
+.btn-restore-link {
+  color: var(--brand-blue);
+  font-weight: 600;
+}
+
+/* AI Answer Container */
+.ai-answer-container, .ai-summary-container {
+  background-color: rgba(10, 132, 255, 0.05);
+  border: 1px solid rgba(10, 132, 255, 0.15);
+  border-radius: var(--border-radius);
+  padding: 24rpx;
+  margin-top: 24rpx;
+}
+
+.ai-summary-container {
+  background-color: rgba(48, 209, 88, 0.05);
+  border: 1px solid rgba(48, 209, 88, 0.15);
+}
+
+.ai-badge-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16rpx;
+}
+
+.ai-badge {
+  font-size: 18rpx;
+  font-weight: 700;
+  padding: 4rpx 12rpx;
+  border-radius: 999rpx;
+  background-color: var(--brand-blue);
+  color: #ffffff;
+}
+
+.bg-green {
+  background-color: var(--brand-green) !important;
+}
+
+.ai-time-label {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+}
+
+.ai-answer-scroll {
+  max-height: 400rpx;
+}
+
+.ai-answer-text {
+  font-size: 26rpx;
+  color: var(--text-primary);
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+/* 接管页面滚动的 scroll-view（隐藏 iOS 原生页面滚动条） */
+.page-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  box-sizing: border-box;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* AI Loading Box */
+.ai-loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48rpx;
+  gap: 16rpx;
+}
+
+.spinner {
+  width: 48rpx;
+  height: 48rpx;
+  border: 4rpx solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--brand-blue);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-msg {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+}
+
+/* Metrics Grid — flat tiles inside the card */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+}
+
+.metric-tile {
+  background-color: #f5f5f7;
+  border-radius: var(--border-radius);
+  padding: 28rpx 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.metric-label {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+}
+
+.metric-value {
+  font-size: 56rpx;
+  font-weight: 800;
+  margin: 14rpx 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.metric-unit {
+  font-size: 24rpx;
+  font-weight: normal;
+}
+
+.metric-desc {
+  font-size: 22rpx;
+  font-weight: 700;
+}
+
+.ai-helper-texts {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 14rpx;
+  border-top: 1px solid rgba(0,0,0,0.05);
+  padding-top: 12rpx;
+  width: 100%;
+}
+
+.ai-helper-line {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* Suggestion — inline, no box */
+.suggestion-inline {
+  margin-bottom: 20rpx;
+}
+
+.suggestion-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: block;
+  margin-bottom: 10rpx;
+}
+
+.suggestion-content {
+  font-size: 26rpx;
+  color: var(--text-primary);
+  line-height: 1.6;
+}
+
+/* Deviation status line */
+.deviation-status-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.status-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-text {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Fund advice list — WeChat-style cell list (divider separated) */
+.fund-advice-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.fund-advice-item {
+  padding: 28rpx 0;
+  border-bottom: 1px solid var(--border-color-faint);
+}
+
+.fund-advice-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.advice-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 20rpx;
+}
+
+.fund-meta-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  flex: 1;
+  padding-right: 16rpx;
+}
+
+.fund-name {
+  font-size: 28rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+.fund-code-tag-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.fund-code {
+  font-size: 20rpx;
+  font-family: monospace;
+  color: var(--text-secondary);
+}
+
+.category-tag {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+  background-color: rgba(0,0,0,0.05);
+  padding: 3rpx 10rpx;
+  border-radius: 6rpx;
+}
+
+.action-tag {
+  font-size: 22rpx;
+  font-weight: 700;
+  padding: 8rpx 18rpx;
+  border-radius: var(--border-radius-sm);
+  white-space: nowrap;
+}
+
+/* Holding metrics row — flat inline */
+.advice-holding-metrics {
+  display: flex;
+  gap: 40rpx;
+  margin-bottom: 20rpx;
+}
+
+.holding-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+}
+
+.metric-lbl {
+  font-size: 18rpx;
+  color: var(--text-secondary);
+}
+
+.metric-val {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+/* Reason explanation — flat with accent border */
+.advice-reason-bubble {
+  border-left: 4rpx solid var(--brand-blue);
+  padding: 12rpx 18rpx;
+  background-color: rgba(10, 132, 255, 0.03);
+}
+
+.reason-bubble-title {
+  font-size: 20rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: block;
+  margin-bottom: 6rpx;
+}
+
+.reason-bubble-desc {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.text-red {
+  color: var(--brand-red) !important;
+}
+
+.text-green {
+  color: var(--brand-green) !important;
+}
+
+.text-bold {
+  font-weight: bold;
+}
