@@ -270,7 +270,8 @@
     else if (avgRate > 0.15) localRisk -= 5;
     localRisk = Math.max(5, Math.min(95, localRisk));
 
-    const aiResult = loadCachedAiResult(a);
+    // P3.18 修复：本地引擎模式不读取任何 AI 缓存（避免历史 AI 胡编理由继续显示）
+    const aiResult = localStorage.getItem('AI_ENGINE') === 'local' ? null : loadCachedAiResult(a);
     // Sanity check: AI 模型有时会"幻觉"——收到完整持仓数据却返回"持仓为空"
     // 当实际有持仓但 AI 返回异常值时，fallback 到本地规则引擎
     const hasActualHoldings = funds.length > 0;
@@ -1775,9 +1776,9 @@
                 </div>
 
                 <div style="display: flex; justify-content: flex-end; gap: 10px;">
-                  <!-- P3.18：「本地引擎」在保存左侧：点击清空 AI 配置并切换 engine=local -->
-                  <button class="secondary" id="local-engine-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center;">本地引擎</button>
-                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
+                  <!-- P3.18：「本地引擎」在保存左侧：点击清空 AI 配置并切换 engine=local（规范 secondary-button 样式，与保存等高 44px） -->
+                  <button class="secondary-button" id="local-engine-btn" style="min-height: 44px; font-size: 13px; white-space: nowrap;">本地引擎</button>
+                  <button class="primary" id="save-ai-config-btn" style="padding: 0 16px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 44px;">保存</button>
                 </div>
               </div>
 
@@ -2970,6 +2971,10 @@
       localStorage.removeItem('AI_API_KEY');
       localStorage.removeItem('AI_BASE_URL');
       localStorage.setItem('AI_ENGINE', 'local');
+      // 清理历史 AI 分析缓存（避免切换后仍显示旧 AI 胡编的摘要/理由）
+      Object.keys(localStorage).forEach(function (k) {
+        if (k.indexOf('LAST_AI_ANALYSIS') === 0) localStorage.removeItem(k);
+      });
       if (typeof window.showToast === 'function') {
         window.showToast('已切换到本地引擎（不调用外部 AI API）', 'success');
       } else {

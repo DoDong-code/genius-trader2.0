@@ -87,9 +87,10 @@
         <input class="wx-input" value="{{aiModelName}}" bindinput="onInputAiModelName" placeholder="例如: gpt-5-mini" />
       </view>
 
-      <view class="wx-actions wx-actions-2" style="margin-top: 16rpx;">
-        <button class="btn btn-secondary wx-save-btn" bindtap="onUseLocalEngine">本地引擎</button>
-        <button class="btn btn-primary wx-save-btn" bindtap="onSaveAiConfig">保存</button>
+      <!-- P3.18：本地引擎 + 保存 并排，按 wx-actions 规范（flex 两列 gap 16rpx，按钮等高） -->
+      <view class="wx-actions" style="margin-top: 16rpx;">
+        <button class="btn btn-secondary" bindtap="onUseLocalEngine">本地引擎</button>
+        <button class="btn btn-primary" bindtap="onSaveAiConfig">保存</button>
       </view>
 
       <view class="wx-subcard">

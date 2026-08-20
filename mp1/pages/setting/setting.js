@@ -331,6 +331,11 @@ Page({
     wx.removeStorageSync('ai_base_url_config');
     wx.removeStorageSync('ai_api_key');
     wx.setStorageSync('ai_engine', 'local');
+    // 清理历史 AI 分析缓存（避免切换后仍显示旧 AI 胡编的摘要/理由）
+    const activeName = app.globalData.activeAccountName || '';
+    wx.removeStorageSync('LAST_AI_ANALYSIS_' + activeName);
+    wx.removeStorageSync('LAST_AI_ANALYSIS_TIME_' + activeName);
+    wx.removeStorageSync('LAST_AI_ANALYSIS_MODEL_' + activeName);
     wx.showToast({
       title: hadKey ? '已切换本地引擎，AI 配置已清空' : '已切换本地引擎',
       icon: 'success'

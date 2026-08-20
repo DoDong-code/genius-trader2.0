@@ -354,7 +354,8 @@ Page({
     else if (avgRate > 0.15) localRisk -= 5;
     localRisk = Math.max(5, Math.min(95, localRisk));
 
-    const aiResult = this.loadCachedAiResult(a);
+    // P3.18 修复：本地引擎模式不读取任何 AI 缓存（避免历史 AI 胡编理由继续显示）
+    const aiResult = wx.getStorageSync('ai_engine') === 'local' ? null : this.loadCachedAiResult(a);
     // AI 幻觉检查（对齐 Web app-refactor.js:241-256）：实际有持仓但 AI 返回「持仓为空」或 healthScore<=0 时 fallback 本地规则
     const hasActualHoldings = funds.length > 0;
     const aiDeviationText = (aiResult && aiResult.deviationText) || '';
