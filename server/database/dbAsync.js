@@ -158,6 +158,10 @@ async function ensureCloudSchema() {
       UNIQUE (fund_code, date)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_fund_nav_code_date ON fund_nav (fund_code, date DESC)`,
+    // —— 当天净值缓存（P3.18-NET）：fund_nav 即当天净值缓存表（fund_code+date 唯一）；
+    // source 记录净值来源（xiaobeiyangji/yangjibao/天天基金…），fetched_at 记录获取时间 ——
+    `ALTER TABLE fund_nav ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT ''`,
+    `ALTER TABLE fund_nav ADD COLUMN IF NOT EXISTS fetched_at TIMESTAMPTZ`,
     `CREATE TABLE IF NOT EXISTS fund_holdings (
       id SERIAL PRIMARY KEY,
       fund_code TEXT NOT NULL REFERENCES fund(fund_code) ON DELETE CASCADE,

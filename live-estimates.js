@@ -127,6 +127,33 @@
   }
   window.inferDataStatusFromEstimate = inferDataStatusFromEstimate;
 
+  // P3.18-NET：显式刷新时批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
+  // 只在「刷新数据」按钮调用；切 Tab/切数据源/页面加载不调用（读本地缓存，不发起净值请求）。
+  function refreshTodayNav() {
+    var state = window.portfolioState || {};
+    var active = typeof state.getActive === 'function' ? state.getActive() : '';
+    var funds = (state.accounts && state.accounts[active] && state.accounts[active].funds) || [];
+    var codes = [];
+    funds.forEach(function (f) { if (f && f.code && codes.indexOf(String(f.code)) === -1) codes.push(String(f.code)); });
+    codes = codes.slice(0, 20); // 并发上限
+    return Promise.all(codes.map(function (code) {
+      return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav')
+        .then(function (res) {
+          if (res && res.success && res.cached && res.nav && res.date) {
+            // 缓存已就绪：更新已更新净值缓存，让徽章立即变蓝（不等下次快照）
+            updatedNavDates[String(code)] = { day: shanghaiDate(), navDate: res.date };
+          }
+          return null;
+        })
+        .catch(function () { return null; });
+    })).then(function () {
+      // 重新扫描行徽章（不 force，读缓存）
+      if (typeof scan === 'function') scan(false, true);
+      markEstimatesRefreshed();
+    });
+  }
+  window.refreshTodayNav = refreshTodayNav;
+
   // 已更新净值的缓存：code -> { day, navDate }，切换 tab 不重复请求，仅手动刷新时更新
   var updatedNavDates = {};
 

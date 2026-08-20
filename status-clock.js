@@ -195,6 +195,10 @@
     if (typeof window.refreshMarketIndices === 'function') {
       refreshTasks.push(Promise.resolve(window.refreshMarketIndices()));
     }
+    // P3.18-NET：刷新数据按钮同步当天净值（后端缓存优先，命中不请求 provider；不清空已有当天净值）
+    if (typeof window.refreshTodayNav === 'function') {
+      refreshTasks.push(Promise.resolve(window.refreshTodayNav()));
+    }
     Promise.all(refreshTasks)
       .finally(function () {
         refresh();

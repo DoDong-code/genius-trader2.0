@@ -207,6 +207,7 @@ Page({
 
   onPullDownRefresh() {
     this.refreshData();
+    this.syncTodayNav(); // P3.18-NET：下拉刷新同步当天净值（后端缓存优先）
     setTimeout(() => {
       wx.stopPullDownRefresh();
       wx.showToast({ title: '列表已更新', icon: 'success' });
@@ -243,9 +244,37 @@ Page({
     wx.showLoading({ title: '正在同步估值...' });
     setTimeout(() => {
       this.refreshData();
+      this.syncTodayNav(); // P3.18-NET：显式刷新时同步当天净值（后端缓存优先，命中不请求 provider）
       wx.hideLoading();
       wx.showToast({ title: '估值已同步', icon: 'success' });
     }, 600);
+  },
+
+  // P3.18-NET：批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
+  // 只在显式刷新（下拉刷新/刷新按钮）调用；切 Tab/切数据源/onShow 不调用（读本地缓存，不发起净值请求）。
+  syncTodayNav() {
+    const account = app.getActiveAccount();
+    const funds = (account && account.funds) || [];
+    if (!funds.length) return;
+    const codes = [...new Set(funds.map(f => f && f.code).filter(Boolean))].slice(0, 20); // 并发上限
+    codes.forEach(code => {
+      http.get(`/api/fund/${encodeURIComponent(code)}/today-nav`, null, { silent: true })
+        .then(res => {
+          if (!res || !res.success || !res.cached || !res.nav) return;
+          // 缓存已就绪：更新 navDateMap，让当前页面徽章立即变蓝（不等下次快照）
+          const map = { ...(this.data.navDateMap || {}) };
+          const today = app.globalData.shanghaiToday || '';
+          map[code] = {
+            navDate: res.date,
+            source: res.source || 'xiaobeiyangji',
+            officialChange: null,
+            day: today,
+            kind: 'updated'
+          };
+          this.setData({ navDateMap: map });
+        })
+        .catch(() => { /* 静默：单只失败不影响其他 */ });
+    });
   },
 
   navigateToOverview() {

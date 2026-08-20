@@ -663,6 +663,19 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // P3.18-NET：当天净值（缓存优先）。前端页面加载/刷新时调用；
+  // 命中 fund_nav 当天缓存 → 直接返回（不请求 provider）；未命中且收盘后 → 按小倍→养基宝获取并写缓存。
+  // 幂等：即使连续点击刷新，也只会命中缓存，不会重复请求 provider。
+  match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/today-nav$/);
+  if (match) {
+    const { ensureTodayNav } = require('../services/navCacheService');
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const result = await ensureTodayNav(match[0], { userId: user ? Number(user.id) : 0 });
+    sendJson(response, 200, { success: true, ...result });
+    return true;
+  }
+
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/calibration$/);
   if (match) {
     const calibration = await calibrateFund(match[0], {
