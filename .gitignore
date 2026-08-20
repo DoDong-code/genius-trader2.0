@@ -21,3 +21,6 @@ design-qa.md
 # Runtime logs
 *.log
 server.out.log
+server/scripts/phase38_inspect_db.js
+server/scripts/phase37b_import_missing_funds.js
+cred_audit.js

@@ -21,7 +21,8 @@ async function fetchText(url, options = {}) {
         headers: {
           Accept: options.accept || 'application/json,text/html,application/javascript;q=0.9,*/*;q=0.8',
           Referer: options.referer || `${EASTMONEY_FUND}/`,
-          'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0'
+          'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0',
+          ...(options.extraHeaders || {}) // Phase 3.17-E：允许附加头（如 Nasdaq 的 Origin），默认行为不变
         },
         signal: AbortSignal.timeout(Number(options.timeout || 15000))
       });
@@ -45,7 +46,7 @@ async function fetchText(url, options = {}) {
       }
     }
   }
-  const error = new Error(`东方财富数据请求失败：${lastError?.message || '未知错误'}`);
+  const error = new Error(`${options.errorLabel || '东方财富数据请求失败'}：${lastError?.message || '未知错误'}`);
   error.statusCode = 502;
   error.cause = lastError;
   throw error;
@@ -596,10 +597,8 @@ function finalizeStockHistory(rawRows, code, days) {
   return trimmed.map(r => ({ stock_code: String(code), ...r }));
 }
 
-// 数据源 1：腾讯财经 qfq 日 K（公开、无需 key、返回真实 A 股 OHLCV）
-async function fetchStockHistoryTencent(code, days) {
-  const prefix = stockExchangePrefix(code);
-  const symbol = `${prefix}${code}`;
+// 腾讯财经 qfq 日 K 通用实现（公开、无需 key；symbol 形如 sh600988 / hk01787）
+async function fetchStockHistoryTencentSymbol(symbol, days) {
   const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},day,,,${days},qfq`;
   const text = await fetchText(url, {
     accept: 'application/json,*/*',
@@ -612,7 +611,7 @@ async function fetchStockHistoryTencent(code, days) {
   if (!json || json.code !== 0) throw new Error('腾讯返回 code!=0 或解析失败');
   const node = json.data && json.data[symbol];
   if (!node) throw new Error('腾讯无该标的节点');
-  const series = node.qfqday || node.day || node.qfqday || node.kline;
+  const series = node.qfqday || node.day || node.kline;
   if (!Array.isArray(series) || !series.length) throw new Error('腾讯无 qfqday 数据');
   // 腾讯 qfqday 数组顺序：[date, open, close, high, low, volume(手), amount?]
   return series.map(arr => {
@@ -629,6 +628,16 @@ async function fetchStockHistoryTencent(code, days) {
     }
     return null;
   }).filter(Boolean);
+}
+
+// 数据源 1：腾讯财经 qfq 日 K（A股 sh/sz 前缀，Phase 3.17-B 起 A股链路不变）
+async function fetchStockHistoryTencent(code, days) {
+  return fetchStockHistoryTencentSymbol(`${stockExchangePrefix(code)}${code}`, days);
+}
+
+// Phase 3.17-E：腾讯港股日 K（hk<5位代码>，免 Key、实测可覆盖 2 年历史；source=tencent-hk-kline）
+async function fetchStockHistoryTencentHk(code, days) {
+  return fetchStockHistoryTencentSymbol(`hk${code}`, days);
 }
 
 // 数据源 2：新浪财经日 K（公开、无需 key、返回真实 A 股 OHLCV，含命名字段）
@@ -719,22 +728,143 @@ async function fetchStockHistoryEastmoney(code, days, secid) {
   throw new Error(errMsg);
 }
 
+// Yahoo Historical（港美日韩 fallback；A股绝不用 Yahoo）。
+// 复用 fetchStockQuoteYahoo 的请求/解析基础设施；返回统一历史记录格式（date/open/close/high/low/volume/amount）。
+async function fetchStockHistoryYahoo(yfSymbol, days) {
+  const range = days <= 120 ? '6mo' : days <= 250 ? '1y' : '2y';
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yfSymbol)}?interval=1d&range=${range}`;
+  const text = await fetchText(url, {
+    referer: 'https://finance.yahoo.com/',
+    accept: 'application/json,*/*',
+    timeout: 8000,
+    attempts: 2,
+    errorLabel: 'Yahoo 数据请求失败' // Phase 3.17-B：Yahoo 错误不再混入 Eastmoney 文案
+  });
+  const json = safeJsonParse(text);
+  if (json && json.chart && json.chart.error) {
+    throw new Error(`Yahoo error: ${json.chart.error.code || ''} ${json.chart.error.description || ''}`.trim());
+  }
+  const result = json && json.chart && json.chart.result && json.chart.result[0];
+  const timestamps = result && result.timestamp;
+  const quote = result && result.indicators && result.indicators.quote && result.indicators.quote[0];
+  if (!Array.isArray(timestamps) || !timestamps.length || !quote) throw new Error('Yahoo 无有效历史数据');
+  const records = [];
+  for (let i = 0; i < timestamps.length; i++) {
+    const close = quote.close[i];
+    if (close === null || close === undefined) continue; // 剔除无效/null
+    records.push({
+      date: new Date(timestamps[i] * 1000).toISOString().slice(0, 10),
+      open: quote.open[i], close,
+      high: quote.high[i], low: quote.low[i],
+      volume: quote.volume[i], amount: null
+    });
+  }
+  if (!records.length) throw new Error('Yahoo 校验后无有效记录');
+  records.sort((a, b) => String(a.date).localeCompare(String(b.date))); // 日期升序
+  return records;
+}
+
+// ── Phase 3.17-E：Nasdaq 公开历史 API（免 Key，仅美股 ticker；source=nasdaq-kline）──
+// 实测（Phase 3.17-D）：单发稳定；连续快速请求会触发风控并返回误导性 "Symbol not exists"，
+// 因此强制相邻请求间隔 >= 1500ms，不做并发。
+let lastNasdaqRequestAt = 0;
+const NASDAQ_MIN_INTERVAL_MS = 1500;
+
+// Nasdaq 日期格式 MM/DD/YYYY → YYYY-MM-DD（finalizeStockHistory 契约）
+function nasdaqToIsoDate(value) {
+  const m = String(value).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  return `${m[3]}-${String(m[1]).padStart(2, '0')}-${String(m[2]).padStart(2, '0')}`;
+}
+
+// Nasdaq 数值为字符串（可能带 $ 与千分位逗号），统一清洗为有限数；非法返回 NaN（由 finalize 校验丢弃）
+function toFiniteNumber(value) {
+  if (value === null || value === undefined) return NaN;
+  const n = Number(String(value).replace(/[$,]/g, ''));
+  return Number.isFinite(n) ? n : NaN;
+}
+
+async function fetchStockHistoryNasdaq(ticker, days) {
+  const waitMs = NASDAQ_MIN_INTERVAL_MS - (Date.now() - lastNasdaqRequestAt);
+  if (waitMs > 0) await sleep(waitMs); // 保守限速，防风控
+  lastNasdaqRequestAt = Date.now();
+  const toDate = new Date();
+  const fromDate = new Date(Date.now() - days * 86400000 * 2); // 2 倍余量，确保取满 days 个交易日
+  const url = `https://api.nasdaq.com/api/quote/${encodeURIComponent(ticker)}/historical?assetclass=stocks&fromdate=${fromDate.toISOString().slice(0, 10)}&todate=${toDate.toISOString().slice(0, 10)}&limit=${days + 30}`;
+  const text = await fetchText(url, {
+    accept: 'application/json,text/plain, */*',
+    referer: 'https://www.nasdaq.com/',
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    extraHeaders: { Origin: 'https://www.nasdaq.com' },
+    attempts: 2,
+    timeout: 10000,
+    errorLabel: 'Nasdaq 数据请求失败'
+  });
+  const json = safeJsonParse(text);
+  const rows = json && json.data && json.data.tradesTable && json.data.tradesTable.rows;
+  if (!Array.isArray(rows) || !rows.length) throw new Error('Nasdaq 无有效历史数据');
+  const out = [];
+  for (const r of rows) {
+    const date = nasdaqToIsoDate(r && r.date);
+    if (!date) continue;
+    out.push({
+      date,
+      open: toFiniteNumber(r.open), close: toFiniteNumber(r.close),
+      high: toFiniteNumber(r.high), low: toFiniteNumber(r.low),
+      volume: toFiniteNumber(r.volume), amount: null
+    });
+  }
+  if (!out.length) throw new Error('Nasdaq 校验后无有效记录');
+  return out; // 排序/去重/校验由 finalizeStockHistory 统一完成
+}
+
 /**
  * 获取个股历史日 K 线（用于校准所需的 stock_price 历史行情）。
- * 多数据源 fallback：腾讯 → 新浪 → 东方财富，任一可用即返回；全部失败返回 records:[]（绝不伪造）。
+ * 多数据源 fallback（Phase 3.17-E 起按市场路由）：
+ * - A股（6 位数字）：tencent → sina → eastmoney（不变，绝不进 Yahoo/Nasdaq）
+ * - 港股（5 位纯数字）：tencent-hk(hk<code>) → eastmoney(116.xxxxx) → yahoo
+ * - 美股（字母 ticker）：nasdaq → eastmoney(105./106./107.) → yahoo
+ * - 日韩（.T/.KS，含 000660/285A/JP3236330001）：跳过三源只走 Yahoo（杜绝跨市场误同步）
+ * 任一可用即返回；全部失败返回 records:[]（绝不伪造）。
  * 返回 { records: [{ stock_code, date, open, close, high, low, volume, amount, price, change_percent }], source, secid }。
  * - price 始终 = 收盘价（与 stockPrice upsert 契约一致）；change_percent 存小数（1.23% => 0.0123）。
  * - 超时策略：每个数据源 timeout=8000ms、最多 2 次尝试；数据源依次尝试，不无限重试，单源失败不阻塞整体。
  * - 关键错误处理：HTML 响应 / 空数据 / 解析错误一律视为该数据源失败，记录 [stock-history] 日志；全部失败记录 all_sources_failed。
+ * - 防误同步（Phase 3.17-B/E）：先按归一化代码判定市场，绝不通过“请求成功”反推市场归属；
+ *   某源成功后立即返回，不再请求后续数据源。
  */
 async function fetchStockHistory(code, options = {}) {
   const days = Math.min(Math.max(Number(options.days || options.limit || 365), 1), 2000);
-  const secids = stockSecIds(code); // 仍用于东方财富 secid（如 1.603986）
-  const sources = [
-    { name: 'tencent', run: () => fetchStockHistoryTencent(code, days) },
-    { name: 'sina', run: () => fetchStockHistorySina(code, days) },
-    { name: 'eastmoney', run: () => fetchStockHistoryEastmoney(code, days, secids[0]) }
-  ];
+  const secids = stockSecIds(code); // 仍用于东方财富 secid（如 1.603986 / 116.01787 / 105.AMD）
+  const normalized = normalizeStockCode(code);
+  const isJpKr = /\.(T|KS)$/.test(normalized); // 日韩：Eastmoney 不可靠，直接 Yahoo（与 fetchStockQuote 一致）
+  const raw = String(code).trim();
+  const isAStock = /^\d{6}$/.test(raw) && !isJpKr;            // A股：6 位纯数字
+  const isHkStock = /^\d{5}$/.test(raw) && !isJpKr;           // 港股：5 位纯数字 → 腾讯 hk<code>
+  const isUsStock = /^[A-Z][A-Z0-9.\-]{0,9}$/.test(raw.toUpperCase()) && !isJpKr; // 美股：字母 ticker → Nasdaq
+  const sources = [];
+  if (isAStock) {
+    sources.push(
+      { name: 'tencent', run: () => fetchStockHistoryTencent(code, days) },
+      { name: 'sina', run: () => fetchStockHistorySina(code, days) },
+      { name: 'eastmoney', run: () => fetchStockHistoryEastmoney(code, days, secids[0]) }
+    );
+  } else if (isHkStock) {
+    sources.push(
+      { name: 'tencent-hk', run: () => fetchStockHistoryTencentHk(code, days) },
+      { name: 'eastmoney', run: () => fetchStockHistoryEastmoney(code, days, secids[0]) }
+    );
+  } else if (isUsStock) {
+    sources.push(
+      { name: 'nasdaq', run: () => fetchStockHistoryNasdaq(code, days) },
+      { name: 'eastmoney', run: () => fetchStockHistoryEastmoney(code, days, secids[0]) }
+    );
+  }
+  // Yahoo Historical fallback：仅港美日韩（A股 6 位数字绝不用 Yahoo）
+  const yf = toYahooSymbol(normalized);
+  if (!isAStock && yf) {
+    sources.push({ name: 'yahoo', run: () => fetchStockHistoryYahoo(yf, days) });
+  }
   let lastError = null;
   for (const src of sources) {
     try {
