@@ -94,6 +94,15 @@
     return Number(time.hour) * 60 + Number(time.minute) >= 15 * 60;
   }
 
+  // P3.18 时间模型：交易日 9:00（北京时间）开盘前判断——开盘前显示最近确认净值（蓝）
+  function isBeforeOpen() {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date());
+    const time = Object.fromEntries(parts.map(part => [part.type, part.value]));
+    return Number(time.hour) * 60 + Number(time.minute) < 9 * 60;
+  }
+
   // QDII 类基金：今天结算上一交易日净值（如 8.7 交易，结算 8.6 净值）
   // 仅美股/全球类基金延迟；港股（恒生/港股/港美）基金按当日结算，交易日正常显示当日估算
   var QDII_CODES = { '022184': true, '014002': true };
@@ -452,12 +461,8 @@
           fund.todayEstimate = profit;
           fund.estimateConfidence = estimate.confidence || null;
           clearNavUpdated(row);
-          // P3.18-ESTIMATE-STATE：provider 当日 → 蓝；旧 → 灰
-          if ((estimate && estimate.data_status) === 'PROVIDER_TODAY') {
-            markProviderTodayBadge(row, fund, pLabel || '小倍');
-          } else {
-            markEstimateBadge(row, fund, pLabel || '估值');
-          }
+          // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
+          markEstimateBadge(row, fund, pLabel || '估值');
           updateTodayCell(row, change, profit);
           row.dataset.estimateState = 'ready';
           markEstimatesRefreshed();
@@ -576,16 +581,18 @@
         fund.estimateConfidence = estimate.confidence || null;
         updateTodayCell(row, change, profit);
 
-        // 数据标识徽章统一决策（P3.18-ESTIMATE-STATE：后端 data_status 权威；缺失时降级旧逻辑）
+        // 数据标识徽章统一决策（P3.18 时间模型：蓝=净值已确认，灰=交易日 9:00 后未确认）
         // CONFIRMED_NAV → 蓝 MMDD（已在上方 officialUpdated 分支处理）
-        // PROVIDER_TODAY → 蓝「小倍/养基宝」；PROVIDER_STALE → 灰「小倍/养基宝」；NO_DATA → 灰「估值」
-        if (!officialUpdated && !(!isTrading && navDate)) {
-          // P3.18-ESTIMATE-STATE：后端 data_status 权威；缺失时前端用 estimate 响应自推（部署后后端接管）
+        // 交易日 9:00 开盘前 → 蓝最近净值；非交易日有净值 → 蓝（已在上方 !isTrading && navDate 分支处理）
+        // 灰 = 交易日 9:00 后净值未确认：provider 当日估值【不算】净值 → 灰「小倍/养基宝」；无数据 → 灰「估值」
+        if (isBeforeOpen() && navDate) {
+          markNavUpdated(row, navDate, fund);
+        } else if (!officialUpdated && !(!isTrading && navDate)) {
+          // P3.18：后端 data_status 权威；缺失时前端用 estimate 响应自推（部署后后端接管）
           let dataStatus = estimate && estimate.data_status;
           if (!dataStatus) dataStatus = inferDataStatusFromEstimate(fund, estimate);
-          if (dataStatus === 'PROVIDER_TODAY') {
-            markProviderTodayBadge(row, fund, providerLabel || '小倍');
-          } else if (dataStatus === 'PROVIDER_STALE') {
+          if (dataStatus === 'PROVIDER_TODAY' || dataStatus === 'PROVIDER_STALE') {
+            // provider 当日估值/旧数据 → 灰「小倍/养基宝」（未确认净值不蓝）
             markEstimateBadge(row, fund, providerLabel || '小倍');
           } else if (dataStatus === 'NO_DATA') {
             markEstimateBadge(row, fund, '估值');
@@ -616,12 +623,8 @@
                   : (Number(fund.amount) || 0) * pChange;
                 updateTodayCell(row, fund.today, fund.todayEstimate);
                 clearNavUpdated(row);
-                // P3.18-ESTIMATE-STATE：provider 当日 → 蓝；旧 → 灰
-                if ((pv && pv.data_status) === 'PROVIDER_TODAY') {
-                  markProviderTodayBadge(row, fund, pLabel || '小倍');
-                } else {
-                  markEstimateBadge(row, fund, pLabel || '估值');
-                }
+                // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
+                markEstimateBadge(row, fund, pLabel || '估值');
                 if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
               }).catch(function () {});
           }, 2500);

@@ -1345,17 +1345,13 @@
   }
 
   function handlePayload(fund, backdrop, ctl, payload) {
+    // P3.18 整改：fetch 已成功 → 永远渲染详情（不再因 history.length===0 进入 SYNCING）。
+    // 核心诉求：历史净值/十大持仓 = 不变缓存 → 必须秒开。
+    // fund_nav 无历史/基金未导入 → 显示「暂无历史」+ 仍渲染持仓等其余字段，不进入重试循环。
+    // 后端 fetch 异常才走 retry（见 retryOrFail），那时才是真正「数据源不可用」。
+    ctl.status = 'SUCCESS';
     const history = Array.isArray(payload.history) ? payload.history : [];
-    if (history.length > 0) {
-      ctl.status = 'SUCCESS';
-      finishSuccess(fund, backdrop, payload, history, ctl);
-      return;
-    }
-    const historyStatus = payload.data_status?.history;
-    // 后端 data_status.history 仅有 normal / pending，没有“永久无数据”信号。
-    // 因此 history 为空且非 pending 时，不能判定为 EMPTY（失败≠无数据），
-    // 一律按“尚未取得数据”继续等待/轮询（显示正在同步），绝不提前结束加载。
-    enterSyncing(fund, backdrop, ctl, payload);
+    finishSuccess(fund, backdrop, payload, history, ctl);
   }
 
   // 统一入口：LOADING → SUCCESS / SYNCING / RETRYING / FAILED（空 history 不再判 EMPTY）。

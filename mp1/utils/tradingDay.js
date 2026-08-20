@@ -97,11 +97,15 @@ export function providerDisplayName(source) {
 export function computeDataBadge(fund, navDate, estimateSource, now = new Date(), officialChange = null, hasEstimateData = false, dataStatus = null) {
   const providerLabel = providerDisplayName(estimateSource);
 
+  // —— P3.18 时间模型（用户确认）——
+  // 蓝 = 净值已确认：fund_nav 有 expected 日（CONFIRMED_NAV）/ 非交易日最近净值 / 交易日 9:00 开盘前最近净值
+  // 灰 = 交易日 9:00 开盘后 ～ 净值确认前（盘中/盘后未确认；provider 当日估值【不算】净值 → 不蓝）
   if (dataStatus === 'CONFIRMED_NAV' && navDate) {
     return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
   }
+  // PROVIDER_TODAY（provider 当日估值）≠ 确认净值 → 灰（同 PROVIDER_STALE）
   if (dataStatus === 'PROVIDER_TODAY') {
-    return { text: providerLabel || '小倍', tone: 'blue', kind: 'provider-today', source: estimateSource || null };
+    return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
   }
   if (dataStatus === 'PROVIDER_STALE') {
     return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
@@ -124,13 +128,26 @@ export function computeDataBadge(fund, navDate, estimateSource, now = new Date()
   if (!trading && navDate) {
     return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
   }
-  // 交易中净值未确认：有估值/数据源数据 → 灰色（数据源名 或「估值」）；数据源不决定颜色
+  // 交易日 9:00 开盘前：显示最近一次确认净值（蓝）
+  if (trading && isBeforeOpen(now) && navDate) {
+    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
+  }
+  // 交易时段（9:00 后）净值未确认：有估值/数据源数据 → 灰色（数据源名 或「估值」）；数据源不决定颜色
   if (hasEstimateData) {
     const label = providerLabel || '估值';
     return { text: label, tone: 'gray', kind: 'estimate', source: estimateSource || null };
   }
   // 无净值、无估值数据 → 灰色「估值」
   return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
+}
+
+// P3.18：交易日 9:00（北京时间）开盘前判断——开盘前显示最近确认净值（蓝）
+export function isBeforeOpen(d = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+  }).formatToParts(d);
+  const t = Object.fromEntries(parts.map(p => [p.type, p.value]));
+  return Number(t.hour) * 60 + Number(t.minute) < 9 * 60;
 }
 
 const PROVIDER_SOURCE_SET = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);
