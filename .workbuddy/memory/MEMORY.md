@@ -39,9 +39,9 @@
 
 - **后端工作目录（2026-08-17 起，实测确认）= `C:\Users\Administrator\Desktop\Codex3 基金\genius-trader2.0`**（仓库根目录本身为纯英文 `genius-trader2.0`，套在 CJK 父目录 `Codex3 基金` 下；因 `.git` 在英文目录内，Bash `cd` / `node --check` / `git diff` / `git rev-parse` 均正常工作，GitHub Desktop 可正常打开）。这是从 GitHub `DoDong-code/genius-trader2.0`@main 重新 clone 的副本，**Phase 2 的 11 个文件改动在此提交并 push**。
 - ⚠️ **旧仓库 `C:\Users\Administrator\Desktop\Codex3 基金\天才交易员` 的 `.git` 已损坏**：pack 数据文件（`.pack`）丢失，仅剩 `.idx`，`refs/heads/main` 与 `packed-refs` 缺失，无法被任何 git 打开。其源码文件完好可作参考，但**不要再对其做 git 操作**。后续后端 git 操作一律在 `genius-trader2.0` 目录进行。
-- **workspace `小程序` 已清理为纯小程序目录**：只剩 `mp1/`（小程序）、`.workbuddy/`（项目数据）、`编组.png`。
+- **⚠️ 2026-08-20 工作区迁移：`C:\Users\Administrator\Desktop\小程序` 文件夹已弃用**。mp1 小程序源码已迁入 `genius-trader2.0\mp1`（删除 mp1/.git 后入库，commit `ff2fcba`），项目数据 `.workbuddy`（memory/skills/Phase 报告）已复制到 `genius-trader2.0\.workbuddy`（与旧目录内容一致）。**今后所有 mp1 开发/检查路径 = `C:\Users\Administrator\Desktop\Codex3 基金\genius-trader2.0\mp1`**；项目 memory/skill 主数据源 = `genius-trader2.0\.workbuddy`。旧 `小程序\mp1` 已删、旧 `小程序\.workbuddy` 弃用保留（勿再读写，勿删 `.workbuddy` 之外内容）。
 - 后端部署源：GitHub `DoDong-code/genius-trader2.0`@main，push 后 Render 自动部署。
 - **agent 无 GitHub 凭据（无 gh/token/SSH，/dev/tty 不可用），无法 push**；用户本地有 GitHub Desktop。**以后需要推送时，直接告诉用户「请在 GitHub Desktop 推送」即可，不要反复尝试 push**。
-- 小程序 mp1 不走 git 部署（手动上传体验版），其 git 工作区是历史累积未提交，不强制纳入 git。
+- 小程序 mp1 随主仓库 git 管理（手动上传体验版到微信；mp1 不再有独立 .git）。⚠️ mp1 的 `.gitignore` 不含 `miniprogram_npm` 等，未来若引入 npm 依赖注意补忽略。
 - 本地 clone 与远程分叉时：先 `git ls-remote` 确认远程，必要时直接备份 + 重新 clone；**不要 stash/reset --hard**（曾因此损坏过 .git）。
 - 本机 Windows 环境 Recycle Bin COM 不可用（`SendToRecycleBin` 报「系统不支持该功能」），大目录删除需分步（先删 node_modules 再删剩余）。
