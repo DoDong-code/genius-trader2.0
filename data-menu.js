@@ -10,13 +10,36 @@
     return { version: 1, exportedAt: new Date().toISOString(), accounts: state.accounts, active: state.getActive() };
   }
   function closeMenu() { document.querySelector('.data-menu')?.remove(); }
-  function downloadData() {
-    var blob = new Blob([JSON.stringify(snapshot(), null, 2)], { type: 'application/json;charset=utf-8' });
+  // P2：导出范围（全部数据 / 投资策略），与小程序一致；「导出数据」上方先选范围
+  function exportSnapshot(kind) {
+    var payload;
+    if (kind === 'strategy') {
+      var state = window.portfolioState;
+      payload = {
+        version: 1,
+        kind: 'strategy',
+        exportedAt: new Date().toISOString(),
+        strategies: Object.keys(state.accounts).map(function (name) {
+          return { name: name, strategy: state.accounts[name].strategy || [] };
+        })
+      };
+    } else {
+      payload = snapshot();
+    }
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' });
     var link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'genius-trader-data-' + new Date().toISOString().slice(0, 10) + '.json';
+    link.download = 'genius-trader-' + (kind === 'strategy' ? 'strategy' : 'data') + '-' + new Date().toISOString().slice(0, 10) + '.json';
     document.body.appendChild(link); link.click(); link.remove();
     window.setTimeout(function () { URL.revokeObjectURL(link.href); }, 0);
+  }
+  function downloadData() {
+    var overlay = dialog('导出数据', '请选择导出范围：', '<button type="button" class="secondary-button" data-export-all>全部数据</button><button type="button" class="secondary-button" data-export-strategy>投资策略</button>');
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) closeDialog(overlay);
+      if (event.target.closest('[data-export-all]')) { closeDialog(overlay); exportSnapshot('all'); }
+      if (event.target.closest('[data-export-strategy]')) { closeDialog(overlay); exportSnapshot('strategy'); }
+    });
   }
   function validData(data) {
     if (!data || typeof data !== 'object' || !data.accounts || typeof data.accounts !== 'object') return null;
@@ -55,6 +78,31 @@
     overlay.addEventListener('click', function (event) {
       if (event.target === overlay || event.target.closest('[data-cancel]')) closeDialog(overlay);
       if (event.target.closest('[data-confirm]')) { restore(payload); closeDialog(overlay); }
+    });
+  }
+  // P2：导入「投资策略」专用备份（kind='strategy'）：仅合并对应账户的 strategy，不覆盖持仓
+  function confirmImportStrategy(payload) {
+    var overlay = dialog('导入策略确认', '导入将覆盖对应账户的「投资策略」，持仓与交易记录不受影响。是否导入？', '<button type="button" data-cancel>取消</button><button type="button" class="confirm-delete" data-confirm>确认导入</button>');
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay || event.target.closest('[data-cancel]')) closeDialog(overlay);
+      if (event.target.closest('[data-confirm]')) {
+        closeDialog(overlay);
+        var state = window.portfolioState;
+        var count = 0;
+        payload.strategies.forEach(function (item) {
+          if (state.accounts[item.name] && Array.isArray(item.strategy)) {
+            state.accounts[item.name].strategy = item.strategy;
+            count++;
+          }
+        });
+        if (count === 0) {
+          var fail = dialog('导入失败', '备份中未找到可匹配的账户（账户名需与当前一致）。', '<button type="button" data-cancel>知道了</button>');
+          fail.addEventListener('click', function (e) { if (e.target.closest('[data-cancel]')) closeDialog(fail); });
+          return;
+        }
+        window.savePortfolioState?.();
+        if (typeof window.showToast === 'function') window.showToast('已导入 ' + count + ' 个账户策略', 'success');
+      }
     });
   }
   function restoreDefaults() {
@@ -205,8 +253,8 @@
     var isLoggedIn = !!(window.auth && window.auth.state && window.auth.state.user);
     var authLabel = isLoggedIn ? escapeHtml(window.auth.state.user.email) : '登录 / 注册';
     var logoutHtml = isLoggedIn ? '<button type="button" data-data-menu="logout"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(2px);" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><polyline points="15 6 21 12 15 18"/></svg></span>退出登录</button>' : '';
-    var backupManagerHtml = isLoggedIn ? '<button type="button" data-data-menu="backups"><span>☁</span>备份管理</button>' : '';
-    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + backupManagerHtml + logoutHtml;
+    // P2：右上角三点移除「备份管理」，备份功能移入账号弹窗（openBackupManager 由 auth.js 复用）
+    menu.innerHTML = '<button type="button" data-data-menu="auth"><span><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" style="transform: translateY(1px);" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-3.9 3.6-6 8-6s8 2.1 8 6"/></svg></span>' + authLabel + '</button><span class="data-menu-separator"></span><button type="button" data-data-menu="export"><span>⇧</span>导出数据</button><button type="button" data-data-menu="import"><span style="display: inline-block; transform: rotate(180deg);">⇧</span>导入数据</button><span class="data-menu-separator"></span><button type="button" data-data-menu="restore"><span>↺</span>恢复默认</button>' + logoutHtml;
     document.body.appendChild(menu);
     var rect = moreButton.getBoundingClientRect();
     menu.style.top = (rect.bottom + 10) + 'px'; menu.style.right = Math.max(16, window.innerWidth - rect.right) + 'px';
@@ -229,7 +277,6 @@
       if (type === 'export') downloadData();
       if (type === 'import') fileInput.click();
       if (type === 'restore') restoreDefaults();
-      if (type === 'backups') openBackupManager();
       if (type === 'logout') {
         if (window.auth && window.auth.logout) window.auth.logout();
       }
@@ -237,11 +284,20 @@
     }
     if (!event.target.closest('.data-menu') && !event.target.closest('.more-button')) closeMenu();
   });
+  // P2：备份管理移入账号弹窗（auth.js 调用）
+  window.openBackupManager = openBackupManager;
   fileInput.addEventListener('change', function () {
     var file = fileInput.files && fileInput.files[0]; fileInput.value = '';
     if (!file) return;
-    file.text().then(JSON.parse).then(validData).then(function (payload) {
-      if (!payload) throw new Error('invalid'); confirmImport(payload);
+    file.text().then(JSON.parse).then(function (payload) {
+      // P2：投资策略专用导出（kind='strategy'）→ 仅合并策略，不覆盖持仓
+      if (payload && payload.kind === 'strategy' && Array.isArray(payload.strategies)) {
+        confirmImportStrategy(payload);
+        return;
+      }
+      var valid = validData(payload);
+      if (!valid) throw new Error('invalid');
+      confirmImport(valid);
     }).catch(function () { dialog('无法导入', '请选择由 Genius trader 导出的有效 JSON 备份文件。', '<button type="button" data-cancel>知道了</button>').addEventListener('click', function (event) { if (event.target.closest('[data-cancel]')) closeDialog(event.currentTarget); }); });
   });
 }());

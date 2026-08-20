@@ -186,13 +186,25 @@
         <h2>已登录</h2>
         <p class="apple-dialog-message">${escapeHtml(state.user ? state.user.email : '')}，数据已同步到云端。</p>
         <div style="display: flex; gap: 10px; margin: 4px 0 0;">
-          <button type="button" class="secondary-button" id="auth-backup-btn" style="flex: 1;">备份云端</button>
+          <button type="button" class="secondary-button" id="auth-backup-btn" style="flex: 1;">立即备份</button>
           <button type="button" class="secondary-button" id="auth-restore-btn" style="flex: 1;">恢复本地</button>
+        </div>
+        <!-- P2：备份功能移入账号弹窗，两个按钮下方增加「备份列表」 -->
+        <div style="margin-top: 8px;">
+          <button type="button" class="secondary-button" id="auth-backups-btn" style="width: 100%;">备份列表</button>
         </div>
       </div>
     `);
     const backupBtn = layer.querySelector('#auth-backup-btn');
     const restoreBtn = layer.querySelector('#auth-restore-btn');
+    const backupsBtn = layer.querySelector('#auth-backups-btn');
+    backupsBtn.addEventListener('click', () => {
+      if (typeof window.openBackupManager === 'function') {
+        window.openBackupManager();
+      } else {
+        window.showToast('备份功能暂不可用', 'warning');
+      }
+    });
     backupBtn.addEventListener('click', async () => {
       backupBtn.disabled = true;
       backupBtn.textContent = '备份中…';
@@ -204,7 +216,7 @@
         window.showToast('备份失败：' + (error.message || '网络错误'), 'error');
       } finally {
         backupBtn.disabled = false;
-        backupBtn.textContent = '备份云端';
+        backupBtn.textContent = '立即备份';
       }
     });
     restoreBtn.addEventListener('click', async () => {

@@ -28,15 +28,17 @@
   function formatMoney(value) {
     var amount = Number(value) || 0;
     var sign = amount < 0 ? '−' : amount > 0 ? '+' : '';
+    // P2 统一：金额最多 2 位小数、不强制补 0
     return sign + '' + Math.abs(amount).toLocaleString('zh-CN', {
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2
     });
   }
 
   function formatPercent(value) {
     var rate = (Number(value) || 0) * 100;
-    return (rate > 0 ? '+' : '') + rate.toFixed(2) + '%';
+    // P2 统一：百分比最多 2 位小数、不强制补 0
+    return (rate > 0 ? '+' : '') + String(Number(rate.toFixed(2))) + '%';
   }
 
   function marketClass(value) {
@@ -249,6 +251,29 @@
     }
   }
 
+  // 蓝色数据源标识（P0 估值状态修复）：有估值/数据源数据时显示蓝色徽章
+  // provider 名（小倍/养基宝）或「估算」；与 .nav-updated-badge 同色系（蓝），区别于灰色 .nav-estimate-badge
+  function markDataSourceBadge(row, fund, label) {
+    var meta = row.querySelector('.fund-info small');
+    if (!meta) return;
+    setFundMeta(row, fund || currentFund(row.dataset.code));
+
+    // 移除可能存在的灰色估值徽章
+    var estBadge = meta.querySelector('.nav-estimate-badge');
+    if (estBadge) estBadge.remove();
+
+    var badge = meta.querySelector('.nav-provider-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-provider-badge';
+    }
+    badge.innerHTML = '<span class="desktop-tag-text">' + label + '</span><span class="mobile-tag-text">' + label + '</span>';
+    badge.title = label + '实时估值（数据源）';
+    if (meta.firstChild !== badge) {
+      meta.insertBefore(badge, meta.firstChild);
+    }
+  }
+
   function clearNavUpdated(row) {
     var badge = row.querySelector('.nav-updated-badge, .nav-estimate-badge');
     if (badge) badge.remove();
@@ -379,7 +404,7 @@
           fund.todayEstimate = profit;
           fund.estimateConfidence = estimate.confidence || null;
           clearNavUpdated(row);
-          markEstimateBadge(row, fund, pLabel);
+          markDataSourceBadge(row, fund, pLabel || '估算');
           updateTodayCell(row, change, profit);
           row.dataset.estimateState = 'ready';
           markEstimatesRefreshed();
@@ -442,10 +467,9 @@
           updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
           markNavUpdated(row, navDate, fund);
         } else {
-          // 净值尚未更新（含交易日盘中与盘后）：灰色估值标识（估值/小倍/养基宝）
+          // 净值尚未更新（含交易日盘中与盘后）：暂不清徽章，待 change 确定后统一决策（P0）
           delete fund.navUpdatedAt;
           clearNavUpdated(row);
-          markEstimateBadge(row, fund, providerLabel);
         }
 
         var estimateDate = estimate && (estimate.trade_date || estimate.nav_date);
@@ -475,6 +499,7 @@
           delete fund.today;
           delete fund.todayEstimate;
           showEstimateUnavailable(row);
+          markEstimateBadge(row, fund, '估值');
           row.dataset.estimateState = 'unavailable';
           if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
           return;
@@ -484,6 +509,7 @@
           delete fund.todayEstimate;
           delete fund.estimateConfidence;
           showEstimateUnavailable(row);
+          markEstimateBadge(row, fund, '估值');
           row.dataset.estimateState = 'unavailable';
           if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
           window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code, unavailable: true } }));
@@ -496,6 +522,16 @@
         fund.todayEstimate = profit;
         fund.estimateConfidence = estimate.confidence || null;
         updateTodayCell(row, change, profit);
+
+        // 数据标识徽章统一决策（对齐 mp1 computeDataBadge / P0 估值状态修复）
+        // 非“已更新”场景：有估值数据 → 蓝色数据源标识（provider 名 / 估算）；无数据 → 灰色“估值”
+        if (!officialUpdated && !(!isTrading && navDate)) {
+          if (Number.isFinite(change)) {
+            markDataSourceBadge(row, fund, providerLabel || '估算');
+          } else {
+            markEstimateBadge(row, fund, '估值');
+          }
+        }
 
         row.dataset.estimateState = 'ready';
         markEstimatesRefreshed();
@@ -517,7 +553,7 @@
                   : (Number(fund.amount) || 0) * pChange;
                 updateTodayCell(row, fund.today, fund.todayEstimate);
                 clearNavUpdated(row);
-                markEstimateBadge(row, fund, pLabel);
+                markDataSourceBadge(row, fund, pLabel || '估算');
                 if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
               }).catch(function () {});
           }, 2500);

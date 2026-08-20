@@ -6,8 +6,9 @@
   function money(value) {
     var amount = Number(value) || 0;
     var sign = amount < 0 ? '−' : '';
+    // P2 统一：金额最多 2 位小数、不强制补 0
     return sign + '' + Math.abs(amount).toLocaleString('zh-CN', {
-      minimumFractionDigits: 2,
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2
     });
   }

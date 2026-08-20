@@ -53,10 +53,17 @@
 .holding-editor {
   width: min(430px, calc(100% - 32px));
   text-align: left;
+  /* P1：删除右侧滑条（保留滚动能力，隐藏滚动条外观） */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.holding-editor::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
-.holding-editor h2,
-.holding-editor > p { text-align: center; }
+.holding-editor h2 { text-align: center; }
 
 .holding-summary {
   display: grid;
@@ -93,7 +100,8 @@
 
 .holding-action-switch {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* P1：五个 Tab（修改|加仓|减仓|定投|清仓）一行横排 */
+  grid-template-columns: repeat(5, 1fr);
   gap: 6px;
   margin: 18px 0 6px;
   padding: 4px;
@@ -121,6 +129,9 @@
 
 .holding-trade-fields { margin-top: 2px; }
 
+/* P1：快捷金额已移至买入/卖出时间模块上方（quick-ratios 在 trade grid 之前） */
+.holding-quick-ratios { margin-bottom: 2px; }
+
 .holding-editor-error {
   min-height: 18px !important;
   margin: 8px 0 0 !important;
@@ -135,5 +146,7 @@
 @media (max-width: 520px) {
   .holding-summary,
   .holding-edit-grid { grid-template-columns: 1fr; }
-  .holding-action-switch { grid-template-columns: 1fr; }
+  /* P1：窄屏也保持五个 Tab 一行横排 */
+  .holding-action-switch { grid-template-columns: repeat(5, 1fr); }
+  .holding-action-switch button { font-size: 11px; padding: 0 2px; }
 }

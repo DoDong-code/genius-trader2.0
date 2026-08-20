@@ -43,7 +43,8 @@
 
   const percent = value => {
     const number = Number(value) || 0;
-    return `${number > 0 ? '+' : ''}${(number * 100).toFixed(2)}%`;
+    // P2 统一：百分比最多 2 位小数、不强制补 0
+    return `${number > 0 ? '+' : ''}${String(Number((number * 100).toFixed(2)))}%`;
   };
 
   const tone = value => Number(value) > 0 ? 'positive' : Number(value) < 0 ? 'negative' : '';
@@ -532,14 +533,24 @@
     const renderRecord = button => {
       activateButton(recordButtons, button);
       recordContent.classList.remove('content-enter');
-      recordContent.innerHTML = button.dataset.record === 'nav'
-        ? navHistoryMarkup(history)
-        : performanceMarkup(history);
+      // P2：四 Tab 统一渲染（历史净值｜历史业绩｜前十大持仓｜交易记录）
+      const record = button.dataset.record;
+      let markup;
+      if (record === 'nav') markup = navHistoryMarkup(history);
+      else if (record === 'performance') markup = performanceMarkup(history);
+      else if (record === 'holdings') markup = holdingsMarkup(fund);
+      else markup = transactionsMarkup(fund);
+      recordContent.innerHTML = markup;
       requestAnimationFrame(() => recordContent.classList.add('content-enter'));
     };
 
     rangeButtons.forEach(button => button.addEventListener('click', () => renderRange(button)));
     recordButtons.forEach(button => button.addEventListener('click', () => renderRecord(button)));
+    // 供外部（startLoad 更新 holdings/transactions 后）重渲染当前激活 Tab
+    backdrop._renderActiveRecord = () => {
+      const active = recordButtons.find(button => button.classList.contains('active'));
+      if (active) renderRecord(active);
+    };
     renderRange(rangeButtons.find(button => button.dataset.range === '1y') || rangeButtons[0]);
     renderRecord(recordButtons.find(button => button.dataset.record === 'nav') || recordButtons[0]);
   }
@@ -607,16 +618,91 @@
   }
 
   function updateAutoInvestBanner(backdrop, fund) {
-    const content = backdrop.querySelector('.detail-transaction-content');
-    const section = content && content.closest('.detail-section');
-    if (!section) return;
-    const existing = section.querySelector('.auto-invest-banner');
-    if (existing) existing.remove();
+    // P2：定投计划 banner 位于 record tabs（历史净值）上方
+    let banner = backdrop.querySelector('.auto-invest-banner');
     if (fund.autoInvest && fund.autoInvest.enabled) {
-      const banner = document.createElement('div');
-      banner.className = 'auto-invest-banner';
+      if (!banner) {
+        banner = document.createElement('div');
+        banner.className = 'auto-invest-banner';
+        const recordSection = backdrop.querySelector('.detail-record-section');
+        if (recordSection) {
+          recordSection.parentNode.insertBefore(banner, recordSection);
+        } else {
+          backdrop.querySelector('.drawer-scroll').appendChild(banner);
+        }
+      }
       banner.textContent = `定投计划：每${fund.autoInvest.frequency === 'daily' ? '日' : fund.autoInvest.frequency === 'weekly' ? '周' : '月'} ${money(fund.autoInvest.amount)}，下次 ${fund.autoInvest.nextDate || '—'}`;
-      section.insertBefore(banner, content);
+    } else if (banner) {
+      banner.remove();
+    }
+  }
+
+  // P2：校准结果渲染（与小程序共用同一套校准数据/算法，字段同 estimateEngine 返回）
+  function renderCalibration(backdrop, payload) {
+    const box = backdrop.querySelector('.detail-calibration-result');
+    if (!box) return;
+    const cal = payload?.estimate?.calibration || null;
+    if (!cal) {
+      box.hidden = true;
+      return;
+    }
+    const weights = payload?.estimate?.weights || null;
+    const cash = payload?.estimate?.cash_adjustment;
+    const metrics = [
+      cal.sample_size != null ? `样本 ${Number(cal.sample_size)} 日` : '',
+      cal.direction_accuracy != null ? `方向准确率 ${(Number(cal.direction_accuracy) * 100).toFixed(0)}%` : '',
+      cal.mae != null ? `MAE ${(Number(cal.mae) * 100).toFixed(3)}%` : '',
+      cal.rmse != null ? `RMSE ${(Number(cal.rmse) * 100).toFixed(3)}%` : '',
+      weights ? `权重 ${Math.round(Number(weights.holdings) * 100)}/${Math.round(Number(weights.sector) * 100)}` : '',
+      cash != null ? `现金 ${(Number(cash) * 100).toFixed(1)}%` : ''
+    ].filter(Boolean);
+    box.hidden = false;
+    const statusNode = box.querySelector('.detail-calibration-status');
+    if (statusNode) {
+      statusNode.textContent = cal.calibrated ? '已校准' : '样本不足';
+      statusNode.className = 'detail-calibration-status ' + (cal.calibrated ? 'ok' : 'warn');
+    }
+    const metricNodes = box.querySelectorAll('.detail-calibration-metric');
+    metricNodes.forEach((node, index) => {
+      node.textContent = metrics[index] || '';
+      node.hidden = !metrics[index];
+    });
+  }
+
+  // P2：手动触发校准（强制重算，与小程序 onCalibrate 同接口 recalibrate=1）
+  async function triggerCalibration(fund, backdrop) {
+    const btn = backdrop.querySelector('[data-calibrate]');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '校准中';
+    try {
+      const response = await fetch(`${getApiBase()}/api/fund/${encodeURIComponent(fund.code)}/calibration?recalibrate=1`);
+      if (!response.ok) throw new Error('calibration request failed');
+      const payload = await response.json();
+      if (payload && payload.calibration) {
+        // calibration 接口返回 { success, calibration }：包装为 estimate 结构供 renderCalibration 消费
+        const cal = payload.calibration;
+        renderCalibration(backdrop, {
+          estimate: {
+            calibration: cal,
+            weights: (cal.holdings_weight != null || cal.sector_weight != null)
+              ? { holdings: cal.holdings_weight, sector: cal.sector_weight }
+              : null,
+            cash_adjustment: cal.cash_adjustment
+          }
+        });
+        const calibrated = Boolean(cal.calibrated);
+        if (typeof window.showToast === 'function') {
+          window.showToast(calibrated ? '校准完成' : '样本不足，暂无法校准', calibrated ? 'success' : '');
+        }
+        // 校准后强制刷新估值，使今日估值使用新权重
+        startLoad(fund, backdrop, { forceRefresh: true });
+      }
+    } catch (err) {
+      if (typeof window.showToast === 'function') window.showToast('校准失败', '');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '校准';
     }
   }
 
@@ -644,7 +730,6 @@
     overlay.innerHTML = [
       '<form class="confirm-dialog fund-modal holding-editor" novalidate>',
       '<h2>修改持仓</h2>',
-      '<p>直接修正当前数据，或按交易金额同步加仓、减仓。</p>',
       '<div class="holding-summary">',
       '<div><span>当前持有金额</span><b>' + money(amount) + '</b></div>',
       '<div><span>当前持有收益</span><b class="' + tone(profit) + '">' + money(profit) + '</b></div>',
@@ -654,24 +739,23 @@
       '<label>持有收益<input name="holding-profit" type="number" step="0.01" value="' + profit.toFixed(2) + '"></label>',
       '</div>',
       '<div class="holding-action-switch" role="group" aria-label="持仓操作">',
-      '<button type="button" class="active" data-holding-mode="edit">直接修改</button>',
-      '<button type="button" data-holding-mode="add">同步加仓</button>',
-      '<button type="button" data-holding-mode="reduce">同步减仓</button>',
-      '<button type="button" data-holding-mode="liquidate">清仓</button>',
+      '<button type="button" class="active" data-holding-mode="edit">修改</button>',
+      '<button type="button" data-holding-mode="add">加仓</button>',
+      '<button type="button" data-holding-mode="reduce">减仓</button>',
       '<button type="button" data-holding-mode="invest">定投</button>',
+      '<button type="button" data-holding-mode="liquidate">清仓</button>',
       '</div>',
       '<div class="holding-trade-fields" hidden>',
-      '<div class="holding-edit-grid">',
-      '<label><span data-trade-amount-label>买入金额</span><input name="trade-amount" type="number" min="0.01" step="0.01" value=""></label>',
-      '<label><span data-trade-fee-label>买入费率</span><input name="trade-fee" type="number" min="0" step="0.0001" value="0"></label>',
-      '<label><span data-trade-time-label>买入时间</span><input name="trade-time" type="datetime-local" value="' + localDateTimeInputValue() + '"></label>',
-      '</div>',
-      '<div class="holding-quick-ratios" style="display:flex;align-items:center;gap:6px;margin-top:10px;flex-wrap:wrap;">',
-      '<span style="font-size:12px;color:#86868b;">快捷金额</span>',
+      '<div class="holding-quick-ratios" style="display:flex;align-items:center;gap:6px;margin:12px 0;flex-wrap:wrap;">',
       '<button type="button" data-quick-ratio="0.25" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/4</button>',
       '<button type="button" data-quick-ratio="0.3333333333333333" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/3</button>',
       '<button type="button" data-quick-ratio="0.5" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">1/2</button>',
       '<button type="button" data-quick-ratio="1" style="background:#f5f5f7;color:#0071e3;border:none;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">全部</button>',
+      '</div>',
+      '<div class="holding-edit-grid">',
+      '<label><span data-trade-amount-label>买入金额</span><input name="trade-amount" type="number" min="0.01" step="0.01" value=""></label>',
+      '<label><span data-trade-fee-label>买入费率</span><input name="trade-fee" type="number" min="0" step="0.0001" value="0"></label>',
+      '<label><span data-trade-time-label>买入时间</span><input name="trade-time" type="datetime-local" value="' + localDateTimeInputValue() + '"></label>',
       '</div>',
       '</div>',
       '<div class="holding-invest-fields" hidden>',
@@ -828,8 +912,13 @@
         window.savePortfolioState?.();
         refreshDrawerHoldingMetrics(drawerBackdrop, fund);
         updateAutoInvestBanner(drawerBackdrop, fund);
-        const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
-        if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
+        // P2：交易记录并入 record Tab —— 重渲染当前激活 Tab
+        if (typeof drawerBackdrop._renderActiveRecord === 'function') {
+          drawerBackdrop._renderActiveRecord();
+        } else {
+          const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
+          if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
+        }
         close();
         if (typeof window.portfolioState?.render === 'function') window.portfolioState.render('portfolio');
         if (typeof window.showToast === 'function') window.showToast('已设置定投并买入本期', 'success');
@@ -869,8 +958,13 @@
       normalizeHolding(fund, nextAmount, nextProfit);
       window.savePortfolioState?.();
       refreshDrawerHoldingMetrics(drawerBackdrop, fund);
-      const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
-      if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
+      // P2：交易记录并入 record Tab —— 重渲染当前激活 Tab
+      if (typeof drawerBackdrop._renderActiveRecord === 'function') {
+        drawerBackdrop._renderActiveRecord();
+      } else {
+        const transactionContent = drawerBackdrop.querySelector('.detail-transaction-content');
+        if (transactionContent) transactionContent.innerHTML = transactionsMarkup(fund);
+      }
       close();
       if (typeof window.portfolioState?.render === 'function') window.portfolioState.render('portfolio');
     });
@@ -910,6 +1004,16 @@
             <div class="detail-section-head">
               <div><p class="eyebrow">历史净值</p><h3 class="detail-history-title">近1年走势</h3></div>
               <span class="detail-api-state">正在读取真实数据…</span>
+              <button type="button" class="detail-calibrate-btn" data-calibrate>校准</button>
+            </div>
+            <!-- P2：校准结果（与小程序共用同一套校准数据/算法；样本数、权重、准确率等关键数据） -->
+            <div class="detail-calibration-result" hidden>
+              <span class="detail-calibration-status ok">已校准</span>
+              <span class="detail-calibration-metric"></span>
+              <span class="detail-calibration-metric"></span>
+              <span class="detail-calibration-metric"></span>
+              <span class="detail-calibration-metric"></span>
+              <span class="detail-calibration-metric"></span>
             </div>
             <div class="detail-history-content"><div class="detail-loading" aria-label="加载历史净值"></div></div>
             <div class="detail-range-tabs" role="tablist" aria-label="净值周期">
@@ -922,31 +1026,26 @@
             </div>
           </div>
 
+          <!-- P2：定投计划移到历史净值（record tabs）上方 -->
+          ${fund.autoInvest && fund.autoInvest.enabled ? `
+            <div class="auto-invest-banner">定投计划：每${fund.autoInvest.frequency === 'daily' ? '日' : fund.autoInvest.frequency === 'weekly' ? '周' : '月'} ${money(fund.autoInvest.amount)}，下次 ${fund.autoInvest.nextDate || '—'}</div>
+          ` : ''}
+
+          <!-- P2：四 Tab 统一（历史净值｜历史业绩｜前十大持仓｜交易记录）横排 -->
           <div class="detail-section detail-record-section">
             <div class="detail-record-tabs" role="tablist" aria-label="历史数据类型">
               <button class="detail-record-tab active" type="button" role="tab"
                 aria-selected="true" data-record="nav">历史净值</button>
               <button class="detail-record-tab" type="button" role="tab"
                 aria-selected="false" data-record="performance">历史业绩</button>
+              <button class="detail-record-tab" type="button" role="tab"
+                aria-selected="false" data-record="holdings">前十大持仓</button>
+              <button class="detail-record-tab" type="button" role="tab"
+                aria-selected="false" data-record="transactions">交易记录</button>
             </div>
             <div class="detail-record-content">
-              <div class="detail-loading detail-loading-short" aria-label="加载历史业绩"></div>
+              <div class="detail-loading detail-loading-short" aria-label="加载历史数据"></div>
             </div>
-          </div>
-
-          <div class="detail-section">
-            <p class="eyebrow">前十大持仓</p>
-            <h3>主要持仓</h3>
-            <div class="detail-holdings-content">${holdingsMarkup(fund)}</div>
-          </div>
-
-          <div class="detail-section">
-            <p class="eyebrow">交易记录</p>
-            <h3>最近操作</h3>
-            ${fund.autoInvest && fund.autoInvest.enabled ? `
-              <div class="auto-invest-banner">定投计划：每${fund.autoInvest.frequency === 'daily' ? '日' : fund.autoInvest.frequency === 'weekly' ? '周' : '月'} ${money(fund.autoInvest.amount)}，下次 ${fund.autoInvest.nextDate || '—'}</div>
-            ` : ''}
-            <div class="detail-transaction-content">${transactionsMarkup(fund)}</div>
           </div>
         </div>
       </aside>`;
@@ -966,6 +1065,9 @@
     });
     backdrop.querySelector('[data-edit-holding]')?.addEventListener('click', () => {
       openHoldingEditor(fund, backdrop);
+    });
+    backdrop.querySelector('[data-calibrate]')?.addEventListener('click', () => {
+      triggerCalibration(fund, backdrop);
     });
     document.addEventListener('keydown', function onEscape(event) {
       if (event.key === 'Escape') {
@@ -1091,8 +1193,16 @@
       const typeNode = backdrop.querySelector('.detail-api-type');
       if (typeNode) typeNode.textContent = `${typeParts.join(' · ')} · 基金详情`;
     }
-    const holdingsContent = backdrop.querySelector('.detail-holdings-content');
-    if (holdingsContent) holdingsContent.innerHTML = holdingsMarkup({ holdings: payload.holdings });
+    // P2：前十大持仓并入 record Tab —— 数据写回 fund.holdings，激活「前十大持仓」Tab 时重渲染
+    if (Array.isArray(payload.holdings)) fund.holdings = payload.holdings;
+    if (typeof backdrop._renderActiveRecord === 'function') {
+      backdrop._renderActiveRecord();
+    } else {
+      const holdingsContent = backdrop.querySelector('.detail-holdings-content');
+      if (holdingsContent) holdingsContent.innerHTML = holdingsMarkup({ holdings: payload.holdings });
+    }
+    // P2：校准结果（样本数/方向准确率/MAE/RMSE/权重）
+    renderCalibration(backdrop, payload);
     // 仅首次加载实时股价，避免每次轮询都打 /api/stock/ 造成请求风暴。
     if (!backdrop._stockLoaded) {
       loadStockRealtimeDetails(payload.holdings, backdrop);
