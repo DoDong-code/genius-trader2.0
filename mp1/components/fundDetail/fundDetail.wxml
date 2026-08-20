@@ -294,12 +294,13 @@
 
       <!-- 加仓/减仓/清仓 -->
       <block wx:if="{{editMode === 'add' || editMode === 'reduce' || editMode === 'liquidate'}}">
-        <view class="form-group" style="margin-top: 24rpx; padding: 0 28rpx;">
+        <view class="form-group" style="margin-top: 24rpx;">
           <text class="form-label">{{editMode === 'reduce' || editMode === 'liquidate' ? '卖出金额 (元)' : '买入金额 (元)'}}</text>
           <input class="form-input" type="digit" placeholder="0.00" placeholder-style="color:#636366" value="{{newTxAmount}}" bindinput="onInputNewTxAmount" cursor-spacing="20" adjust-position="{{true}}" />
         </view>
         <!-- 快捷比例：仅加仓/减仓显示（以当前持仓金额为基准，保留手动修改）；P1 删除「快捷」文案 -->
-        <view class="quick-ratio-row" wx:if="{{editMode === 'add' || editMode === 'reduce'}}" style="display: flex; align-items: center; gap: 12rpx; margin-top: 12rpx; flex-wrap: wrap; padding: 0 28rpx;">
+        <!-- 二次验收：行内 margin-top 12rpx（输入框组内部紧凑间距，与 form-label 12rpx 一致），下方补 margin-bottom 24rpx 对齐 form-grid 间距；左右由 .modal-content 28rpx 统一 -->
+        <view class="quick-ratio-row" wx:if="{{editMode === 'add' || editMode === 'reduce'}}" style="display: flex; align-items: center; gap: 12rpx; margin: 12rpx 0 24rpx; flex-wrap: wrap;">
           <view class="quick-ratio-btn" data-ratio="0.25" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/4</view>
           <view class="quick-ratio-btn" data-ratio="0.3333333333333333" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/3</view>
           <view class="quick-ratio-btn" data-ratio="0.5" catchtap="onQuickRatio" style="padding: 8rpx 20rpx; background: #f2f2f7; color: #0071e3; font-size: 24rpx; border-radius: 8rpx;">1/2</view>
@@ -333,7 +334,7 @@
             </picker>
           </view>
         </view>
-        <view class="form-group" style="padding: 0 28rpx;">
+        <view class="form-group">
           <text class="form-label">定投开始日期</text>
           <picker mode="date" value="{{investDate}}" bindchange="onInvestDateChange">
             <view class="picker-selector">{{investDate}}</view>

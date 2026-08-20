@@ -1,6 +1,7 @@
 // pages/analysis/analysis.js
 import { http } from '../../utils/request.js';
 import { pct } from '../../utils/format.js';
+import { isTradingDay } from '../../utils/tradingDay.js';
 const app = getApp();
 
 Page({
@@ -177,6 +178,41 @@ Page({
     }
   },
 
+  // P3.18：本地评估理由 —— 基于实际数据动态生成（与网页端 buildLocalAdviceReason 同构）
+  buildLocalAdviceReason(f, ctx) {
+    const diffPct = ctx && ctx.diffPct;
+    const currentPct = ctx && ctx.currentPct;
+    const todayRate = ctx && ctx.todayRate;
+    const adviceText = ctx && ctx.adviceText;
+    const cat = ctx && ctx.cat;
+    const parts = [];
+    if (Number.isFinite(todayRate)) {
+      const dir = todayRate >= 0 ? '上涨' : '下跌';
+      parts.push(`今日${dir} ${Math.abs(todayRate).toFixed(2)}%`);
+    } else if (Number.isFinite(Number(f.holdingProfit))) {
+      const hp = Number(f.holdingProfit);
+      parts.push(`当前持有${hp >= 0 ? '盈利' : '亏损'} ¥${Math.abs(Math.round(hp)).toLocaleString('zh-CN')}`);
+    } else if (Number.isFinite(Number(f.amount))) {
+      parts.push(`当前持仓 ¥${Math.round(Number(f.amount)).toLocaleString('zh-CN')}`);
+    }
+    if (cat && cat !== '其他') {
+      parts.push(`所属${cat}板块${todayRate < 0 ? '走弱' : '表现尚可'}`);
+    }
+    if (Number.isFinite(currentPct)) {
+      parts.push(`持仓占比 ${currentPct.toFixed(1)}%`);
+    }
+    if (Number.isFinite(diffPct)) {
+      if (diffPct > 1) parts.push(`高于目标配比 ${diffPct.toFixed(1)}%`);
+      else if (diffPct < -1) parts.push(`低于目标配比 ${Math.abs(diffPct).toFixed(1)}%`);
+      else parts.push('与目标配比基本一致');
+    }
+    let conclusion = '维持持有观察';
+    if (/加仓|买入|低吸|定投|加$/.test(adviceText || '')) conclusion = '处于配置窗口，可逢低分批介入';
+    else if (/减仓|止盈|卖出|赎回|减$/.test(adviceText || '')) conclusion = '按纪律适度减仓、控制集中度';
+    parts.push(`建议${conclusion}`);
+    return parts.join('，');
+  },
+
   parseStrategyDetails(f, list) {
     const matched = [];
     const rules = {
@@ -264,13 +300,14 @@ Page({
 
     const allocations = Object.keys(categoryTotals).map(cat => {
       const amt = categoryTotals[cat];
-      const pct = totalAssets > 0 ? (amt / totalAssets) * 100 : 0;
+      // 二次验收修复：局部变量不能用 pct（遮蔽 import 的 pct 格式化函数 → 页面崩溃空白）
+      const pctVal = totalAssets > 0 ? (amt / totalAssets) * 100 : 0;
       return {
         category: cat,
         amount: amt,
         amountStr: `¥${Math.round(amt).toLocaleString('zh-CN')}`,
-        pct,
-        pctStr: pct(pct / 100, false),
+        pct: pctVal,
+        pctStr: pct(pctVal / 100, false),
         color: colorMap[cat] || colorMap['其他']
       };
     }).sort((x, y) => y.amount - x.amount);
@@ -396,7 +433,14 @@ Page({
         adviceText = fb.adviceText;
         adviceColor = fb.adviceColor;
         adviceBg = fb.adviceBg;
-        adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
+        // P3.18：本地评估理由基于实际数据动态生成（不再统一固定文案）
+        adviceReason = this.buildLocalAdviceReason(f, {
+          diffPct,
+          currentPct,
+          todayRate: Number(f.today || 0) * 100,
+          adviceText,
+          cat
+        });
       }
 
       const todayRate = Number(f.today || 0) * 100;
@@ -560,13 +604,29 @@ Page({
   },
 
   async onRunAiAnalysis() {
+    // P3.18：本地引擎模式 —— 不调用任何外部 AI API，直接用持仓本地数据完成分析
+    if (wx.getStorageSync('ai_engine') === 'local') {
+      wx.showToast({ title: '本地引擎模式：已基于持仓本地数据完成分析', icon: 'none' });
+      this.refreshData();
+      return;
+    }
     this.setData({
       isLoading: true,
       loadingText: '正在刷新账户持仓估值数据...'
     });
 
     try {
-      await this.refreshAccountDataBeforeAi();
+      // P3.18：数据决策树 —— 持仓数据 ≤5min 直接使用；>5min 且交易日才刷新估值；
+      // 非交易日 / 当天净值已存在 → 不刷新（refreshData 直接使用最近净值）
+      let saved = null;
+      try { saved = wx.getStorageSync('genius-trader-portfolio-v2'); } catch (e) { /* ignore */ }
+      const lastSync = (saved && saved.updatedAt) ? Number(saved.updatedAt) : 0;
+      if (Date.now() - lastSync > 5 * 60 * 1000) {
+        if (isTradingDay(new Date())) {
+          await this.refreshAccountDataBeforeAi();
+        }
+        // 非交易时段：不刷新估值，直接使用最近一个交易日净值
+      }
     } catch (e) {
       console.warn('Failed to refresh valuations:', e);
     }
@@ -624,6 +684,11 @@ Page({
   async runAiDiagnostics(userQuery) {
     const a = app.getActiveAccount();
     if (!a) return;
+    // P3.18：本地引擎兜底（双保险）—— 不调用外部 AI，直接用本地报告
+    if (wx.getStorageSync('ai_engine') === 'local') {
+      this.refreshData();
+      return;
+    }
 
     const portfolioData = {
       account: a.name || '默认账户',
@@ -697,6 +762,13 @@ Page({
   async askAiQuestion(question) {
     const a = app.getActiveAccount();
     if (!a) return;
+    // P3.18：本地引擎模式 —— 提问也走本地（不调用外部 AI）
+    if (wx.getStorageSync('ai_engine') === 'local') {
+      wx.showToast({ title: '本地引擎模式：不调用外部 AI，已回答基于本地数据', icon: 'none' });
+      this.setData({ aiAnswer: '本地引擎模式：当前未配置外部 AI 接口。请基于上方「今日操作建议」与持仓数据自行判断。' });
+      this.refreshData();
+      return;
+    }
 
     this.setData({
       isLoading: true,

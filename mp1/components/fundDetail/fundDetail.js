@@ -187,8 +187,9 @@ Component({
         transactions: formattedTxs,
         accountWeightStr: totalAssets > 0 ? pct(amt / totalAssets, false) : pct(0, false),
         autoInvestBanner,
-        editAmount: String(fund.amount),
-        editProfit: String(fund.holdingProfit)
+        // 二次验收修复：回填编辑框限最多 2 位小数（原直接 String(fund.holdingProfit) 暴露 -59.55999999999945 浮点误差）
+        editAmount: String(Number(Number(fund.amount).toFixed(2))),
+        editProfit: String(Number(Number(fund.holdingProfit).toFixed(2)))
       });
     },
 

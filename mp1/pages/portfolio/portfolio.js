@@ -362,19 +362,19 @@ Page({
     if (status.yjbConnected) items.push({ key: 'yjb', label: '养基宝' });
     if (status.xbyjConnected) items.push({ key: 'xbyj', label: '小倍' });
     const itemList = items.map(i => `${i.label}${i.key === this.data.estimateSource ? ' ✓' : ''}`);
-    const cancelText = '取消';
+    // 二次验收修复：wx.showActionSheet 自带底部「取消」，不再手动往 itemList 塞「取消」（曾出现两个取消）
     wx.showActionSheet({
-      itemList: [...itemList, cancelText],
+      itemList,
       success: (res) => {
         if (typeof res.tapIndex !== 'number') return;
-        if (res.tapIndex >= items.length) return; // 取消
         const picked = items[res.tapIndex];
         if (!picked || picked.key === this.data.estimateSource) return;
         this.setData({ estimateSource: picked.key, estimateSourceLabel: picked.label });
         try { wx.setStorageSync(`genius-mp-estimate-source-${app.globalData.activeAccountName}`, picked.key); } catch (e) {}
         this.refreshData();
         if (picked.key !== 'local') this.refreshEstimatesBySource(picked.key);
-      }
+      },
+      fail: () => { /* 用户点击系统底部「取消」 */ }
     });
   },
 

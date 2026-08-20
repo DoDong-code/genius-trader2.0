@@ -138,13 +138,15 @@ Page({
     const useCloudDb = wx.getStorageSync('use_cloud_db') || false;
     const cloudReady = Boolean(app.globalData.cloudReady);
 
-    // Retrieve AI configurations
+    // Retrieve AI configurations（P3.18：API Key 不回填明文；配置过则显示占位并保留）
     const aiProvider = wx.getStorageSync('ai_provider') || 'OpenAI';
     const aiProviders = ['OpenAI', 'DeepSeek', 'Google Gemini', 'Moonshot Kimi', 'Claude', '自定义 OpenAI Compatible'];
     const aiProviderIndex = aiProviders.indexOf(aiProvider) >= 0 ? aiProviders.indexOf(aiProvider) : 0;
     const aiBaseUrl = wx.getStorageSync('ai_base_url_config') || '';
-    const aiApiKey = wx.getStorageSync('ai_api_key') || '';
+    const storedApiKey = wx.getStorageSync('ai_api_key') || '';
+    const aiApiKeyConfigured = Boolean(storedApiKey);
     const aiModelName = wx.getStorageSync('ai_model_name') || 'gpt-5-mini';
+    const aiEngine = wx.getStorageSync('ai_engine') || '';
 
     // Retrieve user profiles
     const openid = wx.getStorageSync('user_openid') || 'mock_openid_guest';
@@ -169,8 +171,10 @@ Page({
       aiProvider,
       aiProviderIndex,
       aiBaseUrl,
-      aiApiKey,
+      aiApiKey: '',
+      aiApiKeyConfigured,
       aiModelName,
+      aiEngine,
       openid,
       cloudOpenId,
       maskedId,
@@ -302,16 +306,33 @@ Page({
   onSaveAiConfig() {
     const provider = this.data.aiProvider;
     const baseURL = this.data.aiBaseUrl;
-    const apiKey = this.data.aiApiKey;
+    const inputKey = (this.data.aiApiKey || '').trim();
     const modelName = this.data.aiModelName;
+    // P3.18：Key 留空且原已配置 → 保留原 Key（输入框不回填明文）；否则用新值
+    const apiKey = inputKey || wx.getStorageSync('ai_api_key') || '';
 
     wx.setStorageSync('ai_provider', provider);
     wx.setStorageSync('ai_base_url_config', baseURL);
     wx.setStorageSync('ai_model_name', modelName);
-    wx.setStorageSync('ai_api_key', apiKey);
+    if (apiKey) wx.setStorageSync('ai_api_key', apiKey);
+    else wx.removeStorageSync('ai_api_key');
+    wx.removeStorageSync('ai_engine'); // 保存外部配置 = 退出本地引擎
 
     wx.showToast({
       title: '天才接口配置保存成功',
+      icon: 'success'
+    });
+  },
+
+  // P3.18：本地引擎 —— 清空 AI 配置输入框与存储，engine=local（分析/评估理由完全不依赖外部 AI）
+  onUseLocalEngine() {
+    const hadKey = Boolean(wx.getStorageSync('ai_api_key'));
+    this.setData({ aiBaseUrl: '', aiApiKey: '', aiApiKeyConfigured: false, aiEngine: 'local' });
+    wx.removeStorageSync('ai_base_url_config');
+    wx.removeStorageSync('ai_api_key');
+    wx.setStorageSync('ai_engine', 'local');
+    wx.showToast({
+      title: hadKey ? '已切换本地引擎，AI 配置已清空' : '已切换本地引擎',
       icon: 'success'
     });
   },
@@ -813,6 +834,14 @@ Page({
     const fileName = `genius-trader-backup-${kind === 'strategy' ? 'strategy' : 'all'}-${app.globalData.shanghaiToday}.json`;
     const filePath = `${wx.env.USER_DATA_PATH}/${fileName}`;
     const fs = wx.getFileSystemManager();
+    // 导出统一降级：分享面板不可用/取消时，直接复制备份内容到剪贴板（用户粘贴保存为本地 .json 文件），
+    // 与网页版「导出即得文件」一致 —— 不再弹失败提示（UI 一致性：无失败噪音，数据始终到手）
+    const copyToClipboard = () => {
+      wx.setClipboardData({
+        data: str,
+        success: () => wx.showToast({ title: '已复制备份内容，可粘贴保存为文件', icon: 'none' })
+      });
+    };
     fs.writeFile({
       filePath,
       data: str,
@@ -823,16 +852,10 @@ Page({
             filePath,
             fileName,
             success: () => wx.showToast({ title: '请选择发送/保存位置', icon: 'none' }),
-            // 二次验收：分享失败时如实提示（不再用剪贴板冒充「微信发送」）
-            fail: () => wx.showToast({ title: '微信发送失败，请重试', icon: 'none' })
+            fail: () => copyToClipboard()
           });
         } else {
-          // 二次验收：当前微信基础库不支持 shareFileMessage，如实提示（不静默降级为复制）
-          wx.showModal({
-            title: '无法分享',
-            content: '当前微信版本不支持文件分享导出，请升级微信后重试，或使用「备份到云端」功能。',
-            showCancel: false
-          });
+          copyToClipboard();
         }
       },
       fail: () => wx.showToast({ title: '导出失败', icon: 'none' })

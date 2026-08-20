@@ -584,5 +584,7 @@
   // Rows are recreated when the active view is mounted. Watching only that
   // boundary prevents normal estimate-cell writes from scheduling re-scans.
   observer.observe(document.getElementById('view-root') || document.body, { childList: true });
+  // P3.18：暴露交易日判断供分析页复用（不新建第二套交易日算法）
+  window.__isTradingDay = isTradingDay;
   scan();
 }());

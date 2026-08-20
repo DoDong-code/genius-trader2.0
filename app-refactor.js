@@ -156,6 +156,41 @@
     try { return JSON.parse(str); } catch (e) { return null; }
   }
 
+  // P3.18：本地评估理由 —— 基于实际数据动态生成（估值/净值/涨跌/持仓比例/偏离/板块/建议），禁止统一固定文案
+  function buildLocalAdviceReason(f, ctx) {
+    const diffPct = ctx && ctx.diffPct;
+    const currentPct = ctx && ctx.currentPct;
+    const todayRate = ctx && ctx.todayRate;
+    const adviceText = ctx && ctx.adviceText;
+    const cat = ctx && ctx.cat;
+    const parts = [];
+    if (Number.isFinite(todayRate)) {
+      const dir = todayRate >= 0 ? '上涨' : '下跌';
+      parts.push('今日' + dir + ' ' + Math.abs(todayRate).toFixed(2) + '%');
+    } else if (Number.isFinite(Number(f.holdingProfit))) {
+      const hp = Number(f.holdingProfit);
+      parts.push('当前持有' + (hp >= 0 ? '盈利' : '亏损') + ' ¥' + Math.abs(Math.round(hp)).toLocaleString('zh-CN'));
+    } else if (Number.isFinite(Number(f.amount))) {
+      parts.push('当前持仓 ¥' + Math.round(Number(f.amount)).toLocaleString('zh-CN'));
+    }
+    if (cat && cat !== '其他') {
+      parts.push('所属' + cat + '板块' + (todayRate < 0 ? '走弱' : '表现尚可'));
+    }
+    if (Number.isFinite(currentPct)) {
+      parts.push('持仓占比 ' + currentPct.toFixed(1) + '%');
+    }
+    if (Number.isFinite(diffPct)) {
+      if (diffPct > 1) parts.push('高于目标配比 ' + diffPct.toFixed(1) + '%');
+      else if (diffPct < -1) parts.push('低于目标配比 ' + Math.abs(diffPct).toFixed(1) + '%');
+      else parts.push('与目标配比基本一致');
+    }
+    let conclusion = '维持持有观察';
+    if (/加仓|买入|低吸|定投|加$/.test(adviceText || '')) conclusion = '处于配置窗口，可逢低分批介入';
+    else if (/减仓|止盈|卖出|赎回|减$/.test(adviceText || '')) conclusion = '按纪律适度减仓、控制集中度';
+    parts.push('建议' + conclusion);
+    return parts.join('，');
+  }
+
   /**
    * 统一决策报告：本地规则引擎 + AI 结果合并为一份标准结构，
    * 分析页与首页“今日操作建议”模块共用，避免两套口径。
@@ -322,7 +357,14 @@
         adviceText = fbFallback.adviceText;
         adviceColor = fbFallback.adviceColor;
         adviceBg = fbFallback.adviceBg;
-        adviceReason = '基于本地规则引擎对资产配比偏离度以及投资策略进行的综合计算。';
+        // P3.18：本地评估理由基于实际数据动态生成（不再统一固定文案）
+        adviceReason = buildLocalAdviceReason(f, {
+          diffPct,
+          currentPct,
+          todayRate: Number(f.today || 0) * 100,
+          adviceText,
+          cat
+        });
       }
 
       const todayRate = Number(f.today || 0) * 100;
@@ -1425,6 +1467,17 @@
     const a = acct();
     const answerBox = document.querySelector('#ai-answer-window');
     const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // P3.18：本地引擎模式 —— 提问也走本地（不调用外部 AI）
+    if (localStorage.getItem('AI_ENGINE') === 'local') {
+      const localReply = '本地引擎模式：当前未配置外部 AI 接口。请基于上方「今日操作建议」与持仓数据自行判断。';
+      saveAiChatState({ status: 'done', reply: localReply, question: question || '', time: nowStr });
+      if (answerBox) {
+        answerBox.style.display = 'block';
+        answerBox.textContent = localReply;
+      }
+      if (typeof window.showToast === 'function') showToast('本地引擎模式：不调用外部 AI', 'success');
+      return;
+    }
     // 不论 DOM 是否存在都发起请求；状态存全局/localStorage，切换视图回来可恢复
     saveAiChatState({ status: 'loading', reply: 'AI 正在思考，请稍候…', question: question || '', time: nowStr });
     if (answerBox) {
@@ -1707,8 +1760,10 @@
 
                 <div>
                   <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 6px; font-weight: 500;">API Key</label>
-                  <input type="password" id="ai-api-key-input" placeholder="sk-xxxxxxxx（若不填则默认使用服务器环境变量配置）" 
-                         value="${esc(savedAPIKey)}"
+                  <!-- P3.18：不回填明文 Key（掩码占位）；留空保存 = 保留原 Key -->
+                  <input type="password" id="ai-api-key-input" placeholder="已配置则留空保留原 Key，或输入新 Key 覆盖" 
+                         value="${savedAPIKey ? '••••••••' : ''}"
+                         autocomplete="new-password"
                          style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
                 </div>
 
@@ -1719,19 +1774,10 @@
                          style="width: 100%; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.12); border-radius: 8px; font-size: 13px; background: #f5f5f7; outline: none; box-sizing: border-box; color: #1d1d1f; height: 38px;" />
                 </div>
 
-                <div style="display: flex; justify-content: flex-end;">
-                  <button class="primary" id="save-ai-config-btn" onclick="
-                    const p=document.querySelector('#ai-provider-select')?.value||'OpenAI';
-                    const b=document.querySelector('#ai-base-url-input')?.value.trim()||'';
-                    const k=document.querySelector('#ai-api-key-input')?.value.trim()||'';
-                    const m=document.querySelector('#ai-model-name-input')?.value.trim()||'gpt-5-mini';
-                    localStorage.setItem('AI_PROVIDER',p);
-                    localStorage.setItem('AI_BASE_URL',b);
-                    localStorage.setItem('AI_MODEL_NAME',m);
-                    if(k){window.AI_API_KEY=k;localStorage.setItem('AI_API_KEY',k);}else{window.AI_API_KEY='';localStorage.removeItem('AI_API_KEY');}
-                    alert('AI 接口配置保存并应用成功！');
-                    setTimeout(()=>typeof setting==='function'&&setting(),100);
-                  " style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                  <!-- P3.18：「本地引擎」在保存左侧：点击清空 AI 配置并切换 engine=local -->
+                  <button class="secondary" id="local-engine-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center;">本地引擎</button>
+                  <button class="primary" id="save-ai-config-btn" style="padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; background: #34a853; border: 0; color: #fff; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 38px;">保存</button>
                 </div>
               </div>
 
@@ -2339,9 +2385,20 @@
   async function runAiDiagnosticsFresh(userQuery) {
     const a = acct();
     if (!a) return;
+    // P3.18：本地引擎模式 —— 不调用任何外部 AI API，直接用持仓本地数据重新渲染分析页
+    if (localStorage.getItem('AI_ENGINE') === 'local') {
+      if (typeof window.showToast === 'function') showToast('本地引擎模式：已基于持仓本地数据完成诊断', 'success');
+      if (typeof analysis === 'function') analysis();
+      return;
+    }
     // 若该账户 5 分钟内已在持仓页刷新过估值数据，直接使用，不再重复强制刷新
     const lastRefresh = (window.lastEstimatesRefreshAtByAccount || {})[a.name] || 0;
     if (Date.now() - lastRefresh < 5 * 60 * 1000) {
+      runAiDiagnostics(userQuery);
+      return;
+    }
+    // P3.18：非交易时段不刷新估值（直接使用最近净值）——复用 live-estimates 的交易日判断
+    if (typeof window.__isTradingDay === 'function' && !window.__isTradingDay(new Date())) {
       runAiDiagnostics(userQuery);
       return;
     }
@@ -2879,23 +2936,45 @@
     if (saveAiConfigBtn) {
       const provider = document.querySelector('#ai-provider-select')?.value || 'OpenAI';
       const baseURL = document.querySelector('#ai-base-url-input')?.value.trim() || '';
-      const apiKey = document.querySelector('#ai-api-key-input')?.value.trim() || '';
+      const rawKey = document.querySelector('#ai-api-key-input')?.value.trim() || '';
       const modelName = document.querySelector('#ai-model-name-input')?.value.trim() || 'gpt-5-mini';
-      
+      // P3.18：掩码占位未改动 → 保留原 Key（不回填明文、不覆盖成掩码）
+      const apiKey = rawKey === '••••••••' ? (window.AI_API_KEY || '') : rawKey;
+
       localStorage.setItem('AI_PROVIDER', provider);
       localStorage.setItem('AI_BASE_URL', baseURL);
       localStorage.setItem('AI_MODEL_NAME', modelName);
-      
+      localStorage.removeItem('AI_ENGINE'); // 保存外部配置 = 退出本地引擎
+
       if (apiKey) {
         window.AI_API_KEY = apiKey;
-        // Client-side local storage of third-party key is used for persisting user-entered configuration.
         localStorage.setItem('AI_API_KEY', apiKey);
       } else {
         window.AI_API_KEY = '';
         localStorage.removeItem('AI_API_KEY');
       }
-      
+
       alert('AI 接口配置保存并应用成功！');
+      setting();
+      return;
+    }
+
+    const localEngineBtn = e.target.closest('#local-engine-btn');
+    if (localEngineBtn) {
+      // P3.18：本地引擎 —— 清空 AI 配置输入框与存储，切换 engine=local（分析/评估理由完全不依赖外部 AI）
+      const keyInput = document.querySelector('#ai-api-key-input');
+      const baseInput = document.querySelector('#ai-base-url-input');
+      if (keyInput) keyInput.value = '';
+      if (baseInput) baseInput.value = '';
+      window.AI_API_KEY = '';
+      localStorage.removeItem('AI_API_KEY');
+      localStorage.removeItem('AI_BASE_URL');
+      localStorage.setItem('AI_ENGINE', 'local');
+      if (typeof window.showToast === 'function') {
+        window.showToast('已切换到本地引擎（不调用外部 AI API）', 'success');
+      } else {
+        alert('已切换到本地引擎（不调用外部 AI API）');
+      }
       setting();
       return;
     }

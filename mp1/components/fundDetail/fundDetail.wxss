@@ -751,24 +751,14 @@
   border-top-left-radius: var(--border-radius-lg);
   border-top-right-radius: var(--border-radius-lg);
   max-height: 90vh;
-  /* 去掉左右 padding，让内部所有控件自己控制 padding —— 彻底消除"两边白边" */
-  padding: 32rpx 0 calc(32rpx + env(safe-area-inset-bottom));
+  /* 二次验收：最外层容器定义安全距离（28rpx 左右）—— 子元素不再各自 28rpx，避免叠加 56rpx */
+  padding: 32rpx 28rpx calc(32rpx + env(safe-area-inset-bottom));
   overflow-y: auto;
   box-shadow: 0 -8rpx 32rpx rgba(0, 0, 0, 0.15);
   border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* 弹窗内所有需要左右内边距的区块，统一给 28rpx 让边缘不贴屏幕 */
-.modal-content > .modal-title,
-.modal-content > .form-grid,
-.modal-content > .modal-actions-row,
-.modal-content > .picker-group,
-.modal-content > .invest-block,
-.modal-content > .modal-section {
-  padding-left: 28rpx;
-  padding-right: 28rpx;
-  box-sizing: border-box;
-}
+/* 内部子元素不再单独左右 padding（由 .modal-content 的 28rpx 统一保障） */
 
 .modal-title {
   font-size: 34rpx;
@@ -782,10 +772,9 @@
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16rpx;
-  /* 溢出 modal-content 的左右 padding，让输入框撑满弹窗到屏幕边缘，避免两侧留白 */
-  /* P1：统一为 28rpx，与 modal-content 内其余区块的内边距一致 */
-  margin: 0 -28rpx;
-  padding: 0 28rpx;
+  /* 二次验收：modal-content 自身已有 28rpx 左右 padding，form-grid 不再溢出；输入框自然在安全区内 */
+  margin: 0;
+  padding: 0;
 }
 
 .form-group {
@@ -837,15 +826,17 @@
 .border-separator {
   height: 1px;
   background-color: var(--border-color-faint);
-  margin: 16rpx 0;
+  /* 二次验收：上下间距统一为 24rpx（对齐 form-group 垂直 token，不再 16rpx 上下不对称） */
+  margin: 24rpx 0;
 }
 
 .form-subsection-title {
   font-size: 24rpx;
   font-weight: 750;
   color: var(--text-primary);
-  margin-bottom: 18rpx;
-  padding: 0 28rpx;
+  /* 二次验收：与 form-group margin-bottom 统一为 24rpx；左右 padding 由 .modal-content 28rpx 统一 */
+  margin-bottom: 24rpx;
+  padding: 0;
   display: block;
 }
 
@@ -858,10 +849,10 @@
   padding: 6rpx;
   border-radius: var(--border-radius-sm);
   border: 1px solid var(--border-color-faint);
-  /* 弹窗去掉左右 padding 后，操作方式容器需要自己加内边距，否则贴边 */
-  margin: 0 28rpx;
+  /* 二次验收：左右由 .modal-content 28rpx 统一，不再自加 margin/calc */
+  margin: 0;
   box-sizing: border-box;
-  width: calc(100% - 56rpx);
+  width: 100%;
 }
 
 /* 弹窗内所有"操作方式/区块标题"等文本，与输入框左右对齐（28rpx 留白） */

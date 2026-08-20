@@ -79,7 +79,7 @@
 
       <view class="wx-field">
         <text class="wx-label">API Key</text>
-        <input class="wx-input" password value="{{aiApiKey}}" bindinput="onInputAiApiKey" placeholder="sk-xxxxxxxx" />
+        <input class="wx-input" password value="{{aiApiKey}}" bindinput="onInputAiApiKey" placeholder="{{aiApiKeyConfigured ? '已配置（留空保留原 Key）' : 'sk-xxxxxxxx'}}" />
       </view>
 
       <view class="wx-field">
@@ -87,7 +87,10 @@
         <input class="wx-input" value="{{aiModelName}}" bindinput="onInputAiModelName" placeholder="例如: gpt-5-mini" />
       </view>
 
-      <button class="btn btn-primary wx-save-btn" bindtap="onSaveAiConfig">保存</button>
+      <view class="wx-actions wx-actions-2" style="margin-top: 16rpx;">
+        <button class="btn btn-secondary wx-save-btn" bindtap="onUseLocalEngine">本地引擎</button>
+        <button class="btn btn-primary wx-save-btn" bindtap="onSaveAiConfig">保存</button>
+      </view>
 
       <view class="wx-subcard">
         <text class="wx-subcard-title">系统已接入的天才接口：</text>
@@ -214,7 +217,7 @@
       <text class="wx-chevron {{collapsed.backup ? 'wx-rot' : ''}}">›</text>
     </view>
     <view wx:if="{{!collapsed.backup}}" class="wx-body">
-      <text class="wx-sub">本地/微信消息导入导出；云端备份管理请到「账号 → 备份与恢复」</text>
+      <text class="wx-sub">导出：分享到文件传输助手保存，或复制内容粘贴为文件；导入：从聊天/文件选择 .json；云端备份请到「账号 → 备份与恢复」</text>
       <view class="wx-actions wx-actions-2">
         <button class="btn btn-secondary" bindtap="onCopyBackup">导出备份</button>
         <button class="btn btn-secondary" bindtap="onImportBackup">导入备份</button>
