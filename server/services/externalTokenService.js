@@ -35,6 +35,20 @@ async function validateToken(token) {
     [hashToken(token)]
   );
   if (!row || row.revoked_at) return null;
+
+  // 生产数据只保留2小时自动删除（过期自动失效）
+  let createdTime;
+  if (row.created_at instanceof Date) {
+    createdTime = row.created_at.getTime();
+  } else {
+    const createdAtStr = String(row.created_at || '');
+    createdTime = new Date(createdAtStr.includes('Z') || createdAtStr.includes('+') ? createdAtStr : createdAtStr + ' UTC').getTime();
+  }
+  if (Date.now() - createdTime > 2 * 60 * 60 * 1000) {
+    await run('UPDATE read_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?', [row.id]);
+    return null;
+  }
+
   await run('UPDATE read_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?', [row.id]);
   return {
     userId: Number(row.user_id),
@@ -52,12 +66,27 @@ async function revokeTokens(userId) {
 
 async function tokenStatus(userId) {
   const row = await get(
-    "SELECT created_at, last_used_at FROM read_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    "SELECT id, created_at, last_used_at FROM read_tokens WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 1",
     [Number(userId)]
   );
-  return row
-    ? { hasToken: true, createdAt: row.created_at, lastUsedAt: row.last_used_at }
-    : { hasToken: false, createdAt: null, lastUsedAt: null };
+  if (!row) {
+    return { hasToken: false, createdAt: null, lastUsedAt: null };
+  }
+
+  // 生产数据只保留2小时自动删除（过期自动失效）
+  let createdTime;
+  if (row.created_at instanceof Date) {
+    createdTime = row.created_at.getTime();
+  } else {
+    const createdAtStr = String(row.created_at || '');
+    createdTime = new Date(createdAtStr.includes('Z') || createdAtStr.includes('+') ? createdAtStr : createdAtStr + ' UTC').getTime();
+  }
+  if (Date.now() - createdTime > 2 * 60 * 60 * 1000) {
+    await run('UPDATE read_tokens SET revoked_at = CURRENT_TIMESTAMP WHERE id = ?', [row.id]);
+    return { hasToken: false, createdAt: null, lastUsedAt: null };
+  }
+
+  return { hasToken: true, createdAt: row.created_at, lastUsedAt: row.last_used_at };
 }
 
 module.exports = {
