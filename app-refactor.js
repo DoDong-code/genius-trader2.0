@@ -369,6 +369,7 @@
       }
 
       const todayRate = Number(f.today || 0) * 100;
+      const todayAmount = Number(f.amount || 0) * Number(f.today || 0);
       let actionType = 'hold';
       if (/(加|低吸|买|定投)/.test(adviceText)) actionType = 'buy';
       else if (/(减|止盈|卖|赎)/.test(adviceText)) actionType = 'sell';
@@ -381,6 +382,7 @@
         currentPct,
         todayRate,
         isTodayPositive: todayRate >= 0,
+        todayAmount,
         adviceText,
         adviceColor,
         adviceBg,
@@ -749,10 +751,18 @@
     const aiResult = report.aiResult;
 
     const activeAccountName = a.name || '默认账户';
-    let cachedTime = localStorage.getItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
-    let cachedModel = localStorage.getItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
-    if (!cachedTime) cachedTime = window.lastAnalysisTime || '';
-    if (!cachedModel) cachedModel = localStorage.getItem('AI_MODEL_NAME') || '';
+    const isLocalEngine = localStorage.getItem('AI_ENGINE') === 'local';
+    let cachedTime = '';
+    let cachedModel = '';
+    if (isLocalEngine) {
+      cachedModel = '本地规则引擎';
+      cachedTime = '实时计算';
+    } else {
+      cachedTime = localStorage.getItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
+      cachedModel = localStorage.getItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
+      if (!cachedTime) cachedTime = window.lastAnalysisTime || '—';
+      if (!cachedModel) cachedModel = localStorage.getItem('AI_MODEL_NAME') || '—';
+    }
 
 
     let allocHtml = '';
@@ -882,10 +892,10 @@
               ${window.innerWidth <= 760 ? `
               <textarea id="ai-question-input" rows="2" placeholder="向 AI 提问，或输入调仓指令（可多只、模糊）：易方达加仓2000 蓝筹减仓一半 中欧医疗清仓" style="flex: 1 1 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; line-height: 1.5; outline: none; transition: border-color 0.2s; resize: none; font-family: inherit; box-sizing: border-box; min-height: 46px;">${esc(window.lastAIUserQuestion || '')}</textarea>` : `
               <input type="text" id="ai-question-input" value="${esc(window.lastAIUserQuestion || '')}" placeholder="向 AI 提问，或直接输入调仓指令（可多只、模糊）：易方达加仓2000 蓝筹减仓一半 中欧医疗清仓" style="flex: 1; padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(0,0,0,0.12); font-size: 13px; outline: none; transition: border-color 0.2s;" />`}
-              <div class="ai-ask-actions" style="display: flex; gap: 10px; align-items: center;">
-                <button id="ai-trade-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #34a853; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">调仓</button>
-                <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap;">提问</button>
-                <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap;">
+              <div class="ai-ask-actions" style="display: flex; gap: 10px; align-items: center; ${window.innerWidth <= 760 ? 'width: 100%; justify-content: center;' : ''}">
+                <button id="ai-trade-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #34a853; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap; ${window.innerWidth <= 760 ? 'flex: 1;' : ''}">调仓</button>
+                <button id="ai-ask-submit-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; white-space: nowrap; ${window.innerWidth <= 760 ? 'flex: 1;' : ''}">提问</button>
+                <button id="run-ai-analysis-btn" class="primary" style="padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; background: #0071e3; color: #fff; border: 0; cursor: pointer; transition: all 0.2s; box-shadow: 0 4px 12px rgba(0,113,227,0.15); white-space: nowrap; ${window.innerWidth <= 760 ? 'flex: 1;' : ''}">
                   <span class="btn-text">诊断</span>
                 </button>
               </div>
@@ -971,7 +981,7 @@
                 </thead>
                 <tbody>
                   ${rows.map(row => {
-                    const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, adviceText, adviceColor, adviceBg, adviceReason } = row;
+                    const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, todayAmount, adviceText, adviceColor, adviceBg, adviceReason } = row;
                     return `
                       <tr style="border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.15s;">
                         <td style="padding: 16px; vertical-align: middle;">
@@ -983,9 +993,14 @@
                           <div style="font-size: 12px; color: #6e6e73; margin-top: 2px;">${currentPct.toFixed(2)}%</div>
                         </td>
                         <td style="padding: 16px; vertical-align: middle;">
-                          <span class="est-badge ${isTodayPositive ? 'positive' : 'negative'}" style="display: inline-block; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; background: ${isTodayPositive ? 'rgba(255, 59, 48, 0.06)' : 'rgba(52, 168, 83, 0.06)'};">
-                            ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
-                          </span>
+                          <div style="display: flex; flex-direction: column; align-items: flex-start;">
+                            <span style="font-size: 14px; font-weight: 700; color: ${isTodayPositive ? '#ff3b30' : '#34a853'};">
+                              ${isTodayPositive ? '+' : ''}${todayAmount.toFixed(2)}
+                            </span>
+                            <span style="font-size: 11px; color: #86868b; margin-top: 2px;">
+                              ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
+                            </span>
+                          </div>
                         </td>
                         <td style="padding: 16px; vertical-align: middle;">
                           <span style="display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12.5px; font-weight: 600; color: ${adviceColor}; background: ${adviceBg}; white-space: nowrap;">
@@ -1005,7 +1020,7 @@
             <!-- Mobile Cards View (Hidden on desktop, visible on mobile) -->
             <div class="analysis-cards" style="display: none; flex-direction: column; gap: 16px;">
               ${rows.map(row => {
-                const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, adviceText, adviceColor, adviceBg, adviceReason } = row;
+                const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, todayAmount, adviceText, adviceColor, adviceBg, adviceReason } = row;
                 return `
                   <div style="background: #f5f5f7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(0,0,0,0.03);">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
@@ -1026,9 +1041,10 @@
                       </div>
                       <div>
                         <span style="font-size: 10px; color: #86868b; display: block; margin-bottom: 2px;">今日估值</span>
-                        <span style="font-size: 12.5px; font-weight: 600; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; display: block;">
-                          ${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%
-                        </span>
+                        <strong style="font-size: 12.5px; font-weight: 700; color: ${isTodayPositive ? '#ff3b30' : '#34a853'}; display: block;">
+                          ${isTodayPositive ? '+' : ''}${todayAmount.toFixed(2)}
+                        </strong>
+                        <span style="font-size: 11px; color: #86868b;">${isTodayPositive ? '+' : ''}${todayRate.toFixed(2)}%</span>
                       </div>
                     </div>
 

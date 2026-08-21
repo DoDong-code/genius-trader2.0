@@ -67,8 +67,16 @@ Page({
     const report = this.buildDecisionReport(account);
 
     // Retrieve AI configurations and details
-    const aiAnalysisTime = wx.getStorageSync('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
-    const aiModelName = wx.getStorageSync('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
+    const isLocalEngine = wx.getStorageSync('ai_engine') === 'local';
+    let aiAnalysisTime = '';
+    let aiModelName = '';
+    if (isLocalEngine) {
+      aiModelName = '本地规则引擎';
+      aiAnalysisTime = '实时计算';
+    } else {
+      aiAnalysisTime = wx.getStorageSync('LAST_AI_ANALYSIS_TIME_' + activeAccountName) || '';
+      aiModelName = wx.getStorageSync('LAST_AI_ANALYSIS_MODEL_' + activeAccountName) || '';
+    }
     const lastUserQuery = wx.getStorageSync('LAST_USER_QUERY_' + activeAccountName) || '';
     const aiAnswer = wx.getStorageSync('LAST_AI_ANSWER_' + activeAccountName) || '';
 
@@ -445,6 +453,7 @@ Page({
       }
 
       const todayRate = Number(f.today || 0) * 100;
+      const todayAmount = Number(f.amount || 0) * Number(f.today || 0);
       let actionType = 'hold';
       if (/(加|低吸|买|定投)/.test(adviceText)) actionType = 'buy';
       else if (/(减|止盈|卖|赎)/.test(adviceText)) actionType = 'sell';
@@ -457,8 +466,9 @@ Page({
         amountStr: `¥${Math.round(f.amount).toLocaleString('zh-CN')}`,
         currentPct,
         currentPctStr: pct(currentPct / 100, false),
-        todayRate,
+        todayRate: todayRate.toFixed(2),
         isTodayPositive: todayRate >= 0,
+        todayAmountStr: (todayRate >= 0 ? '+' : '') + todayAmount.toFixed(2),
         adviceText,
         adviceColor,
         adviceBg,
