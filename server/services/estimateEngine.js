@@ -80,7 +80,17 @@ async function quoteFor(stockCode, options = {}) {
 function isQdiiFund(fund) {
   const type = fund.fund_type || '';
   const name = fund.fund_name || '';
-  return type.includes('QDII') || type.includes('海外') || name.includes('QDII');
+  return (
+    type.includes('QDII') ||
+    type.includes('海外') ||
+    type.includes('美股') ||
+    name.includes('QDII') ||
+    name.includes('美股') ||
+    name.includes('纳斯达克') ||
+    name.includes('标普') ||
+    name.includes('标普500') ||
+    name.includes('S&P')
+  );
 }
 
 function isBondFund(fund) {

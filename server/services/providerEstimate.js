@@ -15,7 +15,7 @@ const PROVIDER_ORDER = ['xiaobeiyangji', 'yangjibao'];
 // 微信端短名 → 服务端内部名；内部名原样透传，不影响网页端现有行为
 const SOURCE_ALIASES = { xbyj: 'xiaobeiyangji', yjb: 'yangjibao' };
 const PROVIDER_TIMEOUT_MS = 2500;
-const CACHE_TTL_MS = 30000;
+const CACHE_TTL_MS = 300000; // 5 minutes TTL as requested
 
 const estimateCache = new Map(); // fund_code -> { at, value }
 

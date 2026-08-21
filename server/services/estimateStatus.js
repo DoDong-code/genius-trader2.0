@@ -13,7 +13,17 @@ function isQdiiFund(fund) {
   if (!fund) return false;
   const type = fund.fund_type || '';
   const name = fund.fund_name || '';
-  return type.includes('QDII') || type.includes('海外') || name.includes('QDII');
+  return (
+    type.includes('QDII') ||
+    type.includes('海外') ||
+    type.includes('美股') ||
+    name.includes('QDII') ||
+    name.includes('美股') ||
+    name.includes('纳斯达克') ||
+    name.includes('标普') ||
+    name.includes('标普500') ||
+    name.includes('S&P')
+  );
 }
 
 function previousTradingDay(dateStr) {
@@ -38,7 +48,7 @@ const PROVIDER_SOURCES = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);
  * @returns {'CONFIRMED_NAV'|'PROVIDER_TODAY'|'PROVIDER_STALE'|'NO_DATA'}
  */
 function resolveDataStatus({ confirmedNavDate, expectedNavDate, providerSource, providerTradeDate }) {
-  if (confirmedNavDate && confirmedNavDate === expectedNavDate) return 'CONFIRMED_NAV';
+  if (confirmedNavDate && (confirmedNavDate === expectedNavDate || (providerTradeDate && providerTradeDate === confirmedNavDate))) return 'CONFIRMED_NAV';
   if (providerSource && providerTradeDate) {
     return providerTradeDate === expectedNavDate ? 'PROVIDER_TODAY' : 'PROVIDER_STALE';
   }

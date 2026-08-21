@@ -181,6 +181,15 @@ function initialize(db) {
     db.exec("ALTER TABLE stock_price ADD COLUMN updated_at TEXT NOT NULL DEFAULT '1970-01-01 00:00:00'");
   }
 
+  // P3.18-NET: fund_nav table columns source and fetched_at
+  const navColumns = db.prepare('PRAGMA table_info(fund_nav)').all();
+  if (!navColumns.some(column => column.name === 'source')) {
+    db.exec("ALTER TABLE fund_nav ADD COLUMN source TEXT NOT NULL DEFAULT ''");
+  }
+  if (!navColumns.some(column => column.name === 'fetched_at')) {
+    db.exec("ALTER TABLE fund_nav ADD COLUMN fetched_at TEXT");
+  }
+
   // 阶段1：同步账户持仓权威化 —— portfolio 表补充类别与交易流水字段
   const portfolioColumns = db.prepare('PRAGMA table_info(portfolio)').all();
   if (!portfolioColumns.some(column => column.name === 'category')) {

@@ -954,5 +954,6 @@ module.exports = {
   toYahooSymbol,
   fetchStockQuote,
   fetchStockHistory,
-  fetchIndexQuotes
+  fetchIndexQuotes,
+  getLatestTradingDay
 };
