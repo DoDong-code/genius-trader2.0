@@ -106,6 +106,27 @@ Component({
     // 绝对不因读状态而 setData / buildList / 改 experimentalOn / 改 list。
     switchTab(e) {
       const path = e.currentTarget.dataset.path;
+      if (path === '/pages/setting/setting') {
+        // 快速点击 6 次触发隐藏实验开关
+        const now = Date.now();
+        if (!this._clickHistory) this._clickHistory = [];
+        this._clickHistory.push(now);
+        // 仅保留 3 秒内的点击记录
+        this._clickHistory = this._clickHistory.filter(t => now - t < 3000);
+        if (this._clickHistory.length >= 6) {
+          this._clickHistory = []; // 重置计数
+          const app = getApp();
+          const current =
+            app.globalData && typeof app.globalData.experimentalMode === 'boolean'
+              ? app.globalData.experimentalMode
+              : Boolean(wx.getStorageSync('experimentalMode'));
+          this.applyExperimentalMode(!current);
+          wx.showToast({
+            title: !current ? '已开启实验功能' : '已关闭实验功能',
+            icon: 'none'
+          });
+        }
+      }
       if (path === '/pages/analysis/analysis') {
         const app = getApp();
         const on =
@@ -119,7 +140,7 @@ Component({
       console.log('[TAB switchTab]', { path });
       wx.switchTab({ url: path });
     },
-    // 长按「设置」tab 10 秒，切换实验功能开关（再次长按可关闭）；静默，无进度条。
+    // 长按「设置」tab 6 秒，切换实验功能开关（再次长按可关闭）；静默，无进度条。
     // storage 写入统一交给 applyExperimentalMode，避免重复写；本方法只负责「取反全局状态 + 触发广播」。
     onTabTouchStart(e) {
       if (e.currentTarget.dataset.path !== '/pages/setting/setting') {
@@ -137,7 +158,7 @@ Component({
           title: !current ? '已开启实验功能' : '已关闭实验功能',
           icon: 'none'
         });
-      }, 10000);
+      }, 6000);
     },
     onTabTouchEnd() {
       if (this._lpTimer) {
