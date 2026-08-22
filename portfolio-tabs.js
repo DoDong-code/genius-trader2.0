@@ -18,7 +18,9 @@
       tabs.innerHTML=accounts.map(n=>'<button class="account-segment" data-portfolio-account="'+n.replace(/"/g,'&quot;')+'">'+n.replace(/（朋友账户）/,'')+'</button>').join('');
     }
     const active=state.getActive();
-    tabs.querySelectorAll('.account-segment').forEach(b=>b.classList.toggle('active',b.dataset.portfolioAccount===active));
+    const activeAccount=state.accounts[active];
+    const highlightKey = (activeAccount && activeAccount.parent) ? activeAccount.parent : active;
+    tabs.querySelectorAll('.account-segment').forEach(b=>b.classList.toggle('active',b.dataset.portfolioAccount===highlightKey));
     window.refreshDataStatus?.();
   }
   root.addEventListener('click',e=>{const tab=e.target.closest('[data-portfolio-account]');if(!tab)return;e.preventDefault();e.stopImmediatePropagation();const name=tab.dataset.portfolioAccount;if(state.accounts[name]){state.setActive(name);document.querySelector('.nav-tab[data-view="portfolio"]')?.click()}},true);

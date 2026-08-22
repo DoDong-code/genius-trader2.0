@@ -142,6 +142,40 @@
     save();
   }
 
+  function ensureParentChildHierarchy() {
+    const s = window.portfolioState || state;
+    if (!s || !s.accounts) return;
+    
+    // Clear children arrays
+    Object.keys(s.accounts).forEach(name => {
+      const acc = s.accounts[name];
+      if (acc) {
+        acc.children = [];
+      }
+    });
+    
+    // Rebuild children arrays from parent field
+    Object.keys(s.accounts).forEach(name => {
+      const acc = s.accounts[name];
+      if (acc && acc.parent && s.accounts[acc.parent]) {
+        const parent = s.accounts[acc.parent];
+        parent.children = parent.children || [];
+        if (!parent.children.includes(name)) {
+          parent.children.push(name);
+        }
+      }
+    });
+    
+    // Clean up empty children arrays
+    Object.keys(s.accounts).forEach(name => {
+      const acc = s.accounts[name];
+      if (acc && acc.children && acc.children.length === 0) {
+        delete acc.children;
+      }
+    });
+  }
+  window.ensureParentChildHierarchy = ensureParentChildHierarchy;
+
   function applyAccounts(saved){
     if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
     if(saved.syncMeta&&typeof saved.syncMeta==='object')syncMetaStore=saved.syncMeta;
@@ -162,6 +196,7 @@
     const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
     if(active)originalSetActive(active);
     else originalSetActive('');
+    ensureParentChildHierarchy();
     return true;
   }
 
@@ -201,7 +236,11 @@
         }
         console.log('[ACCOUNT] activeAccountId=' + state.getActive());
         save();
-        rerender();
+        if(typeof window.refreshSyncedAccounts==='function'){
+          window.refreshSyncedAccounts().then(rerender).catch(rerender);
+        }else{
+          rerender();
+        }
       }
     }).catch(err=>{
       console.error('[ACCOUNT] restore failed', err);

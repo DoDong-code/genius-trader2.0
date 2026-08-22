@@ -1309,8 +1309,18 @@
         const meta = (typeof window.getSyncAccountMeta === 'function') ? window.getSyncAccountMeta(acc.name) : null;
         if (meta && Array.isArray(meta.strategy)) acc.strategy = meta.strategy.slice();
         else if (!Array.isArray(acc.strategy)) acc.strategy = [];
+        
+        // Preserve children array if it exists in memory
+        const oldAccount = s.accounts[acc.name];
+        if (oldAccount && Array.isArray(oldAccount.children)) {
+          acc.children = oldAccount.children.slice();
+        }
+        
         s.accounts[acc.name] = acc;
       });
+      if (typeof window.ensureParentChildHierarchy === 'function') {
+        window.ensureParentChildHierarchy();
+      }
       // 若当前活动账户已不存在（例如默认账户被删除），回退到第一个可用账户
       if (!s.accounts[s.getActive()]) {
         const first = Object.keys(s.accounts)[0];

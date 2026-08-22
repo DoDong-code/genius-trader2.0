@@ -151,6 +151,9 @@
     var box = root.querySelector('.kpis');
     if (!box) return;
     if (selected !== 'all' && !state.accounts[selected]) selected = state.getActive() || 'all';
+    if (selected !== 'all' && state.accounts[selected] && state.accounts[selected].parent) {
+      selected = state.accounts[selected].parent;
+    }
     var tabs = root.querySelector('.account-segmented');
     if (!tabs) {
       tabs = document.createElement('div');
