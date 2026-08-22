@@ -15,10 +15,20 @@ async function createBackup(userId, state, reason = 'manual') {
     'INSERT INTO account_backups (user_id, data, account_count, reason, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
     [userId, JSON.stringify(state), accountCount, reason]
   );
-  await run(
-    'DELETE FROM account_backups WHERE user_id = ? AND id NOT IN (SELECT id FROM account_backups WHERE user_id = ? ORDER BY id DESC LIMIT ?)',
-    [userId, userId, MAX_BACKUPS]
+  
+  // 安全分步清理，避免 SQLite 在 subquery 限制中使用 LIMIT
+  const rows = await all(
+    'SELECT id FROM account_backups WHERE user_id = ? ORDER BY id DESC LIMIT ?',
+    [userId, MAX_BACKUPS]
   );
+  const idsToKeep = (rows || []).map(r => r.id);
+  if (idsToKeep.length > 0) {
+    const placeholders = idsToKeep.map(() => '?').join(',');
+    await run(
+      `DELETE FROM account_backups WHERE user_id = ? AND id NOT IN (${placeholders})`,
+      [userId, ...idsToKeep]
+    );
+  }
   return true;
 }
 

@@ -61,6 +61,9 @@
     officialNavChange: function(fund, navDate) {
       if (!fund || !navDate) return null;
       var history = Array.isArray(fund.history) ? fund.history.slice() : [];
+      if (history.length === 0 && fund._history && Array.isArray(fund._history.data)) {
+        history = fund._history.data.slice();
+      }
       var records = history
         .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
         .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
@@ -72,11 +75,25 @@
           return current / previous - 1;
         }
       }
-      if (fund.nav && fund.nav.date === navDate && Number.isFinite(Number(fund.nav.changePercent))) {
-        return Number(fund.nav.changePercent);
+      if (fund.nav && fund.nav.date === navDate) {
+        if (Number.isFinite(Number(fund.nav.percent))) return Number(fund.nav.percent);
+        if (Number.isFinite(Number(fund.nav.changePercent))) return Number(fund.nav.changePercent);
       }
-      if (fund.detail && fund.detail.latest_nav && fund.detail.latest_nav.date === navDate && Number.isFinite(Number(fund.detail.latest_nav.changePercent))) {
-        return Number(fund.detail.latest_nav.changePercent);
+      
+      var detailData = {};
+      if (fund.detail) {
+        if (fund.detail.data && typeof fund.detail.data === 'object') {
+          detailData = fund.detail.data;
+        } else {
+          detailData = fund.detail;
+        }
+      } else if (fund._detail && fund._detail.data) {
+        detailData = fund._detail.data;
+      }
+      
+      if (detailData.latest_nav && detailData.latest_nav.date === navDate) {
+        if (Number.isFinite(Number(detailData.latest_nav.changePercent))) return Number(detailData.latest_nav.changePercent);
+        if (Number.isFinite(Number(detailData.latest_nav.percent))) return Number(detailData.latest_nav.percent);
       }
       return null;
     }
@@ -89,12 +106,23 @@
     
     var sToday = utils.shanghaiDate();
     
+    var detailData = {};
+    if (fund.detail) {
+      if (fund.detail.data && typeof fund.detail.data === 'object') {
+        detailData = fund.detail.data;
+      } else {
+        detailData = fund.detail;
+      }
+    } else if (fund._detail && fund._detail.data) {
+      detailData = fund._detail.data;
+    }
+    
     // 1. Try manual estimate first
-    var manualDate = fund.detail && fund.detail.data && fund.detail.data.manualEstimateDate;
-    var hasManualEstimate = manualDate === sToday && Number.isFinite(Number(fund.detail && fund.detail.data && fund.detail.data.manualToday));
-    if (hasManualEstimate && fund.detail && fund.detail.data && fund.detail.data.manualEstimateUnavailable !== true) {
-      change = Number(fund.detail.data.manualToday);
-    } else if (fund.detail && fund.detail.data && fund.detail.data.manualEstimateUnavailable === true) {
+    var manualDate = detailData.manualEstimateDate;
+    var hasManualEstimate = manualDate === sToday && Number.isFinite(Number(detailData.manualToday));
+    if (hasManualEstimate && detailData.manualEstimateUnavailable !== true) {
+      change = Number(detailData.manualToday);
+    } else if (detailData.manualEstimateUnavailable === true) {
       return { value: null, percent: null, status: 'ERROR' };
     }
     
@@ -105,7 +133,7 @@
       var isTr = utils.isTradingDay(new Date());
       var isOfficialUpdated = Boolean(navDate === expectedNavDate || (!isTr && navDate));
       if (isOfficialUpdated) {
-        change = fund.nav.percent;
+        change = (fund.nav.percent !== undefined && fund.nav.percent !== null) ? fund.nav.percent : fund.nav.changePercent;
       }
     }
     
@@ -120,7 +148,7 @@
     
     // 4. Fallback: try latest NAV change percent
     if (change === null && fund.nav && fund.nav.status === 'READY') {
-      change = fund.nav.percent;
+      change = (fund.nav.percent !== undefined && fund.nav.percent !== null) ? fund.nav.percent : fund.nav.changePercent;
     }
     
     if (change !== null && Number.isFinite(change)) {
@@ -405,8 +433,9 @@
             if (src.meta.source !== undefined) {
               f.estimateSource = src.meta.source;
             }
-            if (src.history.data && src.history.data.length > 0) {
-              f.history = src.history.data;
+            const historyArray = Array.isArray(src.history) ? src.history : (src._history && src._history.data) || [];
+            if (historyArray && historyArray.length > 0) {
+              f.history = historyArray;
             }
             if (src.holdings && src.holdings.length > 0) {
               f.holdings = src.holdings;
@@ -680,13 +709,20 @@
           if (savedFund.meta) fund.meta = { ...fund.meta, ...savedFund.meta };
           
           // Sync backward compatible flatter fields
+          fund.history = fund._history.data || [];
+          fund.detail = fund._detail.data || {};
+          
+          // Re-evaluate today's profit on load/hydration to heal any corrupted state
+          const profitResult = calculateTodayProfit(fund);
+          fund.todayProfit.percent = profitResult.percent;
+          fund.todayProfit.value = profitResult.value;
+          fund.todayProfit.status = profitResult.status;
+
           fund.todayProfitPercent = fund.todayProfit.percent;
           fund.todayProfitValue = fund.todayProfit.value;
           fund.navUpdatedAt = (fund.nav && fund.nav.status === 'READY') ? fund.nav.date : undefined;
           fund.estimateConfidence = fund.estimate.confidence || null;
           fund.estimateSource = fund.meta.source || null;
-          fund.history = fund._history.data || [];
-          fund.detail = fund._detail.data || {};
           if (savedFund.holdings) fund.holdings = savedFund.holdings;
           if (savedFund.calibration) fund.calibration = savedFund.calibration;
         }
@@ -832,7 +868,7 @@
     window.accountRestoreStatus = 'restoring';
     window.auth.api('/api/account/state').then(data=>{
       window.accountRestoreStatus = 'ready';
-      if(data&&data.state&&data.state.accounts&&Object.keys(data.state.accounts).length>0){
+      if(data&&data.state&&data.state.accounts&&typeof data.state.accounts==='object'){
         console.log('[ACCOUNT] restored: count=' + Object.keys(data.state.accounts).length);
         applyAccounts(data.state);
         console.log('[ACCOUNT] activeAccountId=' + state.getActive());
