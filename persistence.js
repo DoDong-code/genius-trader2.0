@@ -48,6 +48,20 @@
         }
       }
     },
+
+    getLatestTradingDay: function(dateStr) {
+      var parts = dateStr.split('-');
+      var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      while (true) {
+        var yyyy = d.getFullYear();
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        if (this.isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+          return yyyy + '-' + mm + '-' + dd;
+        }
+        d.setDate(d.getDate() - 1);
+      }
+    },
     
     isQdiiFund: function(fund) {
       if (!fund) return false;
@@ -134,6 +148,9 @@
       var isOfficialUpdated = Boolean(navDate === expectedNavDate || (!isTr && navDate));
       if (isOfficialUpdated) {
         change = (fund.nav.percent !== undefined && fund.nav.percent !== null) ? fund.nav.percent : fund.nav.changePercent;
+        if (change === null || change === undefined || !Number.isFinite(change)) {
+          change = utils.officialNavChange(fund, navDate);
+        }
       }
     }
     
@@ -149,6 +166,9 @@
     // 4. Fallback: try latest NAV change percent
     if (change === null && fund.nav && fund.nav.status === 'READY') {
       change = (fund.nav.percent !== undefined && fund.nav.percent !== null) ? fund.nav.percent : fund.nav.changePercent;
+      if (change === null || change === undefined || !Number.isFinite(change)) {
+        change = utils.officialNavChange(fund, fund.nav.date);
+      }
     }
     
     if (change !== null && Number.isFinite(change)) {
@@ -185,8 +205,13 @@
       const l_nav = snap.latest_nav || (snap.fund && snap.fund.latest_nav);
       
       if (l_nav && l_nav.date) {
-        // Prevent date regression: don't overwrite with older date
-        if (!fund.nav.date || String(l_nav.date).localeCompare(String(fund.nav.date)) >= 0) {
+        const sToday = utils.shanghaiDate();
+        const maxAllowedDate = utils.isQdiiFund(fund)
+          ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
+          : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+        const isCachedInvalid = fund.nav.date && String(fund.nav.date).localeCompare(maxAllowedDate) > 0;
+        // Prevent date regression: don't overwrite with older date unless the cached date is invalid
+        if (isCachedInvalid || !fund.nav.date || String(l_nav.date).localeCompare(String(fund.nav.date)) >= 0) {
           console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + l_nav.date);
           fund.nav.date = l_nav.date;
           if (l_nav.nav !== undefined && l_nav.nav !== null) {
@@ -229,7 +254,12 @@
       const estDate = est.trade_date || est.nav_date;
       
       if (estDate) {
-        if (!fund.estimate.date || String(estDate).localeCompare(String(fund.estimate.date)) >= 0) {
+        const sToday = utils.shanghaiDate();
+        const maxAllowedDate = utils.isQdiiFund(fund)
+          ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
+          : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+        const isCachedInvalid = fund.estimate.date && String(fund.estimate.date).localeCompare(maxAllowedDate) > 0;
+        if (isCachedInvalid || !fund.estimate.date || String(estDate).localeCompare(String(fund.estimate.date)) >= 0) {
           console.log('[DATA][MERGE] code=' + code + ' field=estimate date=' + estDate);
           fund.estimate.date = estDate;
           if (est.estimate_change !== undefined && est.estimate_change !== null) {
@@ -250,7 +280,12 @@
     }
     
     if (data.nav && data.nav.date) {
-      if (!fund.nav.date || String(data.nav.date).localeCompare(String(fund.nav.date)) >= 0) {
+      const sToday = utils.shanghaiDate();
+      const maxAllowedDate = utils.isQdiiFund(fund)
+        ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
+        : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+      const isCachedInvalid = fund.nav.date && String(fund.nav.date).localeCompare(maxAllowedDate) > 0;
+      if (isCachedInvalid || !fund.nav.date || String(data.nav.date).localeCompare(String(fund.nav.date)) >= 0) {
         console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + data.nav.date);
         fund.nav.date = data.nav.date;
         if (data.nav.value !== undefined && data.nav.value !== null) {
@@ -426,6 +461,9 @@
               f.latest_nav.date = src.nav.date;
               f.latest_nav.nav = src.nav.value;
               f.latest_nav.changePercent = src.nav.percent;
+            } else {
+              f.navUpdatedAt = null;
+              f.latest_nav = null;
             }
             if (src.estimate.confidence !== undefined) {
               f.estimateConfidence = src.estimate.confidence;
@@ -680,6 +718,34 @@
           const fund = window.fundStore.get(code);
           const savedFund = saved.fundStore[code];
           
+          const utils = window.fundStoreUtils;
+          const sToday = utils.shanghaiDate();
+          const maxAllowedDate = utils.isQdiiFund(fund)
+            ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
+            : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+          
+          if (savedFund.nav && savedFund.nav.date && String(savedFund.nav.date).localeCompare(maxAllowedDate) > 0) {
+            console.log('[DATA][HEAL] Resetting hydrated nav date for ' + code + ' because ' + savedFund.nav.date + ' exceeds maximum allowed ' + maxAllowedDate);
+            savedFund.nav.date = '';
+            savedFund.nav.value = null;
+            savedFund.nav.percent = null;
+            savedFund.nav.status = 'EMPTY';
+            if (savedFund.todayProfit) {
+              if (typeof savedFund.todayProfit === 'object') {
+                savedFund.todayProfit.percent = null;
+                savedFund.todayProfit.value = null;
+                savedFund.todayProfit.status = 'EMPTY';
+              } else {
+                savedFund.todayProfit = null;
+              }
+            }
+          }
+          if (savedFund.estimate && savedFund.estimate.date && String(savedFund.estimate.date).localeCompare(maxAllowedDate) > 0) {
+            savedFund.estimate.date = '';
+            savedFund.estimate.value = null;
+            savedFund.estimate.status = 'EMPTY';
+          }
+          
           if (savedFund.nav) fund.nav = { ...fund.nav, ...savedFund.nav };
           if (savedFund.estimate) fund.estimate = { ...fund.estimate, ...savedFund.estimate };
           if (savedFund.todayProfit) {
@@ -736,7 +802,30 @@
         account&&typeof account.name==='string'&&Array.isArray(account.funds)
       );
       Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
-      valid.forEach(([name,account])=>{normalizeAccount(account);state.accounts[name]=account});
+      valid.forEach(([name,account])=>{
+        normalizeAccount(account);
+        if (Array.isArray(account.funds)) {
+          account.funds.forEach(f => {
+            const utils = window.fundStoreUtils;
+            const sToday = utils.shanghaiDate();
+            const fundForQdiiCheck = window.fundStore ? window.fundStore.get(f.code) : f;
+            const maxAllowedDate = utils.isQdiiFund(fundForQdiiCheck)
+              ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
+              : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+            
+            if (f.navUpdatedAt && String(f.navUpdatedAt).localeCompare(maxAllowedDate) > 0) {
+              f.navUpdatedAt = null;
+            }
+            if (f.latest_nav && f.latest_nav.date && String(f.latest_nav.date).localeCompare(maxAllowedDate) > 0) {
+              f.latest_nav = null;
+            }
+            if (f.estimate && f.estimate.trade_date && String(f.estimate.trade_date).localeCompare(maxAllowedDate) > 0) {
+              f.estimate = null;
+            }
+          });
+        }
+        state.accounts[name]=account;
+      });
       const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
       if(active)originalSetActive(active);
       else originalSetActive('');

@@ -1,6 +1,6 @@
 // components/fundDetail/fundDetail.js
 import { http } from '../../utils/request.js';
-import { pct } from '../../utils/format.js';
+import { pct, money } from '../../utils/format.js';
 
 const app = getApp();
 
@@ -161,12 +161,12 @@ Component({
 
       const formattedFund = {
         ...fund,
-        amountStr: `¥${Math.round(amt).toLocaleString('zh-CN')}`,
-        holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(profit)).toLocaleString('zh-CN')}`,
+        amountStr: `¥${money(amt)}`,
+        holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${money(Math.abs(profit))}`,
         holdingRateStr: pct(holdRate),
         holdingRate: holdRate,
         todayProfit: todayProfitVal,
-        todayProfitStr: `${todayProfitVal >= 0 ? '+' : '-'}¥${Math.abs(Math.round(todayProfitVal)).toLocaleString('zh-CN')}`,
+        todayProfitStr: `${todayProfitVal >= 0 ? '+' : '-'}¥${money(Math.abs(todayProfitVal))}`,
         todayProfitPctStr: pct(todayPct)
       };
 
@@ -571,7 +571,7 @@ Component({
         currentNav: nav ? nav.toFixed(4) : '—',
         currentNavDate: navDate,
         'fund.todayProfit': todayProfitVal,
-        'fund.todayProfitStr': `${todayProfitVal >= 0 ? '+' : '-'}¥${Math.abs(Math.round(todayProfitVal)).toLocaleString('zh-CN')}`,
+        'fund.todayProfitStr': `${todayProfitVal >= 0 ? '+' : '-'}¥${money(Math.abs(todayProfitVal))}`,
         'fund.todayProfitPctStr': pct(dailyPct)
       });
     },
@@ -631,10 +631,11 @@ Component({
       });
 
       const query = this.createSelectorQuery();
-      query.select('#chartCanvas').fields({ node: true, size: true }).exec((res) => {
+      query.select('#chartCanvas').fields({ node: true, size: true, rect: true }).exec((res) => {
         if (!res[0] || !res[0].node) return;
         const canvas = res[0].node;
         const ctx = canvas.getContext('2d');
+        const canvasLeft = res[0].left || 0;
         let dpr = 2;
         try {
           if (typeof wx.getWindowInfo === 'function') dpr = wx.getWindowInfo().pixelRatio || 2;
@@ -678,7 +679,7 @@ Component({
 
         // 缓存图表状态，供触摸交互复用
         this._chartState = {
-          canvas, ctx, dpr, width, height,
+          canvas, ctx, dpr, width, height, canvasLeft,
           paddingLeft, paddingRight, paddingTop, paddingBottom, plotW, plotH,
           minVal, maxVal, valRange,
           segment, getX, getY,
@@ -834,8 +835,15 @@ Component({
       if (!s || !s.segment || s.segment.length < 2) return;
       const touch = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || null;
       if (!touch) return;
-      const touchX = (typeof touch.x === 'number') ? touch.x
-        : (e.detail && typeof e.detail.x === 'number' ? e.detail.x : null);
+      
+      let touchX = null;
+      if (s.canvasLeft !== undefined && typeof touch.clientX === 'number') {
+        touchX = touch.clientX - s.canvasLeft;
+      } else if (typeof touch.x === 'number') {
+        touchX = touch.x;
+      } else if (e.detail && typeof e.detail.x === 'number') {
+        touchX = e.detail.x;
+      }
       if (touchX == null) return;
 
       const { width, height, paddingLeft, paddingRight, plotW, segment, getX, getY } = s;
@@ -871,7 +879,7 @@ Component({
           nav: nav ? nav.toFixed(4) : '—',
           acc: acc ? acc.toFixed(4) : '—',
           changePct: dailyPct,
-          changePctStr: pct(dailyPct)
+          changePctStr: pct(dailyChange)
         }
       });
     },

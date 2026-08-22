@@ -1,7 +1,7 @@
 import { http } from '../../utils/request.js';
 import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate, isTradingDay } from '../../utils/tradingDay.js';
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
-import { pct } from '../../utils/format.js';
+import { pct, money } from '../../utils/format.js';
 const app = getApp();
 
 function syncFundAcrossAccounts(code, updates) {
@@ -385,12 +385,12 @@ Page({
       activeAccountName,
       estimateSource,
       estimateSourceLabel,
-      totalAssetsStr: `¥${Math.round(totalAssets).toLocaleString('zh-CN')}`,
+      totalAssetsStr: `¥${money(totalAssets)}`,
       todayProfit,
-      todayProfitStr: `${todayProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(todayProfit)).toLocaleString('zh-CN')}`,
+      todayProfitStr: `${todayProfit >= 0 ? '+' : '-'}¥${money(Math.abs(todayProfit))}`,
       todayProfitPctStr: pct(todayProfitPct / 100),
       totalProfit,
-      totalProfitStr: `${totalProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(totalProfit)).toLocaleString('zh-CN')}`,
+      totalProfitStr: `${totalProfit >= 0 ? '+' : '-'}¥${money(Math.abs(totalProfit))}`,
       totalProfitPctStr: pct(totalProfitPct / 100)
     });
 
@@ -710,11 +710,11 @@ Page({
         ...f,
         // 二次验收：板块显示与网页端一致（FUND_SECTORS[code] → sector → category → 其他）
         sector: sectorNameOf(f),
-        amountStr: `¥${Math.round(amt).toLocaleString('zh-CN')}`,
-        holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(profit)).toLocaleString('zh-CN')}`,
+        amountStr: `¥${money(amt)}`,
+        holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${money(Math.abs(profit))}`,
         holdingRateStr: pct(holdRate),
         todayProfit: finalTodayProfit,
-        todayProfitStr: `${finalTodayProfit >= 0 ? '+' : '-'}¥${Math.abs(Math.round(finalTodayProfit)).toLocaleString('zh-CN')}`,
+        todayProfitStr: `${finalTodayProfit >= 0 ? '+' : '-'}¥${money(Math.abs(finalTodayProfit))}`,
         todayProfitPctStr: pct(finalTodayPct),
         // UI 展示：去掉蓝色徽章里的「已更新」前缀，只保留日期，减少行高避免列表下方被遮挡
         dataBadge: badge ? { ...badge, text: badge.text.replace(/^已更新/, '') } : null
@@ -910,27 +910,12 @@ Page({
     });
   },
 
-  // ---------- Fund detail drawer ----------
+  // ---------- Fund detail page ----------
   openDetailDrawer(e) {
     const code = e.currentTarget.dataset.code;
-    const statusBarHeight = this.data.statusBarHeight || 0;
-    const navBarHeight = this.data.navBarHeight || 44;
-    const topPad = statusBarHeight + navBarHeight;
-    this.setData({
-      drawerCode: code,
-      showDrawer: true,
-      drawerVisible: false,
-      drawerSettled: false,
-      drawerTopPad: topPad,
-      drawerCloseTop: topPad + 12
-    }, () => {
-      setTimeout(() => {
-        this.setData({ drawerVisible: true });
-        // 滑入动画(280ms)完成后移除 transform，让 fundDetail 内 position:fixed 弹窗相对视口定位、铺满屏幕
-        setTimeout(() => {
-          this.setData({ drawerSettled: true });
-        }, 300);
-      }, 30);
+    if (!code) return;
+    wx.navigateTo({
+      url: `/pages/fund/fund?code=${code}`
     });
   },
 

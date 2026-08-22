@@ -7,7 +7,7 @@
  *   PROVIDER_STALE  - 第三方返回旧数据（trade_date 存在但非当日）→ 前端灰「小倍/养基宝」
  *   NO_DATA         - 无确认净值且无第三方当日/旧数据（本地估算/无数据）→ 前端灰「估值」
  */
-const { shanghaiDateString, getLatestTradingDay } = require('./marketService');
+const { shanghaiDateString, getLatestTradingDay, isTradingDay } = require('./marketService');
 
 function isQdiiFund(fund) {
   if (!fund) return false;
@@ -38,7 +38,13 @@ function previousTradingDay(dateStr) {
 
 function expectedNavDateFor(fund, now = new Date()) {
   const today = shanghaiDateString(now.getTime ? now.getTime() : Date.now());
-  return isQdiiFund(fund) ? previousTradingDay(today) : today;
+  const isTr = isTradingDay(today);
+  if (isTr) {
+    return isQdiiFund(fund) ? previousTradingDay(today) : today;
+  } else {
+    const lastTradingDay = getLatestTradingDay(today);
+    return isQdiiFund(fund) ? previousTradingDay(lastTradingDay) : lastTradingDay;
+  }
 }
 
 const PROVIDER_SOURCES = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);
