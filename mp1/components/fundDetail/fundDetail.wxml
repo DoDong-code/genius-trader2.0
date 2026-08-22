@@ -99,7 +99,7 @@
       </block>
       <block wx:else>
         <canvas type="2d" id="chartCanvas" class="nav-chart" hidden="{{showEditModal}}"
-                bindtouchstart="onChartTouchStart" bindtouchmove="onChartTouchMove" bindtouchend="onChartTouchEnd"></canvas>
+                bindtouchstart="onChartTouchStart" catchtouchmove="onChartTouchMove" bindtouchend="onChartTouchEnd"></canvas>
       </block>
       <view class="chart-fallback" wx:if="{{todayChartFallback}}">
         <text>实时估值走势图暂不可用</text>

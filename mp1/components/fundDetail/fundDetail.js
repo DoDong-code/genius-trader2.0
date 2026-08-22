@@ -819,7 +819,12 @@ Component({
     },
 
     onChartTouchStart(e) {
-      this.handleChartTouch(e);
+      this.createSelectorQuery().select('#chartCanvas').boundingClientRect((rect) => {
+        if (rect) {
+          this._canvasLeft = rect.left;
+        }
+        this.handleChartTouch(e);
+      }).exec();
     },
 
     onChartTouchMove(e) {
@@ -837,8 +842,9 @@ Component({
       if (!touch) return;
       
       let touchX = null;
-      if (s.canvasLeft !== undefined && typeof touch.clientX === 'number') {
-        touchX = touch.clientX - s.canvasLeft;
+      const canvasLeft = (this._canvasLeft !== undefined) ? this._canvasLeft : (s.canvasLeft || 0);
+      if (typeof touch.clientX === 'number') {
+        touchX = touch.clientX - canvasLeft;
       } else if (typeof touch.x === 'number') {
         touchX = touch.x;
       } else if (e.detail && typeof e.detail.x === 'number') {
@@ -848,8 +854,8 @@ Component({
 
       const { width, height, paddingLeft, paddingRight, plotW, segment, getX, getY } = s;
       const clampedX = Math.max(paddingLeft, Math.min(width - paddingRight, touchX));
-      const pct = plotW > 0 ? (clampedX - paddingLeft) / plotW : 0;
-      let index = Math.round(pct * (segment.length - 1));
+      const ratio = plotW > 0 ? (clampedX - paddingLeft) / plotW : 0;
+      let index = Math.round(ratio * (segment.length - 1));
       index = Math.max(0, Math.min(segment.length - 1, index));
 
       const point = segment[index];
