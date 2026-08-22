@@ -476,8 +476,8 @@ async function fetchStockPayload(secid) {
       return JSON.parse(await fetchText(url, {
         accept: 'application/json,*/*',
         referer: 'https://quote.eastmoney.com/',
-        attempts: 1,
-        timeout: 3000
+        attempts: 2,
+        timeout: 8000
       }));
     } catch (error) {
       lastError = error;

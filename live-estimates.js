@@ -429,12 +429,107 @@
     drain();
   }
 
+  function syncFundAcrossAccounts(code, today, todayEstimate, navUpdatedAt, estimateConfidence) {
+    var state = window.portfolioState;
+    if (!state || !state.accounts) return;
+    Object.keys(state.accounts).forEach(function (accName) {
+      var account = state.accounts[accName];
+      if (!account || !Array.isArray(account.funds)) return;
+      account.funds.forEach(function (f) {
+        if (f.code === code) {
+          if (today === undefined || today === null) {
+            delete f.today;
+            delete f.todayEstimate;
+          } else {
+            f.today = today;
+            f.todayEstimate = (Number(f.amount) || 0) * today;
+          }
+          if (navUpdatedAt === undefined || navUpdatedAt === null) {
+            delete f.navUpdatedAt;
+          } else {
+            f.navUpdatedAt = navUpdatedAt;
+          }
+          if (estimateConfidence === undefined || estimateConfidence === null) {
+            delete f.estimateConfidence;
+          } else {
+            f.estimateConfidence = estimateConfidence;
+          }
+        }
+      });
+    });
+  }
+
+  function initUpdatedNavDates() {
+    var state = window.portfolioState;
+    if (!state || !state.accounts) return;
+    var shanghaiToday = shanghaiDate();
+    var isTrading = isTradingDay(new Date());
+    Object.keys(state.accounts).forEach(function (accName) {
+      var account = state.accounts[accName];
+      if (!account || !Array.isArray(account.funds)) return;
+      account.funds.forEach(function (fund) {
+        var code = String(fund.code);
+        var navDate = fund.latest_nav && fund.latest_nav.date;
+        if (!navDate && fund.navUpdatedAt) navDate = fund.navUpdatedAt;
+        
+        var expectedNavDate = isQdiiFund(fund) ? getPreviousTradingDay(shanghaiToday) : shanghaiToday;
+        if (navDate && (navDate === expectedNavDate || (!isTrading && navDate))) {
+          updatedNavDates[code] = { day: shanghaiToday, navDate: navDate };
+        }
+      });
+    });
+  }
+
   function hydrateRow(row, force, estimateOnly) {
     if (!row || row.dataset.estimateState === 'loading' || (!force && (row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable'))) return;
     var code = row.dataset.code;
     var fund = currentFund(code);
     if (!code || !fund) return;
     setFundMeta(row, fund);
+
+    // Phase 1: Fast Screen (Instant rendering of existing valid NAV / estimate date badges)
+    if (!row.dataset.fastScreenRendered) {
+      row.dataset.fastScreenRendered = 'true';
+      var initNavDate = fund.latest_nav && fund.latest_nav.date;
+      if (!initNavDate && fund.navUpdatedAt) initNavDate = fund.navUpdatedAt;
+      
+      var initChange = Number.isFinite(Number(fund.today)) ? Number(fund.today) : null;
+      var initProfit = Number.isFinite(Number(fund.todayEstimate)) ? Number(fund.todayEstimate) : null;
+      
+      var sToday = shanghaiDate();
+      var isTr = isTradingDay(new Date());
+      var expNavDate = isQdiiFund(fund) ? getPreviousTradingDay(sToday) : sToday;
+      var isOfficialUpdated = Boolean(initNavDate && initNavDate === expNavDate && initChange !== null);
+      
+      if (isOfficialUpdated) {
+        markNavUpdated(row, initNavDate, fund);
+        if (initChange !== null) {
+          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
+          updateTodayCell(row, initChange, initProfit);
+        }
+      } else if (!isTr && initNavDate) {
+        markNavUpdated(row, initNavDate, fund);
+        if (initChange !== null) {
+          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
+          updateTodayCell(row, initChange, initProfit);
+        }
+      } else if (isBeforeOpen() && initNavDate) {
+        markNavUpdated(row, initNavDate, fund);
+        if (initChange !== null) {
+          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
+          updateTodayCell(row, initChange, initProfit);
+        }
+      } else if (initChange !== null) {
+        var src = fund.estimateSource || 'local';
+        var pL = providerDisplayName(src);
+        markEstimateBadge(row, fund, pL || '估值');
+        if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
+        updateTodayCell(row, initChange, initProfit);
+      } else {
+        markEstimateBadge(row, fund, '估值');
+      }
+    }
+
     if (estimateOnly) {
       row.dataset.estimateState = 'loading';
       enqueue(function () {
@@ -460,6 +555,7 @@
           fund.today = change;
           fund.todayEstimate = profit;
           fund.estimateConfidence = estimate.confidence || null;
+          syncFundAcrossAccounts(code, change, profit, fund.navUpdatedAt, fund.estimateConfidence);
           clearNavUpdated(row);
           // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
           markEstimateBadge(row, fund, pLabel || '估值');
@@ -556,6 +652,7 @@
         if (manualUnavailable && !officialUpdated) {
           delete fund.today;
           delete fund.todayEstimate;
+          syncFundAcrossAccounts(code, undefined, undefined, fund.navUpdatedAt, fund.estimateConfidence);
           showEstimateUnavailable(row);
           markEstimateBadge(row, fund, '估值');
           row.dataset.estimateState = 'unavailable';
@@ -566,6 +663,7 @@
           delete fund.today;
           delete fund.todayEstimate;
           delete fund.estimateConfidence;
+          syncFundAcrossAccounts(code, undefined, undefined, fund.navUpdatedAt, undefined);
           showEstimateUnavailable(row);
           markEstimateBadge(row, fund, '估值');
           row.dataset.estimateState = 'unavailable';
@@ -579,6 +677,7 @@
         fund.today = change;
         fund.todayEstimate = profit;
         fund.estimateConfidence = estimate.confidence || null;
+        syncFundAcrossAccounts(code, change, profit, fund.navUpdatedAt, fund.estimateConfidence);
         updateTodayCell(row, change, profit);
 
         // 数据标识徽章统一决策（P3.18 时间模型：蓝=净值已确认，灰=交易日 9:00 后未确认）
@@ -621,6 +720,7 @@
                 fund.todayEstimate = Number.isFinite(Number(pv.estimate_profit))
                   ? Number(pv.estimate_profit)
                   : (Number(fund.amount) || 0) * pChange;
+                syncFundAcrossAccounts(code, fund.today, fund.todayEstimate, fund.navUpdatedAt, fund.estimateConfidence);
                 updateTodayCell(row, fund.today, fund.todayEstimate);
                 clearNavUpdated(row);
                 // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
@@ -637,6 +737,7 @@
   }
 
   function scan(force, estimateOnly) {
+    initUpdatedNavDates();
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
       // 初次/切换 tab 进入：不强制重抓基金详情，走服务端缓存，避免多基金排队卡顿
       hydrateRow(row, force, estimateOnly);

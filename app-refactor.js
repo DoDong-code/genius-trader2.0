@@ -665,8 +665,10 @@
   window.refreshMarketIndices = function () { return loadMarketIndices(true); };
 
   function portfolio(){
+    console.log('[PORTFOLIO] init activeAccountId=' + s.getActive());
     title.textContent = s.getActive();
     const a = acct() || { name: '', funds: [], strategy: [], closedPositions: [] };
+    console.log('[PORTFOLIO] holdings account=' + (a ? a.name : 'none'));
     const funds = effectiveFundsOf(a);
     const totalAssets = funds.reduce((x, f) => x + (Number(f.amount) || 0), 0);
     const totalProfit = funds.reduce((x, f) => x + (Number(f.holdingProfit ?? f.profit) || 0), 0);
@@ -1988,7 +1990,7 @@
                     <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: #e3f2fd; color: #0d47a1;">推荐</span>
                   </div>
                   <div style="font-size: 11px; color: #86868b; margin-bottom: 6px; line-height: 1.4;">最适合外部大模型 (如 GPT / Claude / DeepSeek) 深度分析，体积超轻、节省 Token。</div>
-                  <div style="font-size: 12px; font-family: monospace; word-break: break-all; color: #0071e3; margin-bottom: 8px; line-height: 1.5; background: #fff; padding: 8px 10px; border-radius: 6px; border: 1px solid rgba(0,0,0,0.04);" id="external-api-url-ai">正在加载...</div>
+                  <div id="external-api-url-ai" style="display: none;"></div>
                   <div style="display: flex; gap: 8px; width: 100%;">
                     <button class="secondary-button" id="external-copy-api-btn-ai" style="flex: 1; padding: 8px 6px; font-size: 11px; border-radius: 6px; cursor: not-allowed; text-align: center; justify-content: center; font-weight: 500; opacity: 0.4; pointer-events: none; display: inline-flex;" disabled>复制API</button>
                     <button class="secondary-button" id="external-test-api-btn-ai" style="flex: 1; padding: 8px 6px; font-size: 11px; border-radius: 6px; cursor: not-allowed; text-align: center; justify-content: center; font-weight: 500; opacity: 0.4; pointer-events: none; display: inline-flex;" disabled>测试API</button>

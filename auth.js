@@ -162,9 +162,8 @@
       try {
         if (mode === 'login') await login(email, password);
         else await register(email, password);
+        console.log('[AUTH] login success user=' + (state.user ? state.user.email : 'unknown'));
         close();
-        // 登录后立即把当前本地状态同步到云端（首次迁移）
-        if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
         const activeTab = document.querySelector('.nav-tab.active');
         if (activeTab) activeTab.click();
       } catch (error) {

@@ -1,8 +1,28 @@
 import { http } from '../../utils/request.js';
-import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate } from '../../utils/tradingDay.js';
+import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate, isTradingDay } from '../../utils/tradingDay.js';
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct } from '../../utils/format.js';
 const app = getApp();
+
+function syncFundAcrossAccounts(code, updates) {
+  const accounts = app.globalData.accounts || {};
+  Object.keys(accounts).forEach(name => {
+    const acc = accounts[name];
+    if (!acc || !Array.isArray(acc.funds)) return;
+    acc.funds.forEach(fund => {
+      if (fund.code === code) {
+        Object.keys(updates).forEach(key => {
+          if (key === 'todayEstimate') {
+            const amt = Number(fund.amount) || 0;
+            fund.todayEstimate = amt * (updates.today || 0);
+          } else {
+            fund[key] = updates[key];
+          }
+        });
+      }
+    });
+  });
+}
 
 const COLUMN_LABELS = {
   holdingProfit: '持有收益',
@@ -287,6 +307,32 @@ Page({
     const account = app.getActiveAccount();
     const funds = account.funds || [];
 
+    // 自动初始化/预填充 navDateMap，让已有最新净值（周末或今日已更新）的行在首屏秒出蓝色徽章
+    const todayStr = shanghaiDate();
+    const isTr = isTradingDay(new Date());
+    const initialMap = { ...(this.data.navDateMap || {}) };
+    let mapChanged = false;
+    funds.forEach(f => {
+      const navDate = (f.latest_nav && f.latest_nav.date) || f.navUpdatedAt;
+      const expectedNavDate = isQdiiFund(f) ? getPreviousTradingDay(todayStr) : todayStr;
+      if (navDate && (navDate === expectedNavDate || (!isTr && navDate))) {
+        if (!initialMap[f.code] || initialMap[f.code].day !== todayStr) {
+          const officialChange = officialNavChange(f.history || [], navDate);
+          initialMap[f.code] = {
+            navDate,
+            source: f.estimateSource || 'local',
+            officialChange,
+            day: todayStr,
+            kind: 'updated'
+          };
+          mapChanged = true;
+        }
+      }
+    });
+    if (mapChanged) {
+      this.data.navDateMap = initialMap;
+    }
+
     // 恢复当前账户的「数据源」偏好（与网页端 estimate_source_<account> 对齐）
     let estimateSource = this.data.estimateSource;
     try {
@@ -300,11 +346,29 @@ Page({
 
     funds.forEach(f => {
       const amt = Number(f.amount) || 0;
-      const todayPct = Number(f.today) || 0;
       const profitVal = Number(f.holdingProfit) || 0;
 
+      // 预估百分比/收益计算（与 filterAndSortFunds 的逻辑完全对齐，彻底消除账户摘要不同步）
+      const cached = this.data.navDateMap && this.data.navDateMap[f.code];
+      const expectedNavDate = isQdiiFund(f) ? getPreviousTradingDay(todayStr) : todayStr;
+      const officialUpdated = Boolean(
+        cached && cached.navDate && cached.navDate === expectedNavDate && Number.isFinite(cached.officialChange)
+      );
+      
+      let finalTodayPct = Number(f.today) || 0;
+      if (officialUpdated) {
+        finalTodayPct = Number(cached.officialChange);
+      }
+      
+      let finalTodayProfit = Number.isFinite(Number(f.todayEstimate))
+        ? Number(f.todayEstimate)
+        : amt * finalTodayPct;
+      if (officialUpdated) {
+        finalTodayProfit = amt * finalTodayPct;
+      }
+
       totalAssets += amt;
-      todayProfit += amt * todayPct;
+      todayProfit += finalTodayProfit;
       totalProfit += profitVal;
     });
 
@@ -474,6 +538,16 @@ Page({
               let dataStatus = est.data_status || null;
               if (!dataStatus) dataStatus = inferDataStatusFromEstimate(f, est);
               f.dataStatus = dataStatus;
+
+              // 同步更新所有账户中相同 code 的基金
+              syncFundAcrossAccounts(f.code, {
+                today: f.today,
+                todayEstimate: f.todayEstimate,
+                estimateSource: f.estimateSource,
+                estimateUpdatedAt: f.estimateUpdatedAt,
+                dataStatus: f.dataStatus
+              });
+
               updated += 1;
             }
           })
