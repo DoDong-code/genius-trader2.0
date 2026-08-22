@@ -1321,6 +1321,11 @@
         const history = Array.isArray(payload.history) ? payload.history : [];
         if (history.length > 0) {
           ctl.status = 'SUCCESS';
+          
+          if (window.mergeFundData) {
+            window.mergeFundData(fund.code, payload);
+          }
+          
           finishSuccess(fund, backdrop, payload, history, ctl);
           return;
         }
@@ -1372,11 +1377,63 @@
           return now - last > 5 * 60 * 1000;
         })();
 
+    const cached = window.fundStore ? window.fundStore.get(fund.code) : null;
+    const hasCache = cached && Array.isArray(cached.history) && cached.history.length > 0;
+
+    if (hasCache) {
+      ctl.status = 'SUCCESS';
+      const cachedPayload = {
+        fund: cached.detail || {},
+        holdings: cached.holdings || [],
+        history: cached.history,
+        estimate: cached.estimate || {},
+        calibration: cached.calibration || null,
+        latest_nav: cached.nav || (cached.detail && cached.detail.latest_nav)
+      };
+      
+      detailApiFundCache[String(fund.code)] = Date.now();
+      
+      if (state) state.textContent = dataSourceStatusText(fund, cachedPayload);
+      applyMetaSideEffects(fund, backdrop, cachedPayload);
+      setupHistoryExplorer(backdrop, cached.history, fund);
+      backdrop.fundHistory = cached.history;
+      
+      if (!initialRefresh) {
+        return;
+      }
+      
+      (async () => {
+        try {
+          const payload = await fetchFundPayload(fund.code, true);
+          if (ctl.stopped || !backdrop.isConnected) return;
+          detailApiFundCache[String(fund.code)] = Date.now();
+          
+          if (window.mergeFundData) {
+            window.mergeFundData(fund.code, payload);
+          }
+          
+          if (state) state.textContent = dataSourceStatusText(fund, payload);
+          applyMetaSideEffects(fund, backdrop, payload);
+          setupHistoryExplorer(backdrop, payload.history || [], fund);
+          backdrop.fundHistory = payload.history || [];
+          if (typeof window.refreshListRow === 'function') window.refreshListRow(fund.code);
+        } catch (err) {
+          console.warn('Silent background refresh failed', err);
+        }
+      })();
+      return;
+    }
+
     (async () => {
       try {
         const payload = await fetchFundPayload(fund.code, initialRefresh);
         if (ctl.stopped || !backdrop.isConnected) return;
         detailApiFundCache[String(fund.code)] = Date.now();
+        
+        if (window.mergeFundData) {
+          window.mergeFundData(fund.code, payload);
+        }
+        
         handlePayload(fund, backdrop, ctl, payload);
       } catch (err) {
         if (ctl.stopped || !backdrop.isConnected) return;

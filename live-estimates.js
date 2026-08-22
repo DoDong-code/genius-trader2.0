@@ -480,258 +480,91 @@
     });
   }
 
+  function renderRowFromStore(row, code, fund) {
+    if (!row || !row.isConnected) return;
+    
+    var cached = window.fundStore.get(code);
+    var utils = window.fundStoreUtils;
+    var sToday = utils.shanghaiDate();
+    var isTr = utils.isTradingDay(new Date());
+    
+    // Resolve change & profit
+    var change = cached.todayProfit.percent;
+    var profit = cached.todayProfit.value;
+    
+    // Determine badge status
+    var navDate = cached.nav.date;
+    var expNavDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+    var isOfficialUpdated = Boolean(navDate && (navDate === expNavDate || (!isTr && navDate)));
+    
+    if (isOfficialUpdated || (isBeforeOpen() && navDate)) {
+      markNavUpdated(row, navDate, fund);
+    } else if (cached.estimate && cached.estimate.status === 'READY') {
+      // Check data_status or infer provider
+      var source = cached.meta.source;
+      var pLabel = providerDisplayName(source);
+      
+      let dataStatus = cached.estimate.data_status;
+      if (!dataStatus) dataStatus = inferDataStatusFromEstimate(fund, cached.estimate);
+      
+      if (dataStatus === 'PROVIDER_TODAY' || dataStatus === 'PROVIDER_STALE') {
+        markEstimateBadge(row, fund, pLabel || '小倍');
+      } else {
+        markEstimateBadge(row, fund, '估值');
+      }
+    } else {
+      markEstimateBadge(row, fund, '估值');
+    }
+    
+    if (change !== null && Number.isFinite(change)) {
+      updateTodayCell(row, change, profit);
+      row.dataset.estimateState = 'ready';
+    } else {
+      showEstimateUnavailable(row);
+      row.dataset.estimateState = 'unavailable';
+    }
+  }
+
   function hydrateRow(row, force, estimateOnly) {
-    if (!row || row.dataset.estimateState === 'loading' || (!force && (row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable'))) return;
+    if (!row) return;
     var code = row.dataset.code;
     var fund = currentFund(code);
     if (!code || !fund) return;
     setFundMeta(row, fund);
 
-    // Phase 1: Fast Screen (Instant rendering of existing valid NAV / estimate date badges)
-    if (!row.dataset.fastScreenRendered) {
-      row.dataset.fastScreenRendered = 'true';
-      var initNavDate = fund.latest_nav && fund.latest_nav.date;
-      if (!initNavDate && fund.navUpdatedAt) initNavDate = fund.navUpdatedAt;
-      
-      var initChange = Number.isFinite(Number(fund.today)) ? Number(fund.today) : null;
-      var initProfit = Number.isFinite(Number(fund.todayEstimate)) ? Number(fund.todayEstimate) : null;
-      
-      var sToday = shanghaiDate();
-      var isTr = isTradingDay(new Date());
-      var expNavDate = isQdiiFund(fund) ? getPreviousTradingDay(sToday) : sToday;
-      var isOfficialUpdated = Boolean(initNavDate && initNavDate === expNavDate && initChange !== null);
-      
-      if (isOfficialUpdated) {
-        markNavUpdated(row, initNavDate, fund);
-        if (initChange !== null) {
-          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
-          updateTodayCell(row, initChange, initProfit);
-        }
-      } else if (!isTr && initNavDate) {
-        markNavUpdated(row, initNavDate, fund);
-        if (initChange !== null) {
-          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
-          updateTodayCell(row, initChange, initProfit);
-        }
-      } else if (isBeforeOpen() && initNavDate) {
-        markNavUpdated(row, initNavDate, fund);
-        if (initChange !== null) {
-          if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
-          updateTodayCell(row, initChange, initProfit);
-        }
-      } else if (initChange !== null) {
-        var src = fund.estimateSource || 'local';
-        var pL = providerDisplayName(src);
-        markEstimateBadge(row, fund, pL || '估值');
-        if (initProfit === null) initProfit = (Number(fund.amount) || 0) * initChange;
-        updateTodayCell(row, initChange, initProfit);
-      } else {
-        markEstimateBadge(row, fund, '估值');
-      }
+    // Sync fund object with latest fundStore data on load
+    if (window.fundStore && typeof window.fundStore.propagate === 'function') {
+      window.fundStore.propagate(code);
     }
 
-    if (estimateOnly) {
-      row.dataset.estimateState = 'loading';
-      enqueue(function () {
-        return estimateFund(code, fund.amount, force).then(function (payload) {
-          if (!row.isConnected) return;
-          var estimate = payload && (payload.estimate || payload);
-          // 估值涨跌幅：null/undefined/NaN/Infinity/-Infinity 一律视为无有效估值（避免 Number(null)=0 误显 0%）
-          var rawChange = estimate ? estimate.estimate_change : undefined;
-          var change = NaN;
-          if (rawChange !== null && rawChange !== undefined) {
-            var rawNum = Number(rawChange);
-            change = Number.isFinite(rawNum) ? rawNum : NaN;
-          }
-          if (!Number.isFinite(change)) {
-            showEstimateUnavailable(row);
-            row.dataset.estimateState = 'unavailable';
-            return;
-          }
-          var profit = Number.isFinite(Number(estimate.estimate_profit))
-            ? Number(estimate.estimate_profit)
-            : (Number(fund.amount) || 0) * change;
-          var pLabel = providerDisplayName(estimate && (estimate.source || estimate.estimate_source));
-          fund.today = change;
-          fund.todayEstimate = profit;
-          fund.estimateConfidence = estimate.confidence || null;
-          syncFundAcrossAccounts(code, change, profit, fund.navUpdatedAt, fund.estimateConfidence);
-          clearNavUpdated(row);
-          // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
-          markEstimateBadge(row, fund, pLabel || '估值');
-          updateTodayCell(row, change, profit);
-          row.dataset.estimateState = 'ready';
-          markEstimatesRefreshed();
-          if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
-          window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code } }));
-        }).catch(function () {
-          if (row.isConnected) row.dataset.estimateState = 'error';
-        });
-      });
+    var cached = window.fundStore ? window.fundStore.get(code) : null;
+    var hasValidCache = cached && Number.isFinite(cached.todayProfit.percent);
+
+    // If we have valid cached data and we are not forcing a refresh,
+    // we can immediately display it and set state to ready!
+    if (hasValidCache && !force && row.dataset.estimateState !== 'loading' && !estimateOnly) {
+      renderRowFromStore(row, code, fund);
+      
+      // Trigger a non-blocking silent refresh in the background
+      window.fundDataService.refresh(code, false).then(function() {
+        renderRowFromStore(row, code, fund);
+      }).catch(function() {});
       return;
     }
-    // 已更新净值的基金：切换 tab 直接复用缓存，不重复请求（除非手动刷新数据）
-    var cachedNav = updatedNavDates[String(code)];
-    if (!force && cachedNav && cachedNav.day === shanghaiDate()) {
-      if (Number.isFinite(Number(fund.today))) {
-        updateTodayCell(row, Number(fund.today), Number(fund.todayEstimate) || (Number(fund.amount) || 0) * Number(fund.today));
-      } else {
-        showEstimateUnavailable(row);
-      }
-      markNavUpdated(row, cachedNav.navDate, fund);
-      row.dataset.estimateState = 'ready';
-      markEstimatesRefreshed();
-      return;
-    }
+
+    if (row.dataset.estimateState === 'loading' || (!force && (row.dataset.estimateState === 'ready' || row.dataset.estimateState === 'unavailable'))) return;
+
     row.dataset.estimateState = 'loading';
-
     enqueue(function () {
-      return Promise.allSettled([refreshFund(code, force), estimateFund(code, fund.amount, force)]).then(function (results) {
-        if (!row.isConnected) return;
-        var snapshot = results[0].status === 'fulfilled' ? results[0].value || {} : {};
-        var payload = results[1].status === 'fulfilled' ? results[1].value || {} : {};
-        var estimate = payload.estimate || payload;
-
-        var navDate = snapshot.latest_nav && snapshot.latest_nav.date;
-        if (!navDate && snapshot.fund && snapshot.fund.latest_nav) navDate = snapshot.fund.latest_nav.date;
-        if (!navDate && estimate && estimate.nav_date) navDate = estimate.nav_date;
-
-        var officialChange = officialNavChange(snapshot, navDate);
-        if (!Number.isFinite(officialChange) && estimate && Number.isFinite(Number(estimate.estimate_change))) {
-          officialChange = Number(estimate.estimate_change);
-        }
-
-        var shanghaiToday = shanghaiDate();
-        // QDII 基金今天结算上一交易日净值；普通基金结算当日净值
-        var expectedNavDate = isQdiiFund(fund) ? getPreviousTradingDay(shanghaiToday) : shanghaiToday;
-        var officialUpdated = Boolean(navDate && navDate === expectedNavDate && Number.isFinite(officialChange));
-        var isTrading = isTradingDay(new Date());
-        var estimateSource = estimate && (estimate.source || estimate.estimate_source);
-        var providerLabel = providerDisplayName(estimateSource);
-        var providerDataToday = providerLabel && estimate && String(estimate.estimate_time || '').slice(0, 10) === shanghaiToday;
-
-        if (officialUpdated) {
-          // 官方净值已更新到预期日期（如 0811）→ 蓝色“已更新0811”
-          fund.navUpdatedAt = navDate;
-          updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
-          markNavUpdated(row, navDate, fund);
-        } else if (!isTrading && navDate) {
-          // 非交易日：显示最新已公布净值（蓝色“已更新MMDD”）
-          fund.navUpdatedAt = navDate;
-          updatedNavDates[String(code)] = { day: shanghaiToday, navDate: navDate };
-          markNavUpdated(row, navDate, fund);
-        } else {
-          // 净值尚未更新（含交易日盘中与盘后）：暂不清徽章，待 change 确定后统一决策（P0）
-          delete fund.navUpdatedAt;
-          clearNavUpdated(row);
-        }
-
-        var estimateDate = estimate && (estimate.trade_date || estimate.nav_date);
-        var dataDateToSet = navDate;
-        // Provider 返回了 trade_date 时，直接用它作为数据日期（不再死板地要求 === 今天）
-        // 这样小倍返回昨日净值时显示昨日日期、养基宝盘中估值时显示今日
-        if (estimateDate && !officialUpdated) {
-          dataDateToSet = estimateDate;
-        } else if (estimateDate && estimateDate === shanghaiToday && !officialUpdated) {
-          dataDateToSet = shanghaiToday;
-        }
-        if (dataDateToSet) {
-          window.latestFundDataDate = dataDateToSet;
-          if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
-        }
-
-        var manualDate = fund.manualEstimateDate;
-        var hasManualEstimate = manualDate === shanghaiToday && Number.isFinite(Number(fund.manualToday));
-        var manualUnavailable = manualDate === shanghaiToday && fund.manualEstimateUnavailable === true;
-        var change = officialUpdated ? officialChange : (hasManualEstimate ? Number(fund.manualToday) : Number(estimate.estimate_change));
-        // When the official NAV has not yet arrived, use the public intraday
-        // estimate returned with the refreshed fund snapshot as a safe fallback.
-        if (!officialUpdated && !Number.isFinite(change)) {
-          change = Number(snapshot.estimate && snapshot.estimate.estimate_change);
-        }
-        if (manualUnavailable && !officialUpdated) {
-          delete fund.today;
-          delete fund.todayEstimate;
-          syncFundAcrossAccounts(code, undefined, undefined, fund.navUpdatedAt, fund.estimateConfidence);
-          showEstimateUnavailable(row);
-          markEstimateBadge(row, fund, '估值');
-          row.dataset.estimateState = 'unavailable';
-          if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
-          return;
-        }
-        if (!Number.isFinite(change)) {
-          delete fund.today;
-          delete fund.todayEstimate;
-          delete fund.estimateConfidence;
-          syncFundAcrossAccounts(code, undefined, undefined, fund.navUpdatedAt, undefined);
-          showEstimateUnavailable(row);
-          markEstimateBadge(row, fund, '估值');
-          row.dataset.estimateState = 'unavailable';
-          if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
-          window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code, unavailable: true } }));
-          return;
-        }
-        var profit = officialUpdated ? NaN : (hasManualEstimate ? (Number(fund.amount) || 0) * change : Number(estimate.estimate_profit));
-        if (!Number.isFinite(profit)) profit = (Number(fund.amount) || 0) * change;
-
-        fund.today = change;
-        fund.todayEstimate = profit;
-        fund.estimateConfidence = estimate.confidence || null;
-        syncFundAcrossAccounts(code, change, profit, fund.navUpdatedAt, fund.estimateConfidence);
-        updateTodayCell(row, change, profit);
-
-        // 数据标识徽章统一决策（P3.18 时间模型：蓝=净值已确认，灰=交易日 9:00 后未确认）
-        // CONFIRMED_NAV → 蓝 MMDD（已在上方 officialUpdated 分支处理）
-        // 交易日 9:00 开盘前 → 蓝最近净值；非交易日有净值 → 蓝（已在上方 !isTrading && navDate 分支处理）
-        // 灰 = 交易日 9:00 后净值未确认：provider 当日估值【不算】净值 → 灰「小倍/养基宝」；无数据 → 灰「估值」
-        if (isBeforeOpen() && navDate) {
-          markNavUpdated(row, navDate, fund);
-        } else if (!officialUpdated && !(!isTrading && navDate)) {
-          // P3.18：后端 data_status 权威；缺失时前端用 estimate 响应自推（部署后后端接管）
-          let dataStatus = estimate && estimate.data_status;
-          if (!dataStatus) dataStatus = inferDataStatusFromEstimate(fund, estimate);
-          if (dataStatus === 'PROVIDER_TODAY' || dataStatus === 'PROVIDER_STALE') {
-            // provider 当日估值/旧数据 → 灰「小倍/养基宝」（未确认净值不蓝）
-            markEstimateBadge(row, fund, providerLabel || '小倍');
-          } else if (dataStatus === 'NO_DATA') {
-            markEstimateBadge(row, fund, '估值');
-          } else if (Number.isFinite(change)) {
-            markEstimateBadge(row, fund, providerLabel || '估值');
-          } else {
-            markEstimateBadge(row, fund, '估值');
+      return window.fundDataService.refresh(code, force).then(function() {
+        renderRowFromStore(row, code, fund);
+      }).catch(function() {
+        if (row.isConnected) {
+          renderRowFromStore(row, code, fund);
+          if (row.dataset.estimateState === 'loading') {
+            row.dataset.estimateState = 'error';
           }
         }
-
-        row.dataset.estimateState = 'ready';
-        markEstimatesRefreshed();
-        if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
-        // 已登录第三方但本次估值是本地引擎：稍后拉取第三方估值并更正（谁快谁先出）
-        if (!providerLabel && !officialUpdated) {
-          window.setTimeout(function () {
-            if (typeof window.getProviderConnected !== 'function' || !window.getProviderConnected()) return;
-            requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + (Number(fund.amount) || 0) + '&mode=provider&source=' + encodeURIComponent(preferredEstimateSource()))
-              .then(function (payload) {
-                if (!row.isConnected) return;
-                var pv = payload && (payload.estimate || payload);
-                var pChange = Number(pv && pv.estimate_change);
-                var pLabel = providerDisplayName(pv && (pv.source || pv.estimate_source));
-                if (!pLabel || !Number.isFinite(pChange)) return;
-                fund.today = pChange;
-                fund.todayEstimate = Number.isFinite(Number(pv.estimate_profit))
-                  ? Number(pv.estimate_profit)
-                  : (Number(fund.amount) || 0) * pChange;
-                syncFundAcrossAccounts(code, fund.today, fund.todayEstimate, fund.navUpdatedAt, fund.estimateConfidence);
-                updateTodayCell(row, fund.today, fund.todayEstimate);
-                clearNavUpdated(row);
-                // P3.18 时间模型：provider 当日/旧数据均为灰（未确认净值不蓝）
-                markEstimateBadge(row, fund, pLabel || '估值');
-                if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
-              }).catch(function () {});
-          }, 2500);
-        }
-        window.dispatchEvent(new CustomEvent('fund-estimate-updated', { detail: { code: code } }));
-      }).catch(function () {
-        if (row.isConnected) row.dataset.estimateState = 'error';
       });
     });
   }

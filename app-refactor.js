@@ -2419,9 +2419,26 @@
         ]);
         const est = (estimate && estimate.estimate) || estimate || {};
         const change = Number(est.estimate_change);
+        const profit = Number(est.estimate_profit);
+        
+        if (window.fundStore) {
+          window.fundStore.update(f.code, {
+            nav: (snapshot?.latest_nav || snapshot?.fund?.latest_nav) ? {
+              date: snapshot?.latest_nav?.date || snapshot?.fund?.latest_nav?.date,
+              nav: snapshot?.latest_nav?.nav || snapshot?.fund?.latest_nav?.nav,
+              changePercent: snapshot?.latest_nav?.changePercent || snapshot?.fund?.latest_nav?.changePercent
+            } : null,
+            estimate: est,
+            todayProfitPercent: Number.isFinite(change) ? change : undefined,
+            todayProfit: Number.isFinite(profit) ? profit : (Number.isFinite(change) ? (Number(f.amount) || 0) * change : undefined),
+            navUpdatedAt: snapshot?.latest_nav?.date || undefined,
+            history: Array.isArray(snapshot?.history) ? snapshot.history : undefined,
+            detail: snapshot?.fund || undefined
+          });
+        }
+        
         if (Number.isFinite(change)) {
           f.today = change;
-          const profit = Number(est.estimate_profit);
           f.todayEstimate = Number.isFinite(profit) ? profit : ((Number(f.amount) || 0) * change);
         }
         const navDate = snapshot && snapshot.latest_nav && snapshot.latest_nav.date;

@@ -7,6 +7,570 @@
   let syncMetaStore={};
   window.accountRestoreStatus = (window.auth && window.auth.state && window.auth.state.token) ? 'restoring' : 'ready';
 
+  // Define fundStoreUtils on window first
+  window.fundStoreUtils = {
+    shanghaiDate: function() {
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(new Date());
+    },
+    
+    isTradingDay: function(date) {
+      var weekday = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Shanghai', weekday: 'short'
+      }).format(date);
+      if (weekday === 'Sat' || weekday === 'Sun') return false;
+      var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(date);
+      var holidays = [
+        '2026-01-01', '2026-01-02',
+        '2026-02-16', '2026-02-17', '2026-02-18', '2026-02-19', '2026-02-20', '2026-02-23', '2026-02-24',
+        '2026-04-06',
+        '2026-05-01', '2026-05-04', '2026-05-05',
+        '2026-06-19',
+        '2026-09-25',
+        '2026-10-01', '2026-10-02', '2026-10-05', '2026-10-06', '2026-10-07'
+      ];
+      return holidays.indexOf(yyyymmdd) === -1;
+    },
+    
+    getPreviousTradingDay: function(dateStr) {
+      var parts = dateStr.split('-');
+      var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      while (true) {
+        d.setDate(d.getDate() - 1);
+        var yyyy = d.getFullYear();
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        if (this.isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+          return yyyy + '-' + mm + '-' + dd;
+        }
+      }
+    },
+    
+    isQdiiFund: function(fund) {
+      if (!fund) return false;
+      var fundName = String(fund.name || fund.fund_name || '');
+      if (/恒生|港股|港美/.test(fundName)) return false;
+      var QDII_CODES = { '022184': true, '014002': true };
+      if (QDII_CODES[String(fund.code || '')]) return true;
+      return /QDII|全球|海外|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|道琼斯|欧洲/i.test(fundName);
+    },
+
+    officialNavChange: function(fund, navDate) {
+      if (!fund || !navDate) return null;
+      var history = Array.isArray(fund.history) ? fund.history.slice() : [];
+      var records = history
+        .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
+        .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
+      var currentIndex = records.findIndex(function (item) { return item.date === navDate; });
+      if (currentIndex > 0) {
+        var current = Number(records[currentIndex].nav);
+        var previous = Number(records[currentIndex - 1].nav);
+        if (!Number.isNaN(current) && !Number.isNaN(previous) && previous > 0) {
+          return current / previous - 1;
+        }
+      }
+      if (fund.nav && fund.nav.date === navDate && Number.isFinite(Number(fund.nav.changePercent))) {
+        return Number(fund.nav.changePercent);
+      }
+      if (fund.detail && fund.detail.latest_nav && fund.detail.latest_nav.date === navDate && Number.isFinite(Number(fund.detail.latest_nav.changePercent))) {
+        return Number(fund.detail.latest_nav.changePercent);
+      }
+      return null;
+    }
+  };
+
+  function calculateTodayProfit(fund) {
+    var change = null;
+    var utils = window.fundStoreUtils;
+    if (!utils) return { value: null, percent: null, status: 'EMPTY' };
+    
+    var sToday = utils.shanghaiDate();
+    
+    // 1. Try manual estimate first
+    var manualDate = fund.detail && fund.detail.data && fund.detail.data.manualEstimateDate;
+    var hasManualEstimate = manualDate === sToday && Number.isFinite(Number(fund.detail && fund.detail.data && fund.detail.data.manualToday));
+    if (hasManualEstimate && fund.detail && fund.detail.data && fund.detail.data.manualEstimateUnavailable !== true) {
+      change = Number(fund.detail.data.manualToday);
+    } else if (fund.detail && fund.detail.data && fund.detail.data.manualEstimateUnavailable === true) {
+      return { value: null, percent: null, status: 'ERROR' };
+    }
+    
+    // 2. Try official nav change
+    if (change === null && fund.nav && fund.nav.status === 'READY') {
+      var navDate = fund.nav.date;
+      var expectedNavDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+      var isTr = utils.isTradingDay(new Date());
+      var isOfficialUpdated = Boolean(navDate === expectedNavDate || (!isTr && navDate));
+      if (isOfficialUpdated) {
+        change = fund.nav.percent;
+      }
+    }
+    
+    // 3. Try intraday estimate change
+    if (change === null && fund.estimate && fund.estimate.status === 'READY') {
+      var estDate = fund.estimate.date;
+      var expectedEstDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+      if (estDate === expectedEstDate || estDate === sToday || !utils.isTradingDay(new Date())) {
+        change = fund.estimate.value;
+      }
+    }
+    
+    // 4. Fallback: try latest NAV change percent
+    if (change === null && fund.nav && fund.nav.status === 'READY') {
+      change = fund.nav.percent;
+    }
+    
+    if (change !== null && Number.isFinite(change)) {
+      var state = window.portfolioState;
+      var account = state && state.accounts && state.accounts[state.getActive()];
+      var currentFundObj = account && account.funds && account.funds.find(function(f) { return String(f.code) === String(fund.code); });
+      var amount = currentFundObj ? (Number(currentFundObj.amount) || 0) : 0;
+      
+      return {
+        percent: change,
+        value: amount * change,
+        status: 'READY'
+      };
+    }
+    
+    return {
+      percent: null,
+      value: null,
+      status: 'LOADING'
+    };
+  }
+  window.calculateTodayProfit = calculateTodayProfit;
+
+  function mergeFundData(code, data) {
+    const fund = window.fundStore.get(code);
+    if (!data) return fund;
+    
+    const utils = window.fundStoreUtils;
+    let anyMerged = false;
+
+    // Field-level merging with non-regression rules
+    if (data.snapshot) {
+      const snap = data.snapshot;
+      const l_nav = snap.latest_nav || (snap.fund && snap.fund.latest_nav);
+      
+      if (l_nav && l_nav.date) {
+        // Prevent date regression: don't overwrite with older date
+        if (!fund.nav.date || String(l_nav.date).localeCompare(String(fund.nav.date)) >= 0) {
+          console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + l_nav.date);
+          fund.nav.date = l_nav.date;
+          if (l_nav.nav !== undefined && l_nav.nav !== null) {
+            fund.nav.value = Number(l_nav.nav);
+          }
+          if (l_nav.changePercent !== undefined && l_nav.changePercent !== null) {
+            fund.nav.percent = Number(l_nav.changePercent);
+          }
+          fund.nav.status = 'READY';
+          anyMerged = true;
+        } else {
+          console.log('[DATA][PRESERVE] code=' + code + ' field=nav existing newer date kept');
+        }
+      }
+      
+      if (Array.isArray(snap.history) && snap.history.length > 0) {
+        console.log('[DATA][MERGE] code=' + code + ' field=history count=' + snap.history.length);
+        fund._history.data = snap.history;
+        fund._history.status = 'READY';
+        anyMerged = true;
+      }
+      
+      if (snap.fund) {
+        console.log('[DATA][MERGE] code=' + code + ' field=detail');
+        fund._detail.data = { ...fund._detail.data, ...snap.fund };
+        fund._detail.status = 'READY';
+        anyMerged = true;
+      }
+      
+      if (Array.isArray(snap.holdings) && snap.holdings.length > 0) {
+        fund.holdings = snap.holdings;
+      }
+      if (snap.calibration) {
+        fund.calibration = snap.calibration;
+      }
+    }
+    
+    if (data.estimate) {
+      const est = data.estimate;
+      const estDate = est.trade_date || est.nav_date;
+      
+      if (estDate) {
+        if (!fund.estimate.date || String(estDate).localeCompare(String(fund.estimate.date)) >= 0) {
+          console.log('[DATA][MERGE] code=' + code + ' field=estimate date=' + estDate);
+          fund.estimate.date = estDate;
+          if (est.estimate_change !== undefined && est.estimate_change !== null) {
+            fund.estimate.value = Number(est.estimate_change);
+          }
+          if (est.confidence !== undefined && est.confidence !== null) {
+            fund.estimate.confidence = est.confidence;
+          }
+          if (est.source || est.estimate_source) {
+            fund.meta.source = est.source || est.estimate_source;
+          }
+          fund.estimate.status = 'READY';
+          anyMerged = true;
+        } else {
+          console.log('[DATA][PRESERVE] code=' + code + ' field=estimate existing newer date kept');
+        }
+      }
+    }
+    
+    if (data.nav && data.nav.date) {
+      if (!fund.nav.date || String(data.nav.date).localeCompare(String(fund.nav.date)) >= 0) {
+        console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + data.nav.date);
+        fund.nav.date = data.nav.date;
+        if (data.nav.value !== undefined && data.nav.value !== null) {
+          fund.nav.value = Number(data.nav.value);
+        }
+        if (data.nav.percent !== undefined && data.nav.percent !== null) {
+          fund.nav.percent = Number(data.nav.percent);
+        }
+        fund.nav.status = 'READY';
+        anyMerged = true;
+      }
+    }
+    
+    // Re-evaluate today's profit
+    const profitResult = calculateTodayProfit(fund);
+    fund.todayProfit.percent = profitResult.percent;
+    fund.todayProfit.value = profitResult.value;
+    fund.todayProfit.status = profitResult.status;
+    
+    if (profitResult.status === 'READY') {
+      fund.meta.lastValidAt = new Date().toISOString();
+    }
+    fund.meta.updatedAt = new Date().toISOString();
+    
+    // Sync backward compatible flatter fields
+    fund.todayProfitPercent = fund.todayProfit.percent;
+    fund.todayProfitValue = fund.todayProfit.value; // For backwards safety
+    fund.navUpdatedAt = (fund.nav && fund.nav.status === 'READY') ? fund.nav.date : undefined;
+    fund.estimateConfidence = fund.estimate.confidence || null;
+    fund.estimateSource = fund.meta.source || null;
+    fund.history = fund._history.data || [];
+    fund.detail = fund._detail.data || {};
+    
+    // Propagate changes to accounts
+    window.fundStore.propagate(code);
+    
+    if (typeof window.savePortfolioState === 'function') {
+      window.savePortfolioState();
+    }
+    
+    window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
+    return fund;
+  }
+  window.mergeFundData = mergeFundData;
+
+  const storeMethods = {
+    get: function(code) {
+      if (!this[code]) {
+        this[code] = {
+          code: code,
+          nav: { value: null, date: null, status: 'EMPTY' },
+          estimate: { value: null, date: null, status: 'EMPTY', confidence: null },
+          todayProfit: { value: null, percent: null, status: 'EMPTY' },
+          _history: { data: [], status: 'EMPTY' },
+          _detail: { data: {}, status: 'EMPTY' },
+          history: [],
+          detail: {},
+          meta: { source: null, updatedAt: null, lastValidAt: null },
+          
+          // Flatter fields for backward compatibility
+          todayProfitPercent: null,
+          todayProfitValue: null,
+          navUpdatedAt: null,
+          estimateConfidence: null,
+          estimateSource: null,
+          history_compat: [],
+          holdings: [],
+          calibration: null,
+          status: { refreshing: false }
+        };
+      }
+      return this[code];
+    },
+    
+    update: function(code, data) {
+      const fund = this.get(code);
+      if (!data) return fund;
+      
+      let changed = false;
+      
+      if (data.nav !== undefined && data.nav !== null) {
+        fund.nav = { ...fund.nav, ...data.nav };
+        changed = true;
+      }
+      if (data.estimate !== undefined && data.estimate !== null) {
+        fund.estimate = { ...fund.estimate, ...data.estimate };
+        changed = true;
+      }
+      if (data.todayProfitPercent !== undefined) {
+        fund.todayProfit.percent = data.todayProfitPercent;
+        fund.todayProfit.status = 'READY';
+        changed = true;
+      }
+      if (data.todayProfit !== undefined && data.todayProfit !== null) {
+        if (typeof data.todayProfit === 'object') {
+          fund.todayProfit = { ...fund.todayProfit, ...data.todayProfit };
+        } else {
+          fund.todayProfit.value = Number(data.todayProfit) || null;
+          fund.todayProfit.status = 'READY';
+        }
+        changed = true;
+      }
+      if (data.history !== undefined && data.history !== null) {
+        if (Array.isArray(data.history)) {
+          fund._history.data = data.history;
+          fund._history.status = 'READY';
+        } else {
+          fund._history = { ...fund._history, ...data.history };
+        }
+        changed = true;
+      }
+      if (data.detail !== undefined && data.detail !== null) {
+        if (data.detail.data) {
+          fund._detail = { ...fund._detail, ...data.detail };
+        } else {
+          fund._detail.data = { ...fund._detail.data, ...data.detail };
+          fund._detail.status = 'READY';
+        }
+        changed = true;
+      }
+      if (data.meta !== undefined && data.meta !== null) {
+        fund.meta = { ...fund.meta, ...data.meta };
+        changed = true;
+      }
+      if (data.holdings !== undefined) {
+        fund.holdings = data.holdings;
+        changed = true;
+      }
+      if (data.calibration !== undefined) {
+        fund.calibration = data.calibration;
+        changed = true;
+      }
+      
+      // Update backwards compatible fields
+      fund.todayProfitPercent = fund.todayProfit.percent;
+      fund.todayProfitValue = fund.todayProfit.value;
+      fund.navUpdatedAt = (fund.nav && fund.nav.status === 'READY') ? fund.nav.date : undefined;
+      fund.estimateConfidence = fund.estimate.confidence || null;
+      fund.estimateSource = fund.meta.source || null;
+      fund.history = fund._history.data || [];
+      fund.detail = fund._detail.data || {};
+      
+      this.propagate(code);
+      
+      if (changed) {
+        if (typeof window.savePortfolioState === 'function') {
+          window.savePortfolioState();
+        }
+        window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
+      }
+      return fund;
+    },
+    
+    propagate: function(code) {
+      const src = this.get(code);
+      const s = window.portfolioState;
+      if (!s || !s.accounts) return;
+      Object.keys(s.accounts).forEach(function(accName) {
+        const account = s.accounts[accName];
+        if (!account || !Array.isArray(account.funds)) return;
+        account.funds.forEach(function(f) {
+          if (String(f.code) === String(code)) {
+            if (src.todayProfit.percent !== undefined && src.todayProfit.percent !== null) {
+              f.today = src.todayProfit.percent;
+              f.todayEstimate = (Number(f.amount) || 0) * src.todayProfit.percent;
+            } else {
+              f.today = null;
+              f.todayEstimate = null;
+            }
+            if (src.nav.date) {
+              f.navUpdatedAt = src.nav.date;
+              f.latest_nav = f.latest_nav || {};
+              f.latest_nav.date = src.nav.date;
+              f.latest_nav.nav = src.nav.value;
+              f.latest_nav.changePercent = src.nav.percent;
+            }
+            if (src.estimate.confidence !== undefined) {
+              f.estimateConfidence = src.estimate.confidence;
+            }
+            if (src.meta.source !== undefined) {
+              f.estimateSource = src.meta.source;
+            }
+            if (src.history.data && src.history.data.length > 0) {
+              f.history = src.history.data;
+            }
+            if (src.holdings && src.holdings.length > 0) {
+              f.holdings = src.holdings;
+            }
+            if (src.estimate && src.estimate.status === 'READY') {
+              f.estimate = f.estimate || {};
+              f.estimate.estimate_change = src.estimate.value;
+              f.estimate.trade_date = src.estimate.date;
+              f.estimate.confidence = src.estimate.confidence;
+              f.estimate.source = src.meta.source;
+            }
+          }
+        });
+      });
+    }
+  };
+
+  window.fundStore = window.fundStore || {};
+  Object.defineProperty(window.fundStore, 'get', { value: storeMethods.get, enumerable: false, writable: true, configurable: true });
+  Object.defineProperty(window.fundStore, 'update', { value: storeMethods.update, enumerable: false, writable: true, configurable: true });
+  Object.defineProperty(window.fundStore, 'propagate', { value: storeMethods.propagate, enumerable: false, writable: true, configurable: true });
+
+  // Account Store and Service
+  window.accountStore = {
+    get accounts() {
+      return window.portfolioState ? window.portfolioState.accounts : {};
+    },
+    get activeAccountId() {
+      return window.portfolioState ? window.portfolioState.getActive() : '';
+    },
+    set activeAccountId(id) {
+      if (window.portfolioState && typeof window.portfolioState.setActive === 'function') {
+        window.portfolioState.setActive(id);
+      }
+    }
+  };
+
+  window.accountDataService = {
+    switchAccount: function(accountId) {
+      console.log('[ACCOUNT] switch to ' + accountId);
+      window.accountStore.activeAccountId = accountId;
+      if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+      window.dispatchEvent(new CustomEvent('account-changed', { detail: { activeAccountId: accountId } }));
+    }
+  };
+
+  // Network Request Helpers at the Data Layer
+  function getApiBase() { return window.FUND_API_BASE || ''; }
+
+  function requestJson(url, options) {
+    var headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
+    return fetch(url, Object.assign({}, options, { headers: headers })).then(function (response) {
+      if (!response.ok) {
+        var error = new Error('HTTP ' + response.status);
+        error.status = response.status;
+        throw error;
+      }
+      return response.json();
+    });
+  }
+  window.requestJson = requestJson;
+
+  function refreshFund(code, force) {
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + (force ? '?refresh=1&fast=1' : '');
+    return requestJson(endpoint).catch(function (error) {
+      if (error.status !== 404) throw error;
+      var importUrl = getApiBase() + '/api/fund/import/' + encodeURIComponent(code) + (force ? '?force=1' : '');
+      return requestJson(importUrl)
+        .then(function () { return requestJson(endpoint); });
+    });
+  }
+  window.refreshFund = refreshFund;
+
+  function preferredEstimateSource() {
+    var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
+    try {
+      return localStorage.getItem('estimate_source_' + accountName) || 'local';
+    } catch (err) {
+      return 'local';
+    }
+  }
+  window.preferredEstimateSource = preferredEstimateSource;
+
+  function estimateFund(code, amount, force) {
+    var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
+    var source = preferredEstimateSource();
+    if (source === 'local') {
+      endpoint += '&mode=local';
+    } else if (typeof window.getProviderStatus === 'function') {
+      var available = window.getProviderStatus();
+      if (available[source] === true) {
+        endpoint += '&mode=provider&source=' + encodeURIComponent(source);
+      } else {
+        endpoint += '&mode=local';
+      }
+    } else {
+      endpoint += '&mode=provider&source=' + encodeURIComponent(source);
+    }
+    return requestJson(endpoint);
+  }
+  window.estimateFund = estimateFund;
+
+  // Unified Fund Data Service
+  window.fundDataService = {
+    refresh: function(code, force) {
+      console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force);
+      
+      const fund = window.fundStore.get(code);
+      
+      // Update statuses to LOADING or REFRESHING
+      const isNavReady = fund.nav && fund.nav.status === 'READY';
+      const isEstReady = fund.estimate && fund.estimate.status === 'READY';
+      const isProfitReady = fund.todayProfit && fund.todayProfit.status === 'READY';
+      
+      window.fundStore.update(code, {
+        nav: { status: isNavReady ? 'REFRESHING' : 'LOADING' },
+        estimate: { status: isEstReady ? 'REFRESHING' : 'LOADING' },
+        todayProfit: { status: isProfitReady ? 'REFRESHING' : 'LOADING' }
+      });
+      
+      var state = window.portfolioState;
+      var account = state && state.accounts && state.accounts[state.getActive()];
+      var currentFundObj = account && account.funds && account.funds.find(function(f) { return String(f.code) === String(code); });
+      var amount = currentFundObj ? (Number(currentFundObj.amount) || 0) : 0;
+      
+      return Promise.allSettled([
+        refreshFund(code, force),
+        estimateFund(code, amount, force)
+      ]).then(function(results) {
+        const snapshotRes = results[0].status === 'fulfilled' ? results[0].value : null;
+        const estimateRes = results[1].status === 'fulfilled' ? results[1].value : null;
+        
+        console.log('[DATA][SUCCESS] code=' + code + ' source=' + (estimateRes && (estimateRes.source || estimateRes.estimate_source) || 'local'));
+        
+        const mergedData = {
+          snapshot: snapshotRes,
+          estimate: estimateRes
+        };
+        
+        window.mergeFundData(code, mergedData);
+        return window.fundStore.get(code);
+      }).catch(function(err) {
+        console.error('[DATA][ERROR] code=' + code, err);
+        
+        // Revert statuses from REFRESHING back to READY, or if they failed from LOADING, set to ERROR
+        const f = window.fundStore.get(code);
+        window.fundStore.update(code, {
+          nav: { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' },
+          estimate: { status: f.estimate.status === 'REFRESHING' ? 'READY' : 'ERROR' },
+          todayProfit: { status: f.todayProfit.status === 'REFRESHING' ? 'READY' : 'ERROR' }
+        });
+        
+        throw err;
+      });
+    },
+    
+    refreshMany: function(codes, force) {
+      if (!Array.isArray(codes)) return Promise.resolve([]);
+      return Promise.allSettled(codes.map(function(code) {
+        return window.fundDataService.refresh(code, force);
+      }));
+    }
+  };
+
   function buildPersisted(){
     // 同步账户的持仓由服务端权威存储，不写入本地/云端 JSON；本地账户（含由同步转换的）正常持久化
     const persisted={};
@@ -22,7 +586,7 @@
         syncMeta[name]={ strategy: account.strategy.slice() };
       }
     });
-    return { accounts:persisted, active:state.getActive(), syncMeta };
+    return { accounts:persisted, active:state.getActive(), syncMeta, fundStore: window.fundStore };
   }
 
   function normalizeAccount(account){
@@ -78,6 +642,57 @@
   try{
     const saved=JSON.parse(localStorage.getItem(storageKey)||'null');
     if(saved&&saved.syncMeta&&typeof saved.syncMeta==='object')syncMetaStore=saved.syncMeta;
+    
+    // Hydrate fundStore from saved state!
+    if (saved && saved.fundStore && typeof saved.fundStore === 'object') {
+      Object.keys(saved.fundStore).forEach(code => {
+        if (saved.fundStore[code] && typeof saved.fundStore[code] === 'object') {
+          console.log('[DATA][HYDRATE] code=' + code);
+          const fund = window.fundStore.get(code);
+          const savedFund = saved.fundStore[code];
+          
+          if (savedFund.nav) fund.nav = { ...fund.nav, ...savedFund.nav };
+          if (savedFund.estimate) fund.estimate = { ...fund.estimate, ...savedFund.estimate };
+          if (savedFund.todayProfit) {
+            if (typeof savedFund.todayProfit === 'object') {
+              fund.todayProfit = { ...fund.todayProfit, ...savedFund.todayProfit };
+            } else {
+              fund.todayProfit.value = Number(savedFund.todayProfit) || null;
+              fund.todayProfit.status = 'READY';
+            }
+          }
+          if (savedFund.history) {
+            if (savedFund.history.data) {
+              fund._history = { ...fund._history, ...savedFund.history };
+            } else {
+              fund._history.data = Array.isArray(savedFund.history) ? savedFund.history : [];
+              fund._history.status = 'READY';
+            }
+          }
+          if (savedFund.detail) {
+            if (savedFund.detail.data) {
+              fund._detail = { ...fund._detail, ...savedFund.detail };
+            } else {
+              fund._detail.data = typeof savedFund.detail === 'object' ? savedFund.detail : {};
+              fund._detail.status = 'READY';
+            }
+          }
+          if (savedFund.meta) fund.meta = { ...fund.meta, ...savedFund.meta };
+          
+          // Sync backward compatible flatter fields
+          fund.todayProfitPercent = fund.todayProfit.percent;
+          fund.todayProfitValue = fund.todayProfit.value;
+          fund.navUpdatedAt = (fund.nav && fund.nav.status === 'READY') ? fund.nav.date : undefined;
+          fund.estimateConfidence = fund.estimate.confidence || null;
+          fund.estimateSource = fund.meta.source || null;
+          fund.history = fund._history.data || [];
+          fund.detail = fund._detail.data || {};
+          if (savedFund.holdings) fund.holdings = savedFund.holdings;
+          if (savedFund.calibration) fund.calibration = savedFund.calibration;
+        }
+      });
+    }
+
     // 只要存在已保存的 accounts（即使为空），就以保存内容为准，
     // 避免删除默认账户后刷新又出现“主账户”
     if(saved&&saved.accounts&&typeof saved.accounts==='object'){
@@ -89,6 +704,13 @@
       const active=state.accounts[saved.active]?saved.active:Object.keys(state.accounts)[0];
       if(active)originalSetActive(active);
       else originalSetActive('');
+
+      // Propagate loaded fundStore values to state.accounts
+      Object.keys(window.fundStore).forEach(code => {
+        if (typeof window.fundStore.propagate === 'function') {
+          window.fundStore.propagate(code);
+        }
+      });
     }
   }catch(error){
     console.warn('Saved portfolio data could not be restored.',error);
@@ -331,4 +953,72 @@
     }
     return applied;
   };
+  // Data Non-Regression Test Suite
+  window.runDataNonRegressionTest = function() {
+    console.log('[DATA][TEST] Starting Unified Data Layer Self-Test Suite...');
+    try {
+      const code = 'TEST_FUND_999';
+      const store = window.fundStore;
+      
+      // Clear test fund first
+      delete store[code];
+      
+      const fund = store.get(code);
+      
+      // Test 1: Initial EMPTY state
+      if (fund.nav.status !== 'EMPTY' || fund.estimate.status !== 'EMPTY') {
+        throw new Error('Test 1 failed: initial state is not EMPTY');
+      }
+      
+      // Test 2: Update NAV
+      window.mergeFundData(code, {
+        nav: { value: 1.234, date: '2026-08-21', percent: 0.015 }
+      });
+      if (fund.nav.status !== 'READY' || fund.nav.value !== 1.234 || fund.nav.date !== '2026-08-21') {
+        throw new Error('Test 2 failed: NAV update failed or status incorrect');
+      }
+      
+      // Test 3: Failed refresh should preserve existing NAV
+      // Simulating a failed refresh status
+      store.update(code, {
+        nav: { status: 'REFRESHING' }
+      });
+      // Simulate failure recovery
+      store.update(code, {
+        nav: { status: 'READY' }
+      });
+      if (fund.nav.status !== 'READY' || fund.nav.value !== 1.234 || fund.nav.date !== '2026-08-21') {
+        throw new Error('Test 3 failed: failed refresh did not preserve existing NAV');
+      }
+      
+      // Test 4: Update estimate, history should remain untouched
+      window.mergeFundData(code, {
+        snapshot: { history: [{ date: '2026-08-20', nav: 1.215 }] }
+      });
+      if (fund._history.data.length !== 1 || fund._history.data[0].nav !== 1.215) {
+        throw new Error('Test 4.1 failed: history snapshot merge failed');
+      }
+      
+      window.mergeFundData(code, {
+        estimate: { estimate_change: 0.008, trade_date: '2026-08-22' }
+      });
+      if (fund.estimate.value !== 0.008 || fund.estimate.date !== '2026-08-22') {
+        throw new Error('Test 4.2 failed: estimate merge failed');
+      }
+      if (fund._history.data.length !== 1 || fund._history.data[0].nav !== 1.215) {
+        throw new Error('Test 4.3 failed: estimate update regression impacted history data');
+      }
+      
+      // Clean up
+      delete store[code];
+      console.log('[DATA][TEST] All Unified Data Layer Non-Regression Tests Passed Successfully! [GREEN]');
+      return true;
+    } catch (e) {
+      console.error('[DATA][TEST] Non-regression test failed: ', e);
+      return false;
+    }
+  };
+  // Automatically trigger self-test suite on script load to verify integrity
+  setTimeout(window.runDataNonRegressionTest, 1000);
+
 })();
