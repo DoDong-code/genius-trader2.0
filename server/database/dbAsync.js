@@ -320,11 +320,36 @@ async function ensureCloudSchema() {
     )`,
     `CREATE INDEX IF NOT EXISTS idx_fund_estimate_code_date ON fund_estimate (fund_code, trade_date DESC)`
   ];
-  const db = await getPool();
-  for (const statement of statements) {
-    await db.query(statement);
+  // 使用专用连接执行 schema DDL（不占用连接池其它连接），并在该连接会话上
+  // 设置 lock_timeout / statement_timeout，避免 DDL 在等待表锁时永久 pending、
+  // 进而阻塞 server.listen() 导致 Render No open ports。
+  let client;
+  try {
+    const poolInstance = await getPool();
+    client = await poolInstance.connect();
+    await client.query("SET lock_timeout = '10s'");
+    await client.query("SET statement_timeout = '30s'");
+    for (let i = 0; i < statements.length; i++) {
+      const statement = statements[i];
+      try {
+        await client.query(statement);
+      } catch (err) {
+        const code = (err && err.code) || 'UNKNOWN';
+        const firstLine = String(statement).split('\n')[0].slice(0, 120);
+        console.error(
+          '[dbAsync] Cloud schema initialization failed\n' +
+          `  index=${i}\n` +
+          `  statement=${firstLine}\n` +
+          `  code=${code}\n` +
+          `  message=${err && err.message ? err.message : err}`
+        );
+        throw err; // 明确 reject，绝不永久 pending
+      }
+    }
+    console.log('[dbAsync] PostgreSQL schema ready');
+  } finally {
+    if (client) client.release(); // 禁止遗漏 release
   }
-  console.log('[dbAsync] PostgreSQL schema ready');
 }
 
 module.exports = {

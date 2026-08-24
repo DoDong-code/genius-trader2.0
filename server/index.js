@@ -141,7 +141,7 @@ function serveStatic(request, response, url) {
 }
 
 async function createServer() {
-  const { isCloud, ensureCloudSchema } = require('./database/dbAsync');
+  const { isCloud } = require('./database/dbAsync');
   // 云模式（PostgreSQL）下：SQLite 仅用作可重建缓存，其初始化失败不得拖垮 Postgres 服务
   try {
     getDatabase();
@@ -154,7 +154,6 @@ async function createServer() {
   if (!isCloud() && process.env.NODE_ENV !== 'production') {
     ensureInitialSeed();
   }
-  await ensureCloudSchema();
 
   return http.createServer(async (request, response) => {
     const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
@@ -200,6 +199,12 @@ async function startServer(port = 3000, host = '0.0.0.0') {
   server.listen(port, host, () => {
     console.log(`[genius-trader] Server running on http://${host}:${port}`);
     console.log(`[genius-trader] Database: ${require('./database/dbAsync').isCloud() ? 'PostgreSQL (cloud)' : databasePath()}`);
+  });
+  // 后台执行 schema 初始化（dbAsync 内部已设 lock_timeout=10s / statement_timeout=30s，
+  // 失败会明确记录并 reject，但绝不阻塞 server.listen —— 优先保证 Render 端口可探测）。
+  const { ensureCloudSchema } = require('./database/dbAsync');
+  ensureCloudSchema().catch(err => {
+    console.error('[dbAsync] Cloud schema initialization failed (server running in degraded mode):', err && err.message);
   });
   const shutdown = () => {
     server.close(() => {
