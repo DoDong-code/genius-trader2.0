@@ -22,8 +22,9 @@ async function getPool() {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 5,
-      connectionTimeoutMillis: 10000
+      max: 15, // Increase max clients to handle concurrency without queuing bottlenecks
+      connectionTimeoutMillis: 30000, // Wait up to 30 seconds for serverless Neon database cold starts
+      idleTimeoutMillis: 60000 // Keep idle clients connected longer to minimize handshakes
     });
     // P0 健壮性修复（Phase 3.1.2）：PG idle client / 连接错误若未监听会冒泡为
     // 未处理的 'error' 事件，导致 Node 进程退出（Render 自动重启）。
@@ -35,6 +36,41 @@ async function getPool() {
   return pool;
 }
 
+// 建立连接的重试包装器，防止因冷启动、网络波动或握手缓慢产生建连超时
+async function connectWithRetry(poolInstance) {
+  let attempts = 3;
+  while (attempts > 0) {
+    try {
+      return await poolInstance.connect();
+    } catch (err) {
+      attempts--;
+      const isConnectTimeout = err && err.message && (
+        err.message.includes('timeout exceeded when trying to connect') ||
+        err.message.includes('timeout') ||
+        err.message.includes('ETIMEDOUT') ||
+        err.message.includes('ECONNREFUSED')
+      );
+      if (isConnectTimeout && attempts > 0) {
+        console.warn(`[dbAsync] DB connection timeout/error, retrying in 1500ms... (${attempts} attempts left):`, err.message);
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// 统一包装云端查询，自动实现连接生命周期管理与连接重试
+async function queryCloud(sql, params = []) {
+  const poolInstance = await getPool();
+  const client = await connectWithRetry(poolInstance);
+  try {
+    return await client.query(convertPlaceholders(sql), params);
+  } finally {
+    client.release();
+  }
+}
+
 function convertPlaceholders(sql) {
   if (!isCloud()) return sql;
   let index = 0;
@@ -43,8 +79,7 @@ function convertPlaceholders(sql) {
 
 async function all(sql, params = []) {
   if (isCloud()) {
-    const db = await getPool();
-    const result = await db.query(convertPlaceholders(sql), params);
+    const result = await queryCloud(sql, params);
     return result.rows;
   }
   return getDatabase().prepare(sql).all(...params);
@@ -57,8 +92,7 @@ async function get(sql, params = []) {
 
 async function run(sql, params = []) {
   if (isCloud()) {
-    const db = await getPool();
-    const result = await db.query(convertPlaceholders(sql), params);
+    const result = await queryCloud(sql, params);
     return {
       changes: Number(result.rowCount || 0),
       lastInsertRowid: result.rows && result.rows[0] && result.rows[0].id != null ? Number(result.rows[0].id) : 0
@@ -70,8 +104,7 @@ async function run(sql, params = []) {
 
 async function exec(sql) {
   if (isCloud()) {
-    const db = await getPool();
-    await db.query(sql);
+    await queryCloud(sql);
     return;
   }
   getDatabase().exec(sql);
@@ -82,8 +115,8 @@ async function exec(sql) {
  */
 async function transaction(work) {
   if (isCloud()) {
-    const db = await getPool();
-    const client = await db.connect();
+    const poolInstance = await getPool();
+    const client = await connectWithRetry(poolInstance);
     try {
       await client.query('BEGIN');
       const helpers = {

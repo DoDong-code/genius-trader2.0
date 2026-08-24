@@ -103,7 +103,6 @@ export function computeDataBadge(fund, navDate, estimateSource, now = new Date()
   if (dataStatus === 'CONFIRMED_NAV' && navDate) {
     return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
   }
-  // PROVIDER_TODAY（provider 当日估值）≠ 确认净值 → 灰（同 PROVIDER_STALE）
   if (dataStatus === 'PROVIDER_TODAY') {
     return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
   }

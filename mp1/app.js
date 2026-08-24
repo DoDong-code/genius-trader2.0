@@ -57,7 +57,10 @@ App({
     // 3b. If cloud sync is enabled, pull latest account data in background
     if (wx.getStorageSync('use_cloud_db')) {
       this.loadStateFromCloud()
-        .then(synced => { if (synced) this.notifyAccountsChanged(); })
+        .then(async synced => {
+          await this.refreshSyncedAccounts();
+          this.notifyAccountsChanged();
+        })
         .catch(() => {});
     }
 
@@ -81,9 +84,10 @@ App({
         console.log('[Auth] restoring account state');
         // 登录用户：后台拉取该用户的云端 account/state
         this.loadStateFromCloud()
-          .then(synced => {
+          .then(async synced => {
             console.log('[Auth] account state restored =', synced);
-            if (synced) this.notifyAccountsChanged();
+            await this.refreshSyncedAccounts();
+            this.notifyAccountsChanged();
             // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
             this.refreshProviderStatus().catch(() => {});
           })
@@ -120,9 +124,10 @@ App({
     try {
       cloudSynced = await this.loadStateFromCloud(true);
       console.log('[Auth] account state restored =', cloudSynced);
+      await this.refreshSyncedAccounts();
       // ═══ 临时调试：登录后账户恢复确认（诊断后删除）═══
       console.log('[Login-Debug] cloud restore =', cloudSynced, '| accounts keys =', Object.keys(this.globalData.accounts || {}).length, '| active =', this.globalData.activeAccountName);
-      if (cloudSynced) this.notifyAccountsChanged();
+      this.notifyAccountsChanged();
       // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
       await this.refreshProviderStatus();
       console.log('[Auth] provider state restored');
@@ -444,6 +449,53 @@ App({
         try { p.refreshData(); } catch (e) { /* ignore */ }
       }
     });
+  },
+
+  // 同步账户权威数据：从服务端加载并合并进本地状态（标记 accountType=sync，不持久化到 localStorage）
+  async refreshSyncedAccounts() {
+    if (this.globalData.authState !== 'authenticated') return;
+    try {
+      const data = await http.get('/api/portfolio/accounts', null, { silent: true });
+      const serverAccounts = (data && data.accounts) || [];
+      const serverNames = new Set(serverAccounts.map(a => a.name));
+      
+      // Delete any existing sync accounts from local globalData that are no longer on the server
+      Object.keys(this.globalData.accounts || {}).forEach(name => {
+        const account = this.globalData.accounts[name];
+        if (account && (account.accountType === 'sync' || (!account.accountType && account.__source)) && !serverNames.has(name)) {
+          delete this.globalData.accounts[name];
+        }
+      });
+      
+      // Merge from server
+      serverAccounts.forEach(acc => {
+        acc.accountType = 'sync';
+        acc.syncSource = acc.source_name || 'sync';
+        delete acc.__source;
+        
+        // Preserve local strategy or details if they exist in local memory
+        const oldAccount = this.globalData.accounts[acc.name];
+        if (oldAccount) {
+          if (Array.isArray(oldAccount.strategy)) acc.strategy = oldAccount.strategy.slice();
+          if (Array.isArray(oldAccount.children)) acc.children = oldAccount.children.slice();
+        }
+        if (!Array.isArray(acc.strategy)) acc.strategy = [];
+        
+        this.globalData.accounts[acc.name] = acc;
+      });
+      
+      // Mirror cloud -> local so offline still works
+      try {
+        const saved = wx.getStorageSync('genius_portfolio_state') || {};
+        wx.setStorageSync('genius_portfolio_state', {
+          accounts: this.globalData.accounts,
+          active: this.globalData.activeAccountName || saved.active || '主账户',
+          updatedAt: Date.now()
+        });
+      } catch (e) { /* ignore */ }
+    } catch (e) {
+      console.warn('[Sync] refreshSyncedAccounts failed:', e && e.message);
+    }
   },
 
   // 当前账户的展示标识：优先真实微信 openid（云端），否则本地 mock openid

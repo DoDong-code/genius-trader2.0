@@ -303,8 +303,14 @@ Page({
 
   refreshData() {
     this._initNavDatePending();
-    const activeAccountName = app.globalData.activeAccountName;
-    const account = app.getActiveAccount();
+    const accounts = app.globalData.accounts || {};
+    let activeAccountName = app.globalData.activeAccountName;
+    if (!activeAccountName || !accounts[activeAccountName]) {
+      const firstValid = Object.keys(accounts)[0] || '主账户';
+      app.setActiveAccount(firstValid);
+      activeAccountName = firstValid;
+    }
+    const account = accounts[activeAccountName] || { name: activeAccountName, funds: [] };
     const funds = account.funds || [];
 
     // 自动初始化/预填充 navDateMap，让已有最新净值（周末或今日已更新）的行在首屏秒出蓝色徽章

@@ -209,8 +209,13 @@ Page({
   },
 
   refreshData() {
-    const activeAccountName = app.globalData.activeAccountName;
-    const accounts = app.globalData.accounts;
+    const accounts = app.globalData.accounts || {};
+    let activeAccountName = app.globalData.activeAccountName;
+    if (!activeAccountName || !accounts[activeAccountName]) {
+      const firstValid = Object.keys(accounts)[0] || '主账户';
+      app.setActiveAccount(firstValid);
+      activeAccountName = firstValid;
+    }
 
     // Build the account segmented tab list (root accounts only, matches Web)
     // Use {key, label} so '全部' (label) and 'all' (key) don't collide.
@@ -225,7 +230,7 @@ Page({
 
     // Keep selected tab valid; fall back to active account or 全部
     let selectedAccountTab = this.data.selectedAccountTab;
-    if (selectedAccountTab !== 'all' && !accounts[selectedAccountTab]) {
+    if (!selectedAccountTab || (selectedAccountTab !== 'all' && !accounts[selectedAccountTab])) {
       selectedAccountTab = accounts[activeAccountName] ? activeAccountName : 'all';
     }
 
@@ -301,7 +306,7 @@ Page({
       todayProfit = allTodayProfit;
       totalProfit = allTotalProfit;
     } else {
-      const activeAccount = accounts[activeAccountName] || { name: activeAccountName, funds: [] };
+      const activeAccount = accounts[selectedAccountTab] || { name: selectedAccountTab, funds: [] };
       const funds = activeAccount.funds || [];
 
       funds.forEach(f => {
@@ -319,7 +324,7 @@ Page({
     const totalProfitPct = totalCost > 0 ? (totalProfit / totalCost) * 100 : 0;
     const todayProfitPct = totalAssets > 0 ? (todayProfit / totalAssets) * 100 : 0;
 
-    const summaryAccountName = selectedAccountTab === 'all' ? '全部账户' : activeAccountName;
+    const summaryAccountName = selectedAccountTab === 'all' ? '全部账户' : selectedAccountTab;
 
     // Today's advice summary (cached AI result for the active account)
     let todayAdviceSummary = '';

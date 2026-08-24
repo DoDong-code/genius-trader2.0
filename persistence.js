@@ -271,6 +271,18 @@
           if (est.source || est.estimate_source) {
             fund.meta.source = est.source || est.estimate_source;
           }
+          if (est.data_status) {
+            fund.estimate.data_status = est.data_status;
+          }
+          if (est.trade_date) {
+            fund.estimate.trade_date = est.trade_date;
+          }
+          if (est.data_source_actual) {
+            fund.estimate.data_source_actual = est.data_source_actual;
+          }
+          if (est.source || est.estimate_source) {
+            fund.estimate.source = est.source || est.estimate_source;
+          }
           fund.estimate.status = 'READY';
           anyMerged = true;
         } else {
@@ -298,6 +310,11 @@
         anyMerged = true;
       }
     }
+
+    // Restore REFRESHING statuses back to READY if they weren't updated
+    if (fund.nav.status === 'REFRESHING') fund.nav.status = 'READY';
+    if (fund.estimate.status === 'REFRESHING') fund.estimate.status = 'READY';
+    if (fund.todayProfit.status === 'REFRESHING') fund.todayProfit.status = 'READY';
     
     // Re-evaluate today's profit
     const profitResult = calculateTodayProfit(fund);
