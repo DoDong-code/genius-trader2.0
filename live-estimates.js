@@ -170,6 +170,40 @@
               && inferDataStatusFromEstimate(fund, cached.estimate) === 'PROVIDER_TODAY';
             if (!providerToday) {
               updatedNavDates[c] = { day: shanghaiDate(), navDate: res.date };
+              if (cached) {
+                var changePercent = null;
+                if (cached._history && Array.isArray(cached._history.data)) {
+                  var history = cached._history.data;
+                  var records = history
+                    .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
+                    .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
+                  var prevNav = null;
+                  if (records.length > 0) {
+                    var sortedDesc = records.slice().reverse();
+                    var prevRecord = sortedDesc.find(function(r) { return String(r.date).localeCompare(String(res.date)) < 0; });
+                    if (prevRecord) {
+                      prevNav = Number(prevRecord.nav);
+                    }
+                  }
+                  if (prevNav && prevNav > 0 && res.nav) {
+                    changePercent = res.nav / prevNav - 1;
+                  }
+                }
+                window.fundStore.update(c, {
+                  nav: {
+                    status: 'READY',
+                    date: res.date,
+                    value: Number(res.nav),
+                    percent: changePercent !== null ? changePercent : cached.nav.percent
+                  }
+                });
+                if (typeof window.calculateTodayProfit === 'function') {
+                  var updatedProfit = window.calculateTodayProfit(cached);
+                  window.fundStore.update(c, {
+                    todayProfit: updatedProfit
+                  });
+                }
+              }
             } else {
               diagLog('[TODAY_NAV]', 'skip cached nav write for PROVIDER_TODAY code=' + c);
             }
