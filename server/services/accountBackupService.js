@@ -8,9 +8,25 @@ const MAX_BACKUPS = 5;
 
 // 创建快照，超出 5 个自动删除最旧
 async function createBackup(userId, state, reason = 'manual') {
-  const accountCount = state && state.accounts && typeof state.accounts === 'object'
+  let accountCount = state && state.accounts && typeof state.accounts === 'object'
     ? Object.keys(state.accounts).length
     : 0;
+
+  // 动态合并统计：加上该用户在数据库中活跃的、尚未解绑/转换的三方同步账户，确保备份数量显示完全准确
+  try {
+    const syncedAccs = await all(
+      'SELECT DISTINCT account_id FROM portfolio WHERE user_id = ? AND is_synced = 1 AND converted_at IS NULL',
+      [userId]
+    );
+    if (syncedAccs && syncedAccs.length > 0) {
+      const manualNames = state && state.accounts && typeof state.accounts === 'object' ? Object.keys(state.accounts) : [];
+      const uniqueSyncedCount = syncedAccs.filter(acc => !manualNames.includes(acc.account_id)).length;
+      accountCount += uniqueSyncedCount;
+    }
+  } catch (e) {
+    console.warn('[Backup] Failed to query synced account count:', e && e.message);
+  }
+
   await run(
     'INSERT INTO account_backups (user_id, data, account_count, reason, created_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)',
     [userId, JSON.stringify(state), accountCount, reason]

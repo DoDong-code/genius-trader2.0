@@ -5,9 +5,71 @@
  * - 会话为随机 Bearer token，存 sessions 表，30 天有效
  */
 const crypto = require('node:crypto');
-const { get, run } = require('../database/dbAsync');
+const { get, run, all, transaction } = require('../database/dbAsync');
 
 const SESSION_DAYS = 30;
+
+async function migrateGuestData(userId) {
+  if (!userId || userId === 0) return;
+  
+  await transaction(async ({ all: txAll, get: txGet, run: txRun }) => {
+    // 1. Migrate user_data (manual accounts)
+    const existingUserData = await txGet('SELECT data FROM user_data WHERE user_id = ?', [userId]);
+    const guestUserData = await txGet('SELECT data FROM user_data WHERE user_id = 0');
+    if (guestUserData) {
+      if (!existingUserData) {
+        // If the logged-in user does not have any user_data, migrate the guest user_data
+        await txRun(`
+          INSERT INTO user_data (user_id, data, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(user_id) DO UPDATE SET data = excluded.data, updated_at = CURRENT_TIMESTAMP
+        `, [userId, guestUserData.data]);
+      }
+      // After copying or resolving, delete the guest's user_data to avoid multiple adoptions
+      await txRun('DELETE FROM user_data WHERE user_id = 0');
+    }
+
+    // 2. Migrate source_credentials (third-party connections)
+    const guestCreds = await txAll('SELECT source_name, token, refresh_token, cookie, user_info, status FROM source_credentials WHERE user_id = 0');
+    for (const cred of guestCreds) {
+      const existingCred = await txGet('SELECT id FROM source_credentials WHERE user_id = ? AND source_name = ?', [userId, cred.source_name]);
+      if (!existingCred) {
+        await txRun(`
+          INSERT INTO source_credentials (user_id, source_name, token, refresh_token, cookie, user_info, status, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [userId, cred.source_name, cred.token, cred.refresh_token, cred.cookie, cred.user_info, cred.status]);
+      }
+    }
+    await txRun('DELETE FROM source_credentials WHERE user_id = 0');
+
+    // 3. Migrate portfolio (synced positions)
+    const guestPortfolio = await txAll('SELECT account_id, fund_code, shares, cost, amount, category, transactions, is_synced, source_name, converted_at FROM portfolio WHERE user_id = 0');
+    for (const item of guestPortfolio) {
+      const existingItem = await txGet('SELECT user_id FROM portfolio WHERE user_id = ? AND account_id = ? AND fund_code = ?', [userId, item.account_id, item.fund_code]);
+      if (!existingItem) {
+        await txRun(`
+          INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, category, transactions, is_synced, source_name, converted_at, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        `, [
+          userId,
+          item.account_id,
+          item.fund_code,
+          item.shares,
+          item.cost,
+          item.amount,
+          item.category,
+          item.transactions,
+          item.is_synced,
+          item.source_name,
+          item.converted_at
+        ]);
+      }
+    }
+    await txRun('DELETE FROM portfolio WHERE user_id = 0');
+
+    // 4. Migrate account_backups (backups)
+    await txRun('UPDATE account_backups SET user_id = ? WHERE user_id = 0', [userId]);
+  });
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -57,6 +119,14 @@ async function register(email, password) {
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
   await run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', [token, userId, expiresAt]);
+  
+  // 注册时，将本机在游客状态下连接的三方账户凭证、同步持仓、备份等无缝合并/迁移至此正式账号
+  try {
+    await migrateGuestData(userId);
+  } catch (e) {
+    console.error('[Auth] failed to migrate guest data during register:', e);
+  }
+
   return { token, user: { id: userId, email: normalized } };
 }
 
@@ -69,6 +139,14 @@ async function login(email, password) {
   const token = newToken();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 86400000).toISOString();
   await run('INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)', [token, user.id, expiresAt]);
+  
+  // 登录时，将本机在游客状态下连接的三方账户凭证、同步持仓、备份等无缝合并/迁移至此正式账号
+  try {
+    await migrateGuestData(Number(user.id));
+  } catch (e) {
+    console.error('[Auth] failed to migrate guest data during login:', e);
+  }
+
   return { token, user: { id: Number(user.id), email: user.email } };
 }
 

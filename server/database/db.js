@@ -254,6 +254,8 @@ function initialize(db) {
         shares REAL NOT NULL DEFAULT 0,
         cost REAL NOT NULL DEFAULT 0,
         amount REAL NOT NULL DEFAULT 0,
+        source_name TEXT NOT NULL DEFAULT '',
+        converted_at TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now')),
         category TEXT NOT NULL DEFAULT '基金',
@@ -264,13 +266,22 @@ function initialize(db) {
       )
     `);
     db.exec(`
-      INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, created_at, updated_at, category, transactions, is_synced)
-      SELECT 0, account_id, fund_code, shares, cost, amount, created_at, updated_at, category, transactions, is_synced FROM portfolio_legacy
+      INSERT INTO portfolio (user_id, account_id, fund_code, shares, cost, amount, source_name, converted_at, created_at, updated_at, category, transactions, is_synced)
+      SELECT 0, account_id, fund_code, shares, cost, amount, COALESCE(source_name, ''), converted_at, created_at, updated_at, category, transactions, is_synced FROM portfolio_legacy
     `);
     db.exec('DROP TABLE portfolio_legacy');
     db.exec('COMMIT');
     db.exec('PRAGMA foreign_keys = ON');
     db.exec('CREATE INDEX IF NOT EXISTS idx_portfolio_account ON portfolio (account_id)');
+  }
+
+  // 自愈性检查：如果数据库之前已经执行过 user_id 迁移导致丢失了 source_name 或 converted_at 列，在此处重新补全。
+  const finalPortfolioColumns = db.prepare('PRAGMA table_info(portfolio)').all();
+  if (!finalPortfolioColumns.some(column => column.name === 'source_name')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN source_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!finalPortfolioColumns.some(column => column.name === 'converted_at')) {
+    db.exec("ALTER TABLE portfolio ADD COLUMN converted_at TEXT");
   }
 }
 
