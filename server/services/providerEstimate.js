@@ -16,8 +16,56 @@ const PROVIDER_ORDER = ['xiaobeiyangji', 'yangjibao'];
 const SOURCE_ALIASES = { xbyj: 'xiaobeiyangji', yjb: 'yangjibao' };
 const PROVIDER_TIMEOUT_MS = 2500;
 const CACHE_TTL_MS = 300000; // 5 minutes TTL as requested
+const ESTIMATE_CACHE_MAX = 2000; // P3.3: hard cap on fund codes kept in memory
 
+// P3.3: bounded LRU + TTL cache.
+// The previous implementation used a bare `Map` that grew forever: every fund
+// code ever queried stayed resident for the process lifetime. On a long-lived
+// Render instance this silently leaked memory until OOM. Now:
+//   - cacheGet() returns null (and evicts) on TTL expiry
+//   - cacheSet() evicts the oldest entry when over capacity
+//   - a periodic sweeper drops expired-but-untouched entries
 const estimateCache = new Map(); // fund_code -> { at, value }
+
+function cacheGet(code) {
+  const e = estimateCache.get(String(code));
+  if (!e) return null;
+  if (Date.now() - e.at >= CACHE_TTL_MS) {
+    estimateCache.delete(String(code));
+    return null;
+  }
+  return e;
+}
+
+function cacheSet(code, entry) {
+  const key = String(code);
+  if (!estimateCache.has(key) && estimateCache.size >= ESTIMATE_CACHE_MAX) {
+    const oldest = estimateCache.keys().next().value;
+    if (oldest !== undefined) estimateCache.delete(oldest);
+  }
+  estimateCache.set(key, entry);
+}
+
+// periodic sweep: drop expired entries so untouched-but-expired codes don't linger
+const estimateCacheSweeper = setInterval(() => {
+  const now = Date.now();
+  let evicted = 0;
+  for (const [k, v] of estimateCache) {
+    if (now - v.at >= CACHE_TTL_MS) { estimateCache.delete(k); evicted += 1; }
+  }
+  if (evicted > 0) {
+    console.log(`[estimateCache] sweep evicted ${evicted}, size=${estimateCache.size}`);
+  }
+}, CACHE_TTL_MS);
+if (estimateCacheSweeper.unref) estimateCacheSweeper.unref();
+
+// lightweight heap watchdog to observe the leak fix in Render metrics
+const heapWatchdog = setInterval(() => {
+  const m = process.memoryUsage();
+  console.log(`[heap] rss=${(m.rss / 1048576) | 0}MB heapUsed=${(m.heapUsed / 1048576) | 0}MB heapTotal=${(m.heapTotal / 1048576) | 0}MB estimateCache=${estimateCache.size}`);
+}, CACHE_TTL_MS);
+if (heapWatchdog.unref) heapWatchdog.unref();
+
 const pendingBulkFetches = new Map(); // "sourceName:userId" -> Promise
 const lastBulkFetchTime = new Map(); // "sourceName:userId" -> timestamp
 
@@ -102,7 +150,7 @@ async function preFetchAllProviderEstimates(sourceName, userId) {
             };
             const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
             if (normalized) {
-              estimateCache.set(code, { at: Date.now(), value: normalized });
+              cacheSet(code, { at: Date.now(), value: normalized });
             }
           }
         }
@@ -133,7 +181,7 @@ async function preFetchAllProviderEstimates(sourceName, userId) {
             };
             const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
             if (normalized) {
-              estimateCache.set(code, { at: Date.now(), value: normalized });
+              cacheSet(code, { at: Date.now(), value: normalized });
             }
           }
         }
@@ -189,8 +237,8 @@ async function fetchProviderEstimate(code, amount, options = {}) {
 
   // 1. 如果不是强刷，且缓存存在有效数据，立即返回
   if (!options.force) {
-    const cached = estimateCache.get(String(code));
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+  const cached = cacheGet(code);
+  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
       if (cached.value) {
         const copy = { ...cached.value };
         if (Number.isFinite(amount)) {
@@ -213,7 +261,7 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   }
 
   // 3. 再次查询缓存（大概率已通过批量接口预先加载）
-  const cachedAfter = estimateCache.get(String(code));
+  const cachedAfter = cacheGet(code);
   if (cachedAfter && Date.now() - cachedAfter.at < CACHE_TTL_MS) {
     if (cachedAfter.value) {
       const copy = { ...cachedAfter.value };
@@ -246,7 +294,7 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   });
 
   if (hit && !options.force) {
-    estimateCache.set(String(code), { at: Date.now(), value: hit });
+    cacheSet(String(code), { at: Date.now(), value: hit });
   }
   return hit;
 }

@@ -17,6 +17,38 @@ const { shanghaiDateString } = require('./marketService');
 // 进程内并发锁：fund_code -> Promise（同一基金并发请求共享同一次获取）
 const inFlight = new Map();
 
+// P3.3: global concurrency limit for EXTERNAL NAV source fetches.
+// Without this, when an account of N funds is loaded against a cold cache, each
+// fund's ensureTodayNav fires up to 4 external requests (provider bulk, Yahoo,
+// Eastmoney) simultaneously. N funds × 4 in flight at once spikes both memory
+// and outbound connections on a shared Render instance → OOM. This caps the
+// number of simultaneously-executing external fetches regardless of N. The
+// per-fund inFlight lock above still prevents duplicate fetches for the SAME fund.
+const MAX_EXTERNAL_CONCURRENCY = 6;
+let activeExternal = 0;
+const externalQueue = [];
+
+function runExternal(fn) {
+  return new Promise((resolve, reject) => {
+    externalQueue.push({ fn, resolve, reject });
+    pumpExternal();
+  });
+}
+
+function pumpExternal() {
+  while (activeExternal < MAX_EXTERNAL_CONCURRENCY && externalQueue.length > 0) {
+    const { fn, resolve, reject } = externalQueue.shift();
+    activeExternal += 1;
+    Promise.resolve()
+      .then(fn)
+      .then(resolve, reject)
+      .finally(() => {
+        activeExternal -= 1;
+        pumpExternal();
+      });
+  }
+}
+
 function logHit(code, date) { console.log(`[NAV CACHE] hit ${code} ${date}`); }
 function logMiss(code, date) { console.log(`[NAV CACHE] miss ${code} ${date}`); }
 function logFetch(source, code) { console.log(`[NAV FETCH] source=${source} code=${code}`); }
@@ -163,10 +195,10 @@ async function ensureTodayNav(fundCode, options = {}) {
     }
 
     const promises = [
-      fetchFromXiaobei(),
-      fetchFromYangjibao(),
-      fetchFromYahoo(),
-      fetchFromTiantian()
+      runExternal(fetchFromXiaobei),
+      runExternal(fetchFromYangjibao),
+      runExternal(fetchFromYahoo),
+      runExternal(fetchFromTiantian)
     ];
 
     const result = await new Promise((resolve) => {
