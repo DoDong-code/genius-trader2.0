@@ -83,5 +83,7 @@
   // the root changes, not to those internal text updates.
   new MutationObserver(schedule).observe(root, { childList: true });
   window.addEventListener('fund-estimate-updated', schedule);
+  window.addEventListener('fund-store-updated', schedule);
+  window.addEventListener('account-changed', schedule);
   schedule();
 })();

@@ -18,6 +18,8 @@ const PROVIDER_TIMEOUT_MS = 2500;
 const CACHE_TTL_MS = 300000; // 5 minutes TTL as requested
 
 const estimateCache = new Map(); // fund_code -> { at, value }
+const pendingBulkFetches = new Map(); // "sourceName:userId" -> Promise
+const lastBulkFetchTime = new Map(); // "sourceName:userId" -> timestamp
 
 function round2(value) {
   return Math.round(Number(value) * 100) / 100;
@@ -50,6 +52,113 @@ function normalizeProviderEstimate(provider, raw, code, amount) {
   return estimate;
 }
 
+// 批量预拉取第三方估值并填充至全局缓存，实现 O(1) 毫秒级极速响应
+async function preFetchAllProviderEstimates(sourceName, userId) {
+  const cacheKey = `${sourceName}:${userId}`;
+  const now = Date.now();
+  // 限流保护：30秒内不重复向第三方服务器发起批量请求
+  if (lastBulkFetchTime.has(cacheKey) && now - lastBulkFetchTime.get(cacheKey) < 30000) {
+    return;
+  }
+  lastBulkFetchTime.set(cacheKey, now);
+
+  const credential = await getCredential(sourceName, userId);
+  if (!credential || credential.status !== 'connected' || !credential.token) return;
+
+  const provider = getProvider(sourceName);
+  if (!provider) return;
+  provider.setToken(credential.token);
+
+  if (sourceName === 'xiaobeiyangji') {
+    try {
+      // 1. 获取持仓列表以提取持仓基金代码，不消耗额外耗时
+      const data = await provider._request('POST', '/yangji-api/api/get-hold-list', provider._commonBody());
+      const items = ((data && data.list) || []).filter(item => item && item.money);
+      if (items.length) {
+        const codes = items.map(item => String(item.code));
+        // 2. 一次性批量获取所有持仓基金的盘中估值
+        const navList = await provider._getOptionalChangeNav(codes);
+        for (const item of (navList || [])) {
+          const code = String(item.code);
+          const valuation = Number(item.valuation);
+          const valuationY = Number(item.valuationY);
+          const nav = Number(item.nav);
+
+          let estimateNav;
+          let estimateGrowth;
+          if (Number.isFinite(valuation) && valuation !== 0) {
+            estimateNav = valuation;
+            estimateGrowth = Number.isFinite(valuationY) ? valuationY * 100 : null;
+          }
+
+          if (Number.isFinite(estimateNav) && estimateGrowth !== null) {
+            const rawObj = {
+              fund_code: code,
+              fund_name: '',
+              estimate_nav: estimateNav,
+              estimate_growth: estimateGrowth,
+              estimate_time: new Date().toISOString(),
+              trade_date: new Date().toISOString().slice(0, 10)
+            };
+            const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
+            if (normalized) {
+              estimateCache.set(code, { at: Date.now(), value: normalized });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[bulk-estimate] xiaobeiyangji bulk pre-fetch failed:', err.message);
+    }
+  } else if (sourceName === 'yangjibao') {
+    try {
+      // 1. 批量获取养基宝多账户
+      const accounts = await provider.fetchAccounts();
+      for (const account of accounts) {
+        // 2. 获取该账户下的所有持仓（已自带估值 nv_info，单次请求即可拿全）
+        const rawHoldings = await provider._fetchRawHoldings(account.account_id);
+        for (const holding of rawHoldings) {
+          const code = String(holding.code);
+          const nvInfo = holding.nv_info || {};
+          const estimateNav = nvInfo.gsz || nvInfo.vgsz || nvInfo.zsgz;
+          const estimateGrowth = nvInfo.gszzl || nvInfo.vgszzl || nvInfo.zsgzzl;
+          if (estimateNav && estimateGrowth) {
+            const rawObj = {
+              fund_code: code,
+              fund_name: String(holding.short_name || ''),
+              estimate_nav: Number(estimateNav),
+              estimate_growth: Number(estimateGrowth),
+              estimate_time: new Date().toISOString(),
+              trade_date: new Date().toISOString().slice(0, 10)
+            };
+            const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
+            if (normalized) {
+              estimateCache.set(code, { at: Date.now(), value: normalized });
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[bulk-estimate] yangjibao bulk pre-fetch failed:', err.message);
+    }
+  }
+}
+
+// 采用 Promise 共享机制，防止并发请求时重复调用批量接口
+function getBulkFetchPromise(sourceName, userId) {
+  const cacheKey = `${sourceName}:${userId}`;
+  if (pendingBulkFetches.has(cacheKey)) {
+    return pendingBulkFetches.get(cacheKey);
+  }
+
+  const promise = preFetchAllProviderEstimates(sourceName, userId).finally(() => {
+    pendingBulkFetches.delete(cacheKey);
+  });
+
+  pendingBulkFetches.set(cacheKey, promise);
+  return promise;
+}
+
 async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
   // 凭证严格按登录账户隔离：每个账号只使用自己登录的第三方
   const credential = await getCredential(sourceName, userId);
@@ -73,15 +182,51 @@ async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
  * @param {{force?: boolean, source?: string, userId?: number}} options
  */
 async function fetchProviderEstimate(code, amount, options = {}) {
-  if (!options.force) {
-    const cached = estimateCache.get(String(code));
-    if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.value;
-  }
-
   const userId = Number(options.userId) || 0;
   // 统一 source 别名：微信端短名(xbyj/yjb) → 服务端内部名(xiaobeiyangji/yangjibao)；内部名原样透传
   const source = options.source ? (SOURCE_ALIASES[String(options.source)] || options.source) : undefined;
-  // 任一 Provider 先返回有效估值即胜出，避免等待慢的那个；全部失败/超时才返回 null 走本地引擎兜底
+  const targetSources = source ? [source] : PROVIDER_ORDER;
+
+  // 1. 如果不是强刷，且缓存存在有效数据，立即返回
+  if (!options.force) {
+    const cached = estimateCache.get(String(code));
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      if (cached.value) {
+        const copy = { ...cached.value };
+        if (Number.isFinite(amount)) {
+          copy.estimate_profit = round2(amount * copy.estimate_change);
+          copy.estimateProfit = copy.estimate_profit;
+        }
+        return copy;
+      }
+      return cached.value;
+    }
+  }
+
+  // 2. 并发安全地触发批量预拉取（Promise合并）
+  for (const src of targetSources) {
+    try {
+      await getBulkFetchPromise(src, userId);
+    } catch (e) {
+      // 容错：批量预拉取异常时不阻断流程
+    }
+  }
+
+  // 3. 再次查询缓存（大概率已通过批量接口预先加载）
+  const cachedAfter = estimateCache.get(String(code));
+  if (cachedAfter && Date.now() - cachedAfter.at < CACHE_TTL_MS) {
+    if (cachedAfter.value) {
+      const copy = { ...cachedAfter.value };
+      if (Number.isFinite(amount)) {
+        copy.estimate_profit = round2(amount * copy.estimate_change);
+        copy.estimateProfit = copy.estimate_profit;
+      }
+      return copy;
+    }
+    return cachedAfter.value;
+  }
+
+  // 4. 兜底逐个拉取（若批量同步未能涵盖此基金代码）
   const hit = await new Promise(resolve => {
     const order = source ? PROVIDER_ORDER.filter(name => name === source) : PROVIDER_ORDER;
     const pending = order.map(sourceName =>
