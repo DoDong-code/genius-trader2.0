@@ -77,11 +77,20 @@
   }
 
   function applySourceSelection(key) {
+    var from = preferredSource();
+    // Case D：同一数据源不重复请求（养基宝→养基宝 等）
+    if (from === key) {
+      return;
+    }
     try {
       localStorage.setItem('estimate_source_' + currentAccountName(), key);
     } catch (err) {}
     renderSourcePicker();
-    if (typeof window.refreshFundEstimates === 'function') {
+    // P3.4：切换数据源 → 仅触发一次当前账户当前数据源刷新（带请求版本保护 + 结果提示 + 诊断日志）。
+    // 不调用 refreshFundEstimates（通用刷新，无版本保护/无提示），避免“切了但没反应”。
+    if (typeof window.triggerSourceRefresh === 'function') {
+      window.triggerSourceRefresh({ from: from, to: key });
+    } else if (typeof window.refreshFundEstimates === 'function') {
       window.refreshFundEstimates(true);
     }
   }

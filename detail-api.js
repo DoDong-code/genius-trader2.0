@@ -1246,7 +1246,19 @@
   // 估值 source 为小倍/养基宝时显示对应数据源；否则默认后端数据源（天天基金）
   function dataSourceStatusText(fund, payload) {
     const estimate = payload && payload.estimate;
-    const source = estimate && (estimate.source || estimate.estimate_source);
+    let source = estimate && (estimate.source || estimate.estimate_source);
+    // 抽屉以 fast=1 打开时快照 estimate 为 null，回退到前端 FundStore / fund 上已由
+    // 数据源切换或估值刷新写入的真实 source（不会因快照缺 estimate 而误显示“天天基金”）。
+    // 通用修复：不针对任何基金代码硬编码。
+    if (!source) {
+      const fs = (window.fundStore && typeof window.fundStore.get === 'function' && fund)
+        ? window.fundStore.get(fund.code) : null;
+      source = (fs && fs.estimate && (fs.estimate.source || fs.estimate.estimate_source))
+        || (fs && fs.meta && fs.meta.source)
+        || (fund && fund.estimateSource)
+        || (fund && fund.meta && fund.meta.source)
+        || null;
+    }
     if (source === 'xiaobeiyangji' || source === 'xbyj') return '✓ 小倍数据';
     if (source === 'yangjibao' || source === 'yjb') return '✓ 养基宝数据';
     return '✓ ' + FUND_DATA_SOURCE_LABEL + '数据';

@@ -653,6 +653,10 @@
       'from=' + (from || '-'), 'to=' + to, 'version=' + version);
 
     var codes = visibleFundCodes();
+    if (codes.length === 0) {
+      diagLog('[SOURCE_SWITCH]', 'no visible rows to refresh');
+      return;
+    }
     var results = [];
     codes.forEach(function (code) {
       var row = document.querySelector('#view-root .fund-row[data-code="' + String(code) + '"]');
