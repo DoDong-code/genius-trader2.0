@@ -9,6 +9,10 @@
  * - /yangji-api/api/get-optional-change-nav 批量估值（用于推算份额）
  */
 const BaseProvider = require('./baseProvider');
+// Phase 3.3-H：provider 出站请求经全局并发闸门（与股票行情/Yahoo 共享同一把锁），
+// 封住"第二条无界外部 HTTP 路径"——providerEstimate 的 per-fund 兜底 tryProviderEstimate
+// 在冷缓存/批量预取失败时可能 fan-out 至 2×基金数且不受限。
+const { withLimit } = require('../services/concurrencyLimit');
 
 class XiaoBeiYangJiProvider extends BaseProvider {
   constructor() {
@@ -49,24 +53,29 @@ class XiaoBeiYangJiProvider extends BaseProvider {
   }
 
   async _request(method, path, body) {
-    const response = await fetch(this.BASE_URL + path, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this._token || ''}`,
-        // 贴近官方 App 的客户端指纹，部分接口会校验
-        'User-Agent': 'okhttp/4.9.0',
-        Accept: 'application/json'
-      },
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30000)
+    // Phase 3.3-H：provider 出站请求经全局并发闸门（与股票行情/Yahoo 共享同一把锁），
+    // 封住"第二条无界外部 HTTP 路径"——providerEstimate 的 per-fund 兜底 tryProviderEstimate
+    // 在冷缓存/批量预取失败时可能 fan-out 至 2×基金数且不受限。
+    const result = await withLimit(async () => {
+      const response = await fetch(this.BASE_URL + path, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this._token || ''}`,
+          // 贴近官方 App 的客户端指纹，部分接口会校验
+          'User-Agent': 'okhttp/4.9.0',
+          Accept: 'application/json'
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(30000)
+      });
+      if (!response.ok) {
+        const err = new Error(`小倍养基接口请求失败 (HTTP ${response.status})`);
+        if (response.status === 401) err.statusCode = 401;
+        throw err;
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      const err = new Error(`小倍养基接口请求失败 (HTTP ${response.status})`);
-      if (response.status === 401) err.statusCode = 401;
-      throw err;
-    }
-    const result = await response.json();
     if (result.code !== 200) {
       const err = new Error(result.msg || '小倍养基接口返回错误');
       console.error(`[xiaobeiyangji] ${path} 返回错误: code=${result.code} msg=${result.msg}`);

@@ -7,6 +7,9 @@ const EASTMONEY_STOCK_DELAY_API = 'https://push2delay.eastmoney.com';
 const EASTMONEY_STOCK_HIS_API = 'https://push2his.eastmoney.com';
 const EASTMONEY_STOCK_HIS_DELAY_API = 'https://push2hisdelay.eastmoney.com';
 
+// Phase 3.3-H：全局出站并发闸门（钳制同时进行的 fetch 数量，解 OOM 主因 B/F/G）。
+const { withLimit } = require('./concurrencyLimit');
+
 function sleep(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
@@ -17,25 +20,30 @@ async function fetchText(url, options = {}) {
   const attempts = retryDelays ? retryDelays.length + 1 : Number(options.attempts || 3);
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: options.accept || 'application/json,text/html,application/javascript;q=0.9,*/*;q=0.8',
-          Referer: options.referer || `${EASTMONEY_FUND}/`,
-          'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0',
-          ...(options.extraHeaders || {}) // Phase 3.17-E：允许附加头（如 Nasdaq 的 Origin），默认行为不变
-        },
-        signal: AbortSignal.timeout(Number(options.timeout || 15000))
+      // Phase 3.3-H：真实 fetch + 响应体缓冲（response.text()）统一经全局出站闸门，
+      // 钳制并发出站数量，避免大量并发请求同时驻留 response body 造成 RSS 暴涨（G 次因）。
+      const result = await withLimit(async () => {
+        const response = await fetch(url, {
+          headers: {
+            Accept: options.accept || 'application/json,text/html,application/javascript;q=0.9,*/*;q=0.8',
+            Referer: options.referer || `${EASTMONEY_FUND}/`,
+            'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0',
+            ...(options.extraHeaders || {}) // Phase 3.17-E：允许附加头（如 Nasdaq 的 Origin），默认行为不变
+          },
+          signal: AbortSignal.timeout(Number(options.timeout || 15000))
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        if (options.returnMeta) {
+          return {
+            text,
+            status: response.status,
+            contentType: response.headers.get('content-type') || ''
+          };
+        }
+        return text;
       });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      const text = await response.text();
-      if (options.returnMeta) {
-        return {
-          text,
-          status: response.status,
-          contentType: response.headers.get('content-type') || ''
-        };
-      }
-      return text;
+      return result;
     } catch (error) {
       lastError = error;
       if (attempt < attempts) {

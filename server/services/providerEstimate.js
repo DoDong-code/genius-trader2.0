@@ -299,9 +299,19 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   return hit;
 }
 
+// Phase 3.3-H：只读统计导出（不改变任何运行时行为），供 [MEMORY] 诊断采样 estimateCache 规模。
+function stats() {
+  return {
+    estimateCacheSize: estimateCache.size,
+    estimateCacheMax: ESTIMATE_CACHE_MAX,
+    pendingBulkFetchesSize: pendingBulkFetches.size
+  };
+}
+
 module.exports = {
   fetchProviderEstimate,
   tryProviderEstimate,
   normalizeProviderEstimate,
-  PROVIDER_ORDER
+  PROVIDER_ORDER,
+  stats
 };

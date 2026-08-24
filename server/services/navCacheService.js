@@ -252,4 +252,14 @@ async function ensureTodayNav(fundCode, options = {}) {
   }
 }
 
-module.exports = { ensureTodayNav, getCachedNav, isAfterClose };
+// Phase 3.3-H：只读统计导出（不改变任何运行时行为），供 [MEMORY] 诊断采样 nav 路径并发/队列规模。
+function stats() {
+  return {
+    activeExternal,
+    externalQueueSize: externalQueue.length,
+    inFlightSize: inFlight.size,
+    maxExternalConcurrency: MAX_EXTERNAL_CONCURRENCY
+  };
+}
+
+module.exports = { ensureTodayNav, getCachedNav, isAfterClose, stats };

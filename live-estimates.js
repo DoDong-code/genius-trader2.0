@@ -1,6 +1,17 @@
 (function () {
   'use strict';
 
+  // P3.4：诊断日志开关（仅在 ?diag=1 或 window.GT_DIAGNOSTIC===true 时打印）
+  var DIAGNOSTIC = /[?&]diag=1\b/.test(String((window.location && window.location.search) || '')) || window.GT_DIAGNOSTIC === true;
+  function diagLog() {
+    if (!DIAGNOSTIC) return;
+    try { console.log.apply(console, arguments); } catch (e) {}
+  }
+
+  // P3.4：数据源切换请求版本（防止旧 source 响应覆盖新 source 状态）
+  var sourceRequestVersion = 0;
+  window.__sourceRefreshVersion = 0;
+
   var getApiBase = function() { return window.FUND_API_BASE || ''; };
   var active = 0;
   var MAX_CONCURRENT = 6;
@@ -149,8 +160,18 @@
       return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav')
         .then(function (res) {
           if (res && res.success && res.cached && res.nav && res.date) {
-            // 缓存已就绪：更新已更新净值缓存，让徽章立即变蓝（不等下次快照）
-            updatedNavDates[String(code)] = { day: shanghaiDate(), navDate: res.date };
+            // P3.4：updatedNavDates 仅作「正式净值辅助缓存」，绝不作为独立 badge 状态源。
+            // 若当前基金已是 PROVIDER_TODAY（provider 当日估值），禁止写入，避免把估值覆盖成蓝色 0824。
+            var c = String(code);
+            var fund = currentFund(c);
+            var cached = window.fundStore ? window.fundStore.get(c) : null;
+            var providerToday = cached && cached.estimate && cached.estimate.status === 'READY'
+              && inferDataStatusFromEstimate(fund, cached.estimate) === 'PROVIDER_TODAY';
+            if (!providerToday) {
+              updatedNavDates[c] = { day: shanghaiDate(), navDate: res.date };
+            } else {
+              diagLog('[TODAY_NAV]', 'skip cached nav write for PROVIDER_TODAY code=' + c);
+            }
           }
           return null;
         })
@@ -287,7 +308,7 @@
     }
   }
 
-  function markEstimateBadge(row, fund, label) {
+  function markEstimateBadge(row, fund, label, stale) {
     var meta = row.querySelector('.fund-info small');
     if (!meta) return;
     setFundMeta(row, fund || currentFund(row.dataset.code));
@@ -301,9 +322,10 @@
       badge = document.createElement('span');
       badge.className = 'nav-estimate-badge';
     }
+    if (stale) badge.classList.add('is-stale'); else badge.classList.remove('is-stale');
     var text = label || '估算';
     badge.innerHTML = '<span class="desktop-tag-text">' + text + '</span><span class="mobile-tag-text">' + text + '</span>';
-    badge.title = label ? label + '实时估值' : '今日估算数据';
+    badge.title = (stale ? '估值（待确认）' : (label ? label + '实时估值' : '今日估算数据'));
     if (meta.firstChild !== badge) {
       meta.insertBefore(badge, meta.firstChild);
     }
@@ -492,29 +514,44 @@
     var change = cached.todayProfit.percent;
     var profit = cached.todayProfit.value;
     
-    // Determine badge status
-    var navDate = cached.nav.date;
-    var expNavDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
-    var isOfficialUpdated = Boolean(navDate && (navDate === expNavDate || (!isTr && navDate)));
-    
-    if (isOfficialUpdated || (isBeforeOpen() && navDate)) {
-      markNavUpdated(row, navDate, fund);
-    } else if (cached.estimate && cached.estimate.status === 'READY') {
-      // Check data_status or infer provider
-      var source = cached.meta.source;
-      var pLabel = providerDisplayName(source);
-      
-      let dataStatus = cached.estimate.data_status;
-      if (!dataStatus) dataStatus = inferDataStatusFromEstimate(fund, cached.estimate);
-      
-      if (dataStatus === 'PROVIDER_TODAY' || dataStatus === 'PROVIDER_STALE') {
-        markEstimateBadge(row, fund, pLabel || '小倍');
-      } else {
-        markEstimateBadge(row, fund, '估值');
-      }
+    // P3.4-STATE：统一徽章决策（冻结优先级：PROVIDER_TODAY > PROVIDER_STALE > 确认净值蓝 > 估值兜底）
+    // 关键修复：后端 resolveDataStatus 在「已确认净值」存在时会优先返回 CONFIRMED_NAV，
+    // 从而把 provider 当日估值覆盖成蓝色 0824。此处用 inferDataStatusFromEstimate 独立判定
+    // 「当前 source 是否返回 provider 当日/旧数据」，确保 PROVIDER_TODAY 优先于确认净值蓝。
+    var decision = null;
+    var providerStatus = (cached.estimate && cached.estimate.status === 'READY')
+      ? inferDataStatusFromEstimate(fund, cached.estimate)
+      : null;
+
+    if (providerStatus === 'PROVIDER_TODAY') {
+      // 第一优先级：provider 当日估值 → 灰「估值」（不蓝、不显示数据源名）
+      markEstimateBadge(row, fund, '估值', false);
+      decision = 'PROVIDER_TODAY';
+    } else if (providerStatus === 'PROVIDER_STALE') {
+      // 第二优先级：provider 旧数据 → 灰「估值」（待确认）
+      markEstimateBadge(row, fund, '估值', true);
+      decision = 'PROVIDER_STALE';
     } else {
-      markEstimateBadge(row, fund, '估值');
+      // 第三优先级：非 provider 当日数据 → 确认净值蓝（CONFIRMED）或估值兜底
+      var navDate = cached.nav.date;
+      var expNavDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+      var isOfficialUpdated = Boolean(navDate && (navDate === expNavDate || (!isTr && navDate)));
+      if (isOfficialUpdated || (isBeforeOpen() && navDate)) {
+        markNavUpdated(row, navDate, fund);
+        decision = 'CONFIRMED_NAV';
+      } else {
+        markEstimateBadge(row, fund, '估值', false);
+        decision = 'NO_DATA';
+      }
     }
+
+    diagLog('[BADGE_DECISION]', 'code=' + code,
+      'source=' + (cached.meta && cached.meta.source),
+      'data_status=' + (cached.estimate ? cached.estimate.data_status : null),
+      'trade_date=' + (cached.estimate ? (cached.estimate.trade_date || cached.estimate.date) : null),
+      'nav_date=' + cached.nav.date,
+      'providerStatus=' + providerStatus,
+      'decision=' + decision);
     
     if (change !== null && Number.isFinite(change)) {
       updateTodayCell(row, change, profit);
@@ -591,6 +628,116 @@
     delete row.dataset.estimateState;
     hydrateRow(row, false);
   };
+
+  // P3.4：当前视图可见的基金 code 列表（数据源切换只刷新可见行）
+  function visibleFundCodes() {
+    var codes = [];
+    document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
+      var c = row.dataset.code;
+      if (c && codes.indexOf(String(c)) === -1) codes.push(String(c));
+    });
+    return codes;
+  }
+
+  // P3.4：切换数据源的统一刷新入口（每次切换仅触发一次；带请求版本保护 + 结果提示 + 诊断日志）
+  // 调用链：用户选择 source → applySourceSelection 写 localStorage → triggerSourceRefresh
+  //   → fundDataService.refresh(code, true, {version}) → mergeFundData → FundStore
+  //   → renderRowFromStore（按冻结优先级重算 badge）→ todayProfit 重算 → showToast 结果提示
+  function triggerSourceRefresh(opts) {
+    opts = opts || {};
+    var to = opts.to || preferredEstimateSource();
+    var from = opts.from;
+    var version = ++sourceRequestVersion;
+    window.__sourceRefreshVersion = version;
+    diagLog('[SOURCE_SWITCH]', 'account=' + (window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : ''),
+      'from=' + (from || '-'), 'to=' + to, 'version=' + version);
+
+    var codes = visibleFundCodes();
+    var results = [];
+    codes.forEach(function (code) {
+      var row = document.querySelector('#view-root .fund-row[data-code="' + String(code) + '"]');
+      if (row) row.dataset.estimateState = 'loading'; // 立即给出刷新状态反馈
+      refreshSourceRow(code, to, version, results);
+    });
+    Promise.allSettled(codes.map(function () { return Promise.resolve(); })).then(function () {
+      // 等待所有行 refresh 完成（refreshSourceRow 内部已 push，这里用计数兜底）
+    });
+    // 用独立计数器确保 summary 在所有行结束后触发
+    pendingSourceSummary = { version: version, to: to, remaining: codes.length, results: results };
+  }
+
+  // 等待所有行 refresh 完成后再汇总（避免过早提示）
+  var pendingSourceSummary = null;
+  function maybeSummarizeSourceRefresh() {
+    if (!pendingSourceSummary) return;
+    pendingSourceSummary.remaining -= 1;
+    if (pendingSourceSummary.remaining > 0) return;
+    var summary = pendingSourceSummary;
+    pendingSourceSummary = null;
+    if (summary.version !== window.__sourceRefreshVersion) {
+      diagLog('[SOURCE_REFRESH_SUMMARY]', 'skipped stale version=' + summary.version);
+      return; // 已有更新的切换，交给新切换汇总
+    }
+    summarizeSourceRefresh(summary.to, summary.version, summary.results);
+  }
+
+  function refreshSourceRow(code, to, version, results) {
+    var fund = currentFund(code);
+    diagLog('[SOURCE_REFRESH_START]', 'source=' + to, 'version=' + version, 'code=' + code);
+    window.fundDataService.refresh(code, true, { version: version }).then(function () {
+      if (version !== window.__sourceRefreshVersion) {
+        diagLog('[SOURCE_REFRESH_END]', 'source=' + to, 'version=' + version, 'code=' + code, 'result=discarded(stale)');
+        maybeSummarizeSourceRefresh();
+        return;
+      }
+      var cached = window.fundStore.get(code);
+      var est = cached.estimate;
+      var providerStatus = (est && est.status === 'READY') ? inferDataStatusFromEstimate(fund, est) : null;
+      var tradeDate = est ? (est.trade_date || est.date || null) : null;
+      var actualSource = est ? (est.data_source_actual || est.source || est.estimate_source || null) : null;
+      var hasEstimate = Boolean(providerStatus && providerStatus !== 'NO_DATA');
+      diagLog('[SOURCE_REFRESH_RESULT]', 'source=' + to, 'version=' + version, 'code=' + code,
+        'status=' + (providerStatus || 'NO_ESTIMATE'),
+        'trade_date=' + tradeDate, 'data_source_actual=' + actualSource, 'hasEstimate=' + hasEstimate);
+      var row = document.querySelector('#view-root .fund-row[data-code="' + String(code) + '"]');
+      if (row && row.isConnected) renderRowFromStore(row, code, fund);
+      results.push({ code: code, status: providerStatus, hasEstimate: hasEstimate });
+      diagLog('[SOURCE_REFRESH_END]', 'source=' + to, 'version=' + version, 'code=' + code, 'result=ok');
+      maybeSummarizeSourceRefresh();
+    }).catch(function (err) {
+      diagLog('[SOURCE_REFRESH_END]', 'source=' + to, 'version=' + version, 'code=' + code, 'result=error', err && err.message);
+      results.push({ code: code, status: 'ERROR', error: err });
+      maybeSummarizeSourceRefresh();
+    });
+  }
+
+  function showSourceToast(message, type) {
+    if (typeof window.showToast === 'function') {
+      window.showToast(message, type);
+    } else {
+      diagLog('[SOURCE_TOAST]', message);
+    }
+  }
+
+  function summarizeSourceRefresh(to, version, results) {
+    if (version !== window.__sourceRefreshVersion) return;
+    var label = sourceDisplayName(to);
+    if (to === 'local') {
+      showSourceToast('本地引擎：已基于持仓计算今日估值', 'success');
+      return;
+    }
+    var errors = results.filter(function (r) { return r.status === 'ERROR'; });
+    var hasData = results.some(function (r) { return r.hasEstimate; });
+    if (results.length > 0 && errors.length === results.length) {
+      showSourceToast(label + '：数据获取失败，已保留当前数据', 'error');
+    } else if (!hasData) {
+      showSourceToast(label + '：暂无今日估值数据，已保留最近确认净值', 'warning');
+    } else {
+      showSourceToast(label + '：已获取今日估值', 'success');
+    }
+  }
+
+  window.triggerSourceRefresh = triggerSourceRefresh;
 
   var scanQueued = false;
   function scheduleScan() {

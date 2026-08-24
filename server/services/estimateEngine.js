@@ -4,6 +4,8 @@ const { assertFundCode, getFund, getRealtimeFundEstimate } = require('./fundServ
 const { fetchStockQuote, toYahooSymbol, normalizeStockCode } = require('./marketService');
 const { calibrateFund } = require('./calibrationEngine');
 const config = require('../config/estimateConfig');
+// Phase 3.3-H：全局出站并发闸门（解 OOM 主因 B/F/G）。
+const { withLimit, externalConcurrencyStats } = require('./concurrencyLimit');
 
 function round(value, digits = 6) {
   const factor = 10 ** digits;
@@ -58,23 +60,41 @@ async function cachedQuote(stockCode, ttlMinutes = config.quoteTtlMinutes) {
   return age <= ttlMinutes * 60_000 ? row : null;
 }
 
+// Phase 3.3-H：per-stock in-flight 去重 + 经全局出站闸门。
+// 同一账户下 57 只基金可能持有大量相同成分股；若不做去重，一次冷缓存账户估值会
+// 对同一股票触发多次并发 fetch（funds × holdings 量级）。去重后：相同股票代码在途
+// 只发一次请求，其余并发调用共享同一结果 Promise。
+const pendingQuotes = new Map(); // key: `${code}:${forceFlag}` → Promise<quote|null>
+
 async function quoteFor(stockCode, options = {}) {
   const code = String(stockCode || '').trim();
   if (!options.force) {
     const cached = await cachedQuote(code);
     if (cached) return { ...cached, source: 'stock-cache' };
   }
-  const quote = await fetchStockQuote(code);
-  if (!quote || !Number.isFinite(quote.change_percent)) return null;
-  await dbAsync.run(`
-    INSERT INTO stock_price (stock_code, date, price, change_percent, updated_at)
-    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(stock_code, date) DO UPDATE SET
-      price = excluded.price,
-      change_percent = excluded.change_percent,
-      updated_at = CURRENT_TIMESTAMP
-  `, [code, shanghaiDate(), Number(quote.price || 0), quote.change_percent]);
-  return quote;
+  const key = `${code}:${options.force ? 'f' : 'c'}`;
+  const inflight = pendingQuotes.get(key);
+  if (inflight) return inflight;
+  const task = (async () => {
+    // 真实 fetch 经全局出站闸门（MAX=6），钳制并发出站数量（解 B/F）。
+    const quote = await withLimit(() => fetchStockQuote(code));
+    if (!quote || !Number.isFinite(quote.change_percent)) return null;
+    await dbAsync.run(`
+      INSERT INTO stock_price (stock_code, date, price, change_percent, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(stock_code, date) DO UPDATE SET
+        price = excluded.price,
+        change_percent = excluded.change_percent,
+        updated_at = CURRENT_TIMESTAMP
+    `, [code, shanghaiDate(), Number(quote.price || 0), quote.change_percent]);
+    return quote;
+  })();
+  pendingQuotes.set(key, task);
+  try {
+    return await task;
+  } finally {
+    pendingQuotes.delete(key);
+  }
 }
 
 function isQdiiFund(fund) {
@@ -165,9 +185,15 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
     for (const secid of secids) {
       try {
         const url = `http://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=1&end=20500101&lmt=15`;
-        const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        if (!response.ok) continue;
-        const json = await response.json();
+        // Phase 3.3-H：真实 fetch + 响应体缓冲（response.json()）经全局出站闸门，
+        // 钳制并发出站数量并避免大量响应体同时驻留内存（解 B/F/G）。
+        const fetched = await withLimit(async () => {
+          const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+          if (!response.ok) return null;
+          return response.json();
+        });
+        if (!fetched) continue;
+        const json = fetched;
         const klines = json?.data?.klines;
         if (klines && klines.length > 0) {
           for (const line of klines) {
@@ -192,13 +218,15 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
     let json = null;
     for (const host of ['query1.finance.yahoo.com', 'query2.finance.yahoo.com']) {
       try {
-        const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
-          signal: AbortSignal.timeout(3000)
+        // Phase 3.3-H：fetch + response.json() 经全局出站闸门（解 B/F/G）。
+        const j = await withLimit(async () => {
+          const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
+            signal: AbortSignal.timeout(3000)
+          });
+          if (!response.ok) return null;
+          return response.json();
         });
-        if (response.ok) {
-          const j = await response.json();
-          if (j?.chart?.result?.[0]) { json = j; break; }
-        }
+        if (j?.chart?.result?.[0]) { json = j; break; }
       } catch (err) { /* try next host */ }
     }
     const result = json?.chart?.result?.[0];
@@ -477,6 +505,12 @@ async function calculateFundEstimate(code, options = {}) {
   return result;
 }
 
+// Phase 3.3-H：per-account in-flight 合并。
+// 网页加载 + 小程序登录 + 多次数据源切换可能同时触发同一账户的 estimate 重算；
+// 若不做合并，N 个并发请求各自跑完整 57 基金 × 持仓行情，制造 N 倍放大（B/F）。
+// 合并后：相同 accountId（+force 标志）的并发调用共享同一次计算 Promise。
+const pendingAccountEstimates = new Map(); // key: `${id}:${forceFlag}` → Promise
+
 async function calculateAccountEstimate(accountId, options = {}) {
   const id = String(accountId || '').trim();
   if (!id) {
@@ -484,32 +518,52 @@ async function calculateAccountEstimate(accountId, options = {}) {
     error.statusCode = 400;
     throw error;
   }
-  const positions = getDatabase().prepare(`
-    SELECT p.fund_code, p.amount, p.cost, f.fund_name
-    FROM portfolio p JOIN fund f ON f.fund_code = p.fund_code
-    WHERE p.account_id = ? ORDER BY p.fund_code
-  `).all(id);
-  const funds = await Promise.all(positions.map(async position => {
-    const estimate = await calculateFundEstimate(position.fund_code, {
-      ...options, amount: position.amount
-    });
-    return { ...estimate, fund_name: position.fund_name, cost: position.cost };
-  }));
-  const totalAmount = round(funds.reduce((sum, item) => sum + Number(item.amount || 0), 0), 2);
-  const todayProfit = round(funds.reduce((sum, item) => sum + Number(item.estimate_profit || 0), 0), 2);
+  const key = `${id}:${options.force ? 'f' : 'c'}`;
+  const inflight = pendingAccountEstimates.get(key);
+  if (inflight) return inflight;
+  const task = (async () => {
+    const positions = getDatabase().prepare(`
+      SELECT p.fund_code, p.amount, p.cost, f.fund_name
+      FROM portfolio p JOIN fund f ON f.fund_code = p.fund_code
+      WHERE p.account_id = ? ORDER BY p.fund_code
+    `).all(id);
+    const funds = await Promise.all(positions.map(async position => {
+      const estimate = await calculateFundEstimate(position.fund_code, {
+        ...options, amount: position.amount
+      });
+      return { ...estimate, fund_name: position.fund_name, cost: position.cost };
+    }));
+    const totalAmount = round(funds.reduce((sum, item) => sum + Number(item.amount || 0), 0), 2);
+    const todayProfit = round(funds.reduce((sum, item) => sum + Number(item.estimate_profit || 0), 0), 2);
+    return {
+      account_id: id,
+      total_amount: totalAmount,
+      totalAmount,
+      today_profit: todayProfit,
+      todayProfit,
+      today_change: totalAmount ? round(todayProfit / totalAmount) : 0,
+      todayChange: totalAmount ? round(todayProfit / totalAmount * 100, 2) : 0,
+      today_change_percent: totalAmount ? round(todayProfit / totalAmount * 100, 2) : 0,
+      confidence: funds.some(item => item.confidence === 'low') ? 'low'
+        : funds.some(item => item.confidence === 'medium') ? 'medium' : 'high',
+      funds,
+      calculated_at: new Date().toISOString()
+    };
+  })();
+  pendingAccountEstimates.set(key, task);
+  try {
+    return await task;
+  } finally {
+    pendingAccountEstimates.delete(key);
+  }
+}
+
+// Phase 3.3-H：只读统计导出（不改变任何运行时行为），供 [MEMORY] 诊断采样
+// 股票行情 in-flight / 账户估值 in-flight 规模，验证并发闸门后无 Promise 泄漏。
+function stats() {
   return {
-    account_id: id,
-    total_amount: totalAmount,
-    totalAmount,
-    today_profit: todayProfit,
-    todayProfit,
-    today_change: totalAmount ? round(todayProfit / totalAmount) : 0,
-    todayChange: totalAmount ? round(todayProfit / totalAmount * 100, 2) : 0,
-    today_change_percent: totalAmount ? round(todayProfit / totalAmount * 100, 2) : 0,
-    confidence: funds.some(item => item.confidence === 'low') ? 'low'
-      : funds.some(item => item.confidence === 'medium') ? 'medium' : 'high',
-    funds,
-    calculated_at: new Date().toISOString()
+    pendingQuotesSize: pendingQuotes.size,
+    pendingAccountEstimatesSize: pendingAccountEstimates.size
   };
 }
 
@@ -518,5 +572,6 @@ module.exports = {
   calculateAccountEstimate,
   latestHoldings,
   sectorForFund,
-  quoteFor
+  quoteFor,
+  stats
 };

@@ -43,6 +43,10 @@ ensureAiBundle();
 const http = require('node:http');
 const { handleFundApi, sendJson } = require('./api/fund');
 const { getDatabase, databasePath, closeDatabase } = require('./database/db');
+// Phase 3.3-H：[MEMORY] 诊断所需的只读统计（不改变运行时行为）。
+const { externalConcurrencyStats } = require('./services/concurrencyLimit');
+const { stats: navStats } = require('./services/navCacheService');
+const { stats: estimateStats } = require('./services/providerEstimate');
 
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
@@ -194,6 +198,34 @@ async function createServer() {
   });
 }
 
+// Phase 3.3-H：[MEMORY] 轻量内存诊断。每 60s 采样一次进程内存与各并发/缓存队列规模，
+// 仅打点不刷屏；便于线上确认 OOM 修复后内存是否平稳（区分 heapUsed 增长 vs rss 增长 vs 峰值暴涨）。
+function startMemoryDiagnostics() {
+  if (process.env.DISABLE_MEMORY_DIAGNOSTICS === '1') return;
+  const timer = setInterval(() => {
+    try {
+      const m = process.memoryUsage();
+      const nav = navStats();
+      const ext = externalConcurrencyStats();
+      const est = estimateStats();
+      console.log(
+        '[MEMORY] ' +
+        `rss=${(m.rss / 1048576) | 0}MB ` +
+        `heapUsed=${(m.heapUsed / 1048576) | 0}MB ` +
+        `heapTotal=${(m.heapTotal / 1048576) | 0}MB ` +
+        `external=${(m.external / 1048576) | 0}MB ` +
+        `arrayBuffers=${(m.arrayBuffers / 1048576) | 0}MB ` +
+        `| nav(active=${nav.activeExternal},queue=${nav.externalQueueSize},inflight=${nav.inFlightSize},max=${nav.maxExternalConcurrency}) ` +
+        `| ext(active=${ext.active},queued=${ext.queued},max=${ext.max}) ` +
+        `| estimateCache=${est.estimateCacheSize}`
+      );
+    } catch (err) {
+      /* 诊断采样失败绝不影响主流程 */
+    }
+  }, 60 * 1000);
+  if (timer.unref) timer.unref();
+}
+
 async function startServer(port = 3000, host = '0.0.0.0') {
   const server = await createServer();
   server.listen(port, host, () => {
@@ -206,6 +238,9 @@ async function startServer(port = 3000, host = '0.0.0.0') {
   ensureCloudSchema().catch(err => {
     console.error('[dbAsync] Cloud schema initialization failed (server running in degraded mode):', err && err.message);
   });
+  // Phase 3.3-H：[MEMORY] 轻量内存诊断（每 60s 采样一次，仅打点不刷屏，
+  // 不打印 response / 基金对象 / history；可被 DISABLE_MEMORY_DIAGNOSTICS=1 关闭）。
+  startMemoryDiagnostics();
   const shutdown = () => {
     server.close(() => {
       closeDatabase();

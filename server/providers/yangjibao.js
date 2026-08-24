@@ -12,6 +12,10 @@
 const crypto = require('node:crypto');
 const QRCode = require('qrcode');
 const BaseProvider = require('./baseProvider');
+// Phase 3.3-H：provider 出站请求经全局并发闸门（与股票行情/Yahoo 共享同一把锁），
+// 封住"第二条无界外部 HTTP 路径"——providerEstimate 的 per-fund 兜底 tryProviderEstimate
+// 在冷缓存/批量预取失败时可能 fan-out 至 2×基金数且不受限。
+const { withLimit } = require('../services/concurrencyLimit');
 
 class YangJiBaoProvider extends BaseProvider {
   constructor() {
@@ -41,18 +45,23 @@ class YangJiBaoProvider extends BaseProvider {
     };
     if (this._token) headers.Authorization = this._token;
 
-    const response = await fetch(this.BASE_URL + path, {
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: AbortSignal.timeout(30000)
+    // Phase 3.3-H：provider 出站请求经全局并发闸门（与股票行情/Yahoo 共享同一把锁），
+    // 封住"第二条无界外部 HTTP 路径"——providerEstimate 的 per-fund 兜底 tryProviderEstimate
+    // 在冷缓存/批量预取失败时可能 fan-out 至 2×基金数且不受限。
+    const result = await withLimit(async () => {
+      const response = await fetch(this.BASE_URL + path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(30000)
+      });
+      if (!response.ok) {
+        const err = new Error(`养基宝接口请求失败 (HTTP ${response.status})`);
+        if (response.status === 401) err.statusCode = 401;
+        throw err;
+      }
+      return response.json();
     });
-    if (!response.ok) {
-      const err = new Error(`养基宝接口请求失败 (HTTP ${response.status})`);
-      if (response.status === 401) err.statusCode = 401;
-      throw err;
-    }
-    const result = await response.json();
     if (result.code !== 200) {
       const err = new Error(result.message || '养基宝接口返回错误');
       if (/未登录|登录已过期|token/i.test(err.message)) err.statusCode = 401;
