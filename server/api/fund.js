@@ -671,7 +671,8 @@ async function handleFundApi(request, response, url) {
     const { ensureTodayNav } = require('../services/navCacheService');
     const { userFromRequest } = require('../services/authService');
     const user = await userFromRequest(request);
-    const result = await ensureTodayNav(match[0], { userId: user ? Number(user.id) : 0 });
+    const source = url.searchParams.get('source') || null;
+    const result = await ensureTodayNav(match[0], { userId: user ? Number(user.id) : 0, preferredSource: source });
     sendJson(response, 200, { success: true, ...result });
     return true;
   }

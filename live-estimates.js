@@ -156,8 +156,9 @@
     var codes = [];
     funds.forEach(function (f) { if (f && f.code && codes.indexOf(String(f.code)) === -1) codes.push(String(f.code)); });
     codes = codes.slice(0, 20); // 并发上限
+    var currentSource = preferredEstimateSource();
     return Promise.all(codes.map(function (code) {
-      return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav')
+      return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav?source=' + encodeURIComponent(currentSource))
         .then(function (res) {
           if (res && res.success && res.cached && res.nav && res.date) {
             // P3.4：updatedNavDates 仅作「正式净值辅助缓存」，绝不作为独立 badge 状态源。
@@ -593,7 +594,7 @@
 
     row.dataset.estimateState = 'loading';
     enqueue(function () {
-      return window.fundDataService.refresh(code, force).then(function() {
+      return window.fundDataService.refresh(code, force, { estimateOnly: estimateOnly }).then(function() {
         renderRowFromStore(row, code, fund);
       }).catch(function() {
         if (row.isConnected) {
@@ -614,7 +615,13 @@
     });
   }
 
-  window.refreshFundEstimates = function (estimateOnly) {
+  window.refreshFundEstimates = function (arg) {
+    var estimateOnly = false;
+    if (typeof arg === 'boolean') {
+      estimateOnly = arg;
+    } else if (arg && typeof arg === 'object') {
+      estimateOnly = arg.estimateOnly === true;
+    }
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
       delete row.dataset.estimateState;
     });
@@ -688,7 +695,7 @@
   function refreshSourceRow(code, to, version, results) {
     var fund = currentFund(code);
     diagLog('[SOURCE_REFRESH_START]', 'source=' + to, 'version=' + version, 'code=' + code);
-    window.fundDataService.refresh(code, true, { version: version }).then(function () {
+    window.fundDataService.refresh(code, true, { version: version, estimateOnly: true }).then(function () {
       if (version !== window.__sourceRefreshVersion) {
         diagLog('[SOURCE_REFRESH_END]', 'source=' + to, 'version=' + version, 'code=' + code, 'result=discarded(stale)');
         maybeSummarizeSourceRefresh();

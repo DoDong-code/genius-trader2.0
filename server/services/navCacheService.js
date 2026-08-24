@@ -194,37 +194,34 @@ async function ensureTodayNav(fundCode, options = {}) {
       return null;
     }
 
-    const promises = [
-      runExternal(fetchFromXiaobei),
-      runExternal(fetchFromYangjibao),
-      runExternal(fetchFromYahoo),
-      runExternal(fetchFromTiantian)
-    ];
+    const fetcherMap = {
+      'xiaobeiyangji': fetchFromXiaobei,
+      'yangjibao': fetchFromYangjibao,
+      'yahoo': fetchFromYahoo,
+      'eastmoney': fetchFromTiantian
+    };
 
-    const result = await new Promise((resolve) => {
-      let resolved = false;
-      let completed = 0;
-      promises.forEach(p => {
-        p.then(val => {
-          if (resolved) return;
-          if (val) {
-            resolved = true;
-            resolve(val);
-          } else {
-            completed++;
-            if (completed === promises.length) {
-              resolve(null);
-            }
-          }
-        }).catch(() => {
-          if (resolved) return;
-          completed++;
-          if (completed === promises.length) {
-            resolve(null);
-          }
-        });
-      });
-    });
+    const fetchers = [];
+    const preferredSource = options.preferredSource || null;
+
+    if (preferredSource && fetcherMap[preferredSource]) {
+      fetchers.push(fetcherMap[preferredSource]);
+    }
+
+    const defaultOrder = ['xiaobeiyangji', 'yangjibao', 'eastmoney', 'yahoo'];
+    for (const src of defaultOrder) {
+      if (src !== preferredSource && fetcherMap[src]) {
+        fetchers.push(fetcherMap[src]);
+      }
+    }
+
+    let result = null;
+    for (const fetcher of fetchers) {
+      result = await runExternal(fetcher).catch(() => null);
+      if (result) {
+        break;
+      }
+    }
 
     if (result) {
       const accNav = result.accNav || result.nav;

@@ -595,8 +595,10 @@
 
   // Unified Fund Data Service
   window.fundDataService = {
-    refresh: function(code, force) {
-      console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force);
+    refresh: function(code, force, options) {
+      options = options || {};
+      const estimateOnly = options.estimateOnly === true;
+      console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force + ' estimateOnly=' + estimateOnly);
       
       const fund = window.fundStore.get(code);
       
@@ -605,11 +607,15 @@
       const isEstReady = fund.estimate && fund.estimate.status === 'READY';
       const isProfitReady = fund.todayProfit && fund.todayProfit.status === 'READY';
       
-      window.fundStore.update(code, {
-        nav: { status: isNavReady ? 'REFRESHING' : 'LOADING' },
+      const updateData = {
         estimate: { status: isEstReady ? 'REFRESHING' : 'LOADING' },
         todayProfit: { status: isProfitReady ? 'REFRESHING' : 'LOADING' }
-      });
+      };
+      if (!estimateOnly) {
+        updateData.nav = { status: isNavReady ? 'REFRESHING' : 'LOADING' };
+      }
+      
+      window.fundStore.update(code, updateData);
       
       var state = window.portfolioState;
       var account = state && state.accounts && state.accounts[state.getActive()];
@@ -617,7 +623,7 @@
       var amount = currentFundObj ? (Number(currentFundObj.amount) || 0) : 0;
       
       return Promise.allSettled([
-        refreshFund(code, force),
+        estimateOnly ? Promise.resolve(null) : refreshFund(code, force),
         estimateFund(code, amount, force)
       ]).then(function(results) {
         const snapshotRes = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -637,11 +643,14 @@
         
         // Revert statuses from REFRESHING back to READY, or if they failed from LOADING, set to ERROR
         const f = window.fundStore.get(code);
-        window.fundStore.update(code, {
-          nav: { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' },
+        const revertData = {
           estimate: { status: f.estimate.status === 'REFRESHING' ? 'READY' : 'ERROR' },
           todayProfit: { status: f.todayProfit.status === 'REFRESHING' ? 'READY' : 'ERROR' }
-        });
+        };
+        if (!estimateOnly) {
+          revertData.nav = { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' };
+        }
+        window.fundStore.update(code, revertData);
         
         throw err;
       });

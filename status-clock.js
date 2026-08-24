@@ -199,7 +199,7 @@
 
     var refreshTasks = [];
     if (typeof window.refreshFundEstimates === 'function') {
-      refreshTasks.push(Promise.resolve(window.refreshFundEstimates()));
+      refreshTasks.push(Promise.resolve(window.refreshFundEstimates({ estimateOnly: true })));
     }
     if (typeof window.refreshMarketIndices === 'function') {
       refreshTasks.push(Promise.resolve(window.refreshMarketIndices()));
