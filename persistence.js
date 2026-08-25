@@ -209,7 +209,7 @@
         const maxAllowedDate = utils.isQdiiFund(fund)
           ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
           : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
-        const isCachedInvalid = fund.nav.date && String(fund.nav.date).localeCompare(maxAllowedDate) > 0;
+        const isCachedInvalid = fund.nav.date && (String(fund.nav.date).localeCompare(maxAllowedDate) > 0 || !fund.nav.confirmed);
         // Prevent date regression: don't overwrite with older date unless the cached date is invalid
         if (isCachedInvalid || !fund.nav.date || String(l_nav.date).localeCompare(String(fund.nav.date)) >= 0) {
           console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + l_nav.date);
@@ -221,6 +221,7 @@
             fund.nav.percent = Number(l_nav.changePercent);
           }
           fund.nav.status = 'READY';
+          fund.nav.confirmed = true;
           anyMerged = true;
         } else {
           console.log('[DATA][PRESERVE] code=' + code + ' field=nav existing newer date kept');
@@ -296,7 +297,7 @@
       const maxAllowedDate = utils.isQdiiFund(fund)
         ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
         : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
-      const isCachedInvalid = fund.nav.date && String(fund.nav.date).localeCompare(maxAllowedDate) > 0;
+      const isCachedInvalid = fund.nav.date && (String(fund.nav.date).localeCompare(maxAllowedDate) > 0 || !fund.nav.confirmed);
       if (isCachedInvalid || !fund.nav.date || String(data.nav.date).localeCompare(String(fund.nav.date)) >= 0) {
         console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + data.nav.date);
         fund.nav.date = data.nav.date;
@@ -307,14 +308,21 @@
           fund.nav.percent = Number(data.nav.percent);
         }
         fund.nav.status = 'READY';
+        fund.nav.confirmed = true;
         anyMerged = true;
       }
     }
 
-    // Restore REFRESHING statuses back to READY if they weren't updated
-    if (fund.nav.status === 'REFRESHING') fund.nav.status = 'READY';
-    if (fund.estimate.status === 'REFRESHING') fund.estimate.status = 'READY';
-    if (fund.todayProfit.status === 'REFRESHING') fund.todayProfit.status = 'READY';
+    // Restore LOADING or REFRESHING statuses back to READY/EMPTY if they weren't successfully resolved
+    if (fund.nav.status === 'REFRESHING' || fund.nav.status === 'LOADING') {
+      fund.nav.status = (fund.nav.value !== null && fund.nav.value !== undefined) ? 'READY' : 'EMPTY';
+    }
+    if (fund.estimate.status === 'REFRESHING' || fund.estimate.status === 'LOADING') {
+      fund.estimate.status = (fund.estimate.value !== null && fund.estimate.value !== undefined) ? 'READY' : 'EMPTY';
+    }
+    if (fund.todayProfit.status === 'REFRESHING' || fund.todayProfit.status === 'LOADING') {
+      fund.todayProfit.status = (fund.todayProfit.percent !== null && fund.todayProfit.percent !== undefined) ? 'READY' : 'EMPTY';
+    }
     
     // Re-evaluate today's profit
     const profitResult = calculateTodayProfit(fund);
@@ -595,8 +603,10 @@
 
   // Unified Fund Data Service
   window.fundDataService = {
-    refresh: function(code, force) {
-      console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force);
+    refresh: function(code, force, options) {
+      options = options || {};
+      const estimateOnly = options.estimateOnly === true;
+      console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force + ' estimateOnly=' + estimateOnly);
       
       const fund = window.fundStore.get(code);
       
@@ -605,11 +615,15 @@
       const isEstReady = fund.estimate && fund.estimate.status === 'READY';
       const isProfitReady = fund.todayProfit && fund.todayProfit.status === 'READY';
       
-      window.fundStore.update(code, {
-        nav: { status: isNavReady ? 'REFRESHING' : 'LOADING' },
+      const updateData = {
         estimate: { status: isEstReady ? 'REFRESHING' : 'LOADING' },
         todayProfit: { status: isProfitReady ? 'REFRESHING' : 'LOADING' }
-      });
+      };
+      if (!estimateOnly) {
+        updateData.nav = { status: isNavReady ? 'REFRESHING' : 'LOADING' };
+      }
+      
+      window.fundStore.update(code, updateData);
       
       var state = window.portfolioState;
       var account = state && state.accounts && state.accounts[state.getActive()];
@@ -617,7 +631,7 @@
       var amount = currentFundObj ? (Number(currentFundObj.amount) || 0) : 0;
       
       return Promise.allSettled([
-        refreshFund(code, force),
+        estimateOnly ? Promise.resolve(null) : refreshFund(code, force),
         estimateFund(code, amount, force)
       ]).then(function(results) {
         const snapshotRes = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -637,11 +651,14 @@
         
         // Revert statuses from REFRESHING back to READY, or if they failed from LOADING, set to ERROR
         const f = window.fundStore.get(code);
-        window.fundStore.update(code, {
-          nav: { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' },
+        const revertData = {
           estimate: { status: f.estimate.status === 'REFRESHING' ? 'READY' : 'ERROR' },
           todayProfit: { status: f.todayProfit.status === 'REFRESHING' ? 'READY' : 'ERROR' }
-        });
+        };
+        if (!estimateOnly) {
+          revertData.nav = { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' };
+        }
+        window.fundStore.update(code, revertData);
         
         throw err;
       });
@@ -741,19 +758,30 @@
             ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
             : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
           
-          if (savedFund.nav && savedFund.nav.date && String(savedFund.nav.date).localeCompare(maxAllowedDate) > 0) {
-            console.log('[DATA][HEAL] Resetting hydrated nav date for ' + code + ' because ' + savedFund.nav.date + ' exceeds maximum allowed ' + maxAllowedDate);
-            savedFund.nav.date = '';
-            savedFund.nav.value = null;
-            savedFund.nav.percent = null;
-            savedFund.nav.status = 'EMPTY';
-            if (savedFund.todayProfit) {
-              if (typeof savedFund.todayProfit === 'object') {
-                savedFund.todayProfit.percent = null;
-                savedFund.todayProfit.value = null;
-                savedFund.todayProfit.status = 'EMPTY';
-              } else {
-                savedFund.todayProfit = null;
+          if (savedFund.nav && savedFund.nav.date) {
+            const dateStr = String(savedFund.nav.date);
+            const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
+            // Phase-4 严格规则：蓝色只能来自后端确认的 fund_nav。
+            // localStorage/user_data 中残留的「今日/已知污染日期」缓存，即使声称 confirmed，
+            // 也不能信任为正式净值——真正的确认必须由后端 refresh 重新写入。
+            // 因此：今日日期 或 已知污染日期(2026-08-24) 或 未来日期 → 一律降级为未确认。
+            const isToday = dateStr === sToday;
+            const isKnownPolluted = dateStr === '2026-08-24';
+            if (isFuture || isToday || isKnownPolluted) {
+              console.log('[DATA][HEAL] Downgrading cached nav to unconfirmed for ' + code + ': ' + dateStr + ' (today/polluted/future -> not backend-confirmed)');
+              savedFund.nav.date = '';
+              savedFund.nav.value = null;
+              savedFund.nav.percent = null;
+              savedFund.nav.status = 'EMPTY';
+              savedFund.nav.confirmed = false;
+              if (savedFund.todayProfit) {
+                if (typeof savedFund.todayProfit === 'object') {
+                  savedFund.todayProfit.percent = null;
+                  savedFund.todayProfit.value = null;
+                  savedFund.todayProfit.status = 'EMPTY';
+                } else {
+                  savedFund.todayProfit = null;
+                }
               }
             }
           }
@@ -830,11 +858,24 @@
               ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
               : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
             
-            if (f.navUpdatedAt && String(f.navUpdatedAt).localeCompare(maxAllowedDate) > 0) {
-              f.navUpdatedAt = null;
+            if (f.navUpdatedAt) {
+              const dateStr = String(f.navUpdatedAt);
+              const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
+              const isTodayPolluted = dateStr === '2026-08-24' && !(f.latest_nav && f.latest_nav.confirmed);
+              const isTodayUnconfirmed = dateStr === sToday && !(f.latest_nav && f.latest_nav.confirmed);
+              if (isFuture || isTodayPolluted || isTodayUnconfirmed) {
+                f.navUpdatedAt = null;
+              }
             }
-            if (f.latest_nav && f.latest_nav.date && String(f.latest_nav.date).localeCompare(maxAllowedDate) > 0) {
-              f.latest_nav = null;
+            if (f.latest_nav && f.latest_nav.date) {
+              const dateStr = String(f.latest_nav.date);
+              const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
+              const isTodayPolluted = dateStr === '2026-08-24' && !f.latest_nav.confirmed;
+              const isTodayUnconfirmed = dateStr === sToday && !f.latest_nav.confirmed;
+              if (isFuture || isTodayPolluted || isTodayUnconfirmed) {
+                f.latest_nav = null;
+                f.navUpdatedAt = null;
+              }
             }
             if (f.estimate && f.estimate.trade_date && String(f.estimate.trade_date).localeCompare(maxAllowedDate) > 0) {
               f.estimate = null;

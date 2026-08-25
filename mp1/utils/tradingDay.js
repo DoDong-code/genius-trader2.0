@@ -89,7 +89,7 @@ export function providerDisplayName(source) {
  *
  * data_status 展示规则（后端唯一权威）：
  *   CONFIRMED_NAV  → 蓝「MMDD」（fund_nav 已确认净值日期）
- *   PROVIDER_TODAY → 蓝「小倍/养基宝」（provider 当日数据）
+ *   PROVIDER_TODAY → 灰「小倍/养基宝」（provider 当日数据，估值绝不算净值→不蓝）
  *   PROVIDER_STALE → 灰「小倍/养基宝」（provider 旧数据）
  *   NO_DATA        → 灰「估值」
  * 缺失 data_status（旧后端/降级）→ 回退本地五态判定

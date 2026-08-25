@@ -2,8 +2,8 @@
  * P3.18-ESTIMATE-STATE：基金估值/净值统一数据状态判定（后端唯一权威）
  *
  * data_status 四态：
- *   CONFIRMED_NAV   - fund_nav 已确认当日净值（expected 日）→ 前端蓝「MMDD」
- *   PROVIDER_TODAY  - 第三方（小倍/养基宝）返回当日数据（trade_date === expected）→ 前端蓝「小倍/养基宝」
+ *   CONFIRMED_NAV   - fund_nav 已确认当日净值（expected 日）→ 前端蓝「MMDD」（唯一蓝色来源）
+ *   PROVIDER_TODAY  - 第三方（小倍/养基宝）返回当日数据（trade_date === expected）→ 前端灰「小倍/养基宝」
  *   PROVIDER_STALE  - 第三方返回旧数据（trade_date 存在但非当日）→ 前端灰「小倍/养基宝」
  *   NO_DATA         - 无确认净值且无第三方当日/旧数据（本地估算/无数据）→ 前端灰「估值」
  */
