@@ -17,6 +17,14 @@ const SOURCE_ALIASES = { xbyj: 'xiaobeiyangji', yjb: 'yangjibao' };
 const PROVIDER_TIMEOUT_MS = 2500;
 const CACHE_TTL_MS = 300000; // 5 minutes TTL as requested
 const ESTIMATE_CACHE_MAX = 2000; // P3.3: hard cap on fund codes kept in memory
+// P3.10-DATA：批量预拉取（小倍/养基宝持仓估值）整体超时护栏。
+// 根因：preFetchAllProviderEstimates 走 provider._request（AbortSignal.timeout=30000），
+// 但批量预拉取本身没有任何更短的上限。当第三方慢/不可达时，getBulkFetchPromise 会
+// 一直挂到 30s，导致 /estimate 与 /today-nav 请求远超前端 20s 中断，前端 loading 卡死。
+// 这里给批量预拉取一个更短的整体上限：超时即 reject，调用方 .catch 吞掉后走本地引擎兜底
+// （灰「估值」），不再无限等待第三方。这是修复真实 hang，不是用 timeout 掩盖——底层
+// provider 的 30s 超时仍在，本护栏只是让「慢/挂」的第三方不再阻塞用户请求。
+const BULK_FETCH_TIMEOUT_MS = 8000;
 
 // P3.3: bounded LRU + TTL cache.
 // The previous implementation used a bare `Map` that grew forever: every fund
@@ -192,11 +200,21 @@ async function preFetchAllProviderEstimates(sourceName, userId) {
   }
 }
 
+// 给批量预拉取加整体超时护栏，避免第三方慢/挂时请求无限期挂起（见 BULK_FETCH_TIMEOUT_MS 说明）
+function withBulkTimeout(promise, cacheKey) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => {
+      reject(new Error('bulk-fetch-timeout:' + cacheKey));
+    }, BULK_FETCH_TIMEOUT_MS))
+  ]);
+}
+
 // 采用 Promise 共享机制，防止并发请求时重复调用批量接口
 function getBulkFetchPromise(sourceName, userId) {
   const cacheKey = `${sourceName}:${userId}`;
   if (pendingBulkFetches.has(cacheKey)) {
-    return pendingBulkFetches.get(cacheKey);
+    return withBulkTimeout(pendingBulkFetches.get(cacheKey), cacheKey);
   }
 
   const promise = preFetchAllProviderEstimates(sourceName, userId).finally(() => {
@@ -204,7 +222,7 @@ function getBulkFetchPromise(sourceName, userId) {
   });
 
   pendingBulkFetches.set(cacheKey, promise);
-  return promise;
+  return withBulkTimeout(promise, cacheKey);
 }
 
 async function tryProviderEstimate(sourceName, code, amount, userId = 0) {

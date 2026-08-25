@@ -226,6 +226,48 @@ function startMemoryDiagnostics() {
   if (timer.unref) timer.unref();
 }
 
+// Phase 3.10-DATA：净值数据链自愈调度器。
+// 根因：生产环境此前没有「自动重导所有基金」的机制，fund_nav 只在单只基金被查看/刷新
+// 时才更新，导致「最新确认净值」长期停留在某一天（例如 0821/0824 大面积缺失）。
+// 本调度器周期性调用 navService.syncAll（内部 importFund 全量回填 fund_nav，仅写确认净值，
+// 绝不写 estimate / 绝不污染 confirmed），保证所有基金的最新确认净值持续入库。
+// 注意：不触碰 navCacheService（P3.3-H 冻结），也不改写任何前端逻辑。
+function startNavSyncScheduler() {
+  if (process.env.DISABLE_NAV_SYNC === '1') {
+    console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
+    return;
+  }
+  const { isCloud } = require('./database/dbAsync');
+  if (!isCloud() && process.env.NODE_ENV !== 'production') {
+    console.log('[NAV-SYNC] disabled in local/dev mode (set NODE_ENV=production or run on cloud to enable)');
+    return;
+  }
+  const INTERVAL_MS = 4 * 60 * 60 * 1000; // 每 4 小时全量重导一次
+  let running = false;
+  const runOnce = async () => {
+    if (running) return;
+    running = true;
+    const startedAt = Date.now();
+    try {
+      const { syncAll } = require('./services/navService');
+      const results = await syncAll({});
+      const ok = results.filter(r => r.success).length;
+      const fail = results.length - ok;
+      console.log(`[NAV-SYNC] completed in ${Date.now() - startedAt}ms: ${ok} ok, ${fail} failed, total ${results.length}`);
+    } catch (err) {
+      console.error('[NAV-SYNC] run failed:', err && err.message);
+    } finally {
+      running = false;
+    }
+  };
+  // 启动后延迟 30s 首次执行，避免与启动期 schema 初始化抢资源
+  const initial = setTimeout(() => { runOnce(); }, 30 * 1000);
+  if (initial.unref) initial.unref();
+  const timer = setInterval(() => { runOnce(); }, INTERVAL_MS);
+  if (timer.unref) timer.unref();
+  console.log('[NAV-SYNC] scheduler started (interval=4h)');
+}
+
 async function startServer(port = 3000, host = '0.0.0.0') {
   const server = await createServer();
   server.listen(port, host, () => {
@@ -241,6 +283,7 @@ async function startServer(port = 3000, host = '0.0.0.0') {
   // Phase 3.3-H：[MEMORY] 轻量内存诊断（每 60s 采样一次，仅打点不刷屏，
   // 不打印 response / 基金对象 / history；可被 DISABLE_MEMORY_DIAGNOSTICS=1 关闭）。
   startMemoryDiagnostics();
+  startNavSyncScheduler();
   const shutdown = () => {
     server.close(() => {
       closeDatabase();
