@@ -694,9 +694,14 @@ Page({
       const hasEstimateData = Boolean(navDate)
         || Number.isFinite(Number(f.today))
         || Number.isFinite(Number(f.todayEstimate));
-      // P4.5 统一三态：蓝色仅来自后端确认净值（dataStatus===CONFIRMED_NAV 或 latest_nav.confirmed），
+      // P4.5 统一三态：蓝色仅来自后端确认净值（fund_nav 的 latest_nav，含有效正值）。
+      // 后端 latest_nav = {date, nav, acc_nav} 不含 confirmed 字段，故以 (date 存在 && nav>0) 推导已确认事实；
       // 灰度一律「估值」，不再用 provider 名 / 时间 / 开盘与否推导（与网页端 live-estimates.js 一致）。
-      const navConfirmed = f.dataStatus === 'CONFIRMED_NAV' || Boolean(f.latest_nav && f.latest_nav.confirmed === true);
+      // 交易时段后端 dataStatus 可能为 NO_DATA（confirmedNavDate≠预期日），但 latest_nav 仍持有最近已确认净值，
+      // 据此显示蓝色 MMDD，与网页端一致，消除 Web/mp1 不一致。
+      const ln = f.latest_nav;
+      const navConfirmed = f.dataStatus === 'CONFIRMED_NAV' ||
+        Boolean(ln && ln.date && Number.isFinite(Number(ln.nav)) && Number(ln.nav) > 0);
       const displayNavDate = navDate || (f.latest_nav && f.latest_nav.date) || null;
       const badge = getNavDisplayState({ navConfirmed, navDate: displayNavDate, estimateReady: hasEstimateData });
 

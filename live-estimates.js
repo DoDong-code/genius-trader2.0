@@ -103,7 +103,10 @@
   // 禁止在 UI 层用 provider 名称 / estimate 日期 / 开盘与否 / 非交易日 / localStorage 日期再推导状态。
   // 蓝色唯一事实 = 后端确认的正式净值（fund_nav）；一切估值永远灰色，estimate 永远不得写 confirmed。
   function getNavDisplayState(fund) {
-    if (fund && fund.nav && fund.nav.confirmed === true && fund.nav.date) {
+    // 三态唯一入口：蓝色 = 后端确认净值且含有效正值（confirmed===true && date && value>0）。
+    // 增加 value>0 守卫，彻底封堵「res.date 存在但 nav=0/null」被误判为蓝色（旧 0825 假蓝根因）。
+    if (fund && fund.nav && fund.nav.confirmed === true && fund.nav.date &&
+        Number.isFinite(Number(fund.nav.value)) && Number(fund.nav.value) > 0) {
       return { type: 'CONFIRMED_NAV', date: String(fund.nav.date) };
     }
     if (fund && fund.estimate && fund.estimate.status === 'READY') {

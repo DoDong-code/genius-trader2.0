@@ -770,14 +770,12 @@
           if (savedFund.nav && savedFund.nav.date) {
             const dateStr = String(savedFund.nav.date);
             const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
-            // Phase-4 严格规则：蓝色只能来自后端确认的 fund_nav。
-            // localStorage/user_data 中残留的「今日/已知污染日期」缓存，即使声称 confirmed，
-            // 也不能信任为正式净值——真正的确认必须由后端 refresh 重新写入。
-            // 因此：今日日期 或 已知污染日期(2026-08-24) 或 未来日期 → 一律降级为未确认。
-            const isToday = dateStr === sToday;
-            const isKnownPolluted = dateStr === '2026-08-24';
-            if (isFuture || isToday || isKnownPolluted) {
-              console.log('[DATA][HEAL] Downgrading cached nav to unconfirmed for ' + code + ': ' + dateStr + ' (today/polluted/future -> not backend-confirmed)');
+            // 只拒绝真正无效的缓存：① 未来日期；② 声称 confirmed 但无有效正值（旧 bug / 脏数据残留）。
+            // 不再按「今天 / 特定日期(如 2026-08-24)」强制降级——正式 NAV 是否确认由后端 refresh 事实决定，
+            // 缓存仅作为即时显示，后台刷新会按需保留/替换/补充，绝不因日期而清空已确认净值。
+            const hasValidValue = Number.isFinite(Number(savedFund.nav.value)) && Number(savedFund.nav.value) > 0;
+            if (isFuture || (savedFund.nav.confirmed === true && !hasValidValue)) {
+              console.log('[DATA][HEAL] Downgrading invalid cached nav for ' + code + ': ' + dateStr + ' (future or confirmed-without-value)');
               savedFund.nav.date = '';
               savedFund.nav.value = null;
               savedFund.nav.percent = null;
@@ -870,18 +868,19 @@
             if (f.navUpdatedAt) {
               const dateStr = String(f.navUpdatedAt);
               const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
-              const isTodayPolluted = dateStr === '2026-08-24' && !(f.latest_nav && f.latest_nav.confirmed);
-              const isTodayUnconfirmed = dateStr === sToday && !(f.latest_nav && f.latest_nav.confirmed);
-              if (isFuture || isTodayPolluted || isTodayUnconfirmed) {
+              // 只拒绝未来日期；不再按「今天 / 特定日期(2026-08-24)」强制降级——
+              // 正式 NAV 是否确认由后端事实决定，缓存仅作即时显示，刷新按需保留/替换/补充。
+              if (isFuture) {
                 f.navUpdatedAt = null;
               }
             }
             if (f.latest_nav && f.latest_nav.date) {
               const dateStr = String(f.latest_nav.date);
               const isFuture = dateStr.localeCompare(maxAllowedDate) > 0;
-              const isTodayPolluted = dateStr === '2026-08-24' && !f.latest_nav.confirmed;
-              const isTodayUnconfirmed = dateStr === sToday && !f.latest_nav.confirmed;
-              if (isFuture || isTodayPolluted || isTodayUnconfirmed) {
+              const hasValidValue = Number.isFinite(Number(f.latest_nav.nav)) && Number(f.latest_nav.nav) > 0;
+              // 只拒绝未来日期 / 声称 confirmed 但无有效正值（旧 bug / 脏数据）。
+              // 保留最近已确认净值（如 0821），避免每次刷新清空已确认数据造成 NO_DATA 闪退。
+              if (isFuture || (f.latest_nav.confirmed === true && !hasValidValue)) {
                 f.latest_nav = null;
                 f.navUpdatedAt = null;
               }
