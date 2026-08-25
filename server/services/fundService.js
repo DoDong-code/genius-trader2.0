@@ -366,7 +366,10 @@ async function importFund(code, options = {}) {
         nav = excluded.nav,
         acc_nav = excluded.acc_nav
     `;
-    for (const item of data.history) {
+    const historyToUpsert = data.history.filter((item, index) => {
+      return !existingDates.has(item.date) || (index >= data.history.length - 5);
+    });
+    for (const item of historyToUpsert) {
       await database.run(upsertNavSql, [data.fundCode, item.date, item.nav, item.accNav]);
     }
 

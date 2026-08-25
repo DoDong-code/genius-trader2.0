@@ -4,6 +4,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+delete process.env.DATABASE_URL;
+
 const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'fund-data-test-'));
 process.env.FUND_DB_PATH = path.join(temporaryDirectory, 'test.sqlite');
 

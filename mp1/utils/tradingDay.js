@@ -84,7 +84,7 @@ export function getNavDisplayState({ navConfirmed = false, navDate = null, estim
   if (estimateReady) {
     return { type: 'TODAY_ESTIMATE', tone: 'gray', text: '估值' };
   }
-  return { type: 'NO_DATA', tone: 'gray', text: '暂无数据' };
+  return null; // 没有数据：保持空白，不显示任何标签，禁止显示「暂无数据」
 }
 
 const PROVIDER_SOURCE_SET = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);

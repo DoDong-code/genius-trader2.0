@@ -6,7 +6,9 @@ const test = require('node:test');
 const assert = require('node:assert');
 const path = require('node:path');
 
-const PROJ = 'C:/Users/Administrator/Desktop/Codex3 基金/genius-trader2.0/server';
+delete process.env.DATABASE_URL;
+
+const PROJ = path.resolve(__dirname, '..');
 
 // 在 require estimateEngine 之前注入 mock，模拟 Render 出网被封（Eastmoney+Yahoo 均不可达）
 const fundServiceMock = {

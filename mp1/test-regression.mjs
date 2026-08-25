@@ -140,9 +140,9 @@ console.log('\n【四】getNavDisplayState 三态');
   const s2 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: true });
   assert(s2.type === 'TODAY_ESTIMATE' && s2.tone === 'gray' && s2.text === '估值', `② estimate READY → 灰估值(${s2.text})`);
 
-  // ③ 无 nav、无 estimate → NO_DATA（灰「暂无数据」）
+  // ③ 无 nav、无 estimate → null (不显示任何标签，保持空白)
   const s3 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: false });
-  assert(s3.type === 'NO_DATA' && s3.tone === 'gray' && s3.text === '暂无数据', `③ 无 nav/estimate → 灰暂无数据(${s3.text})`);
+  assert(s3 === null, `③ 无 nav/estimate → null (空白)`);
 
   // ④ estimate/provider 日期不能制造 CONFIRMED_NAV：有 estimate + navDate 但 navConfirmed=false → 绝不蓝
   const s4 = getNavDisplayState({ navConfirmed: false, navDate: '2026-08-25', estimateReady: true });
@@ -150,11 +150,11 @@ console.log('\n【四】getNavDisplayState 三态');
 
   // ⑤ confirmed=false 即使有 navDate 也不能蓝
   const s5 = getNavDisplayState({ navConfirmed: false, navDate: '2026-08-24', estimateReady: false });
-  assert(s5.type !== 'CONFIRMED_NAV', `⑤ confirmed=false 不蓝（type=${s5.type}）`);
+  assert(s5 === null, `⑤ confirmed=false 不蓝（blank）`);
 
   // ⑥ confirmed=true 但 navDate 缺失 → 仍不判蓝（防脏数据）
   const s6 = getNavDisplayState({ navConfirmed: true, navDate: null, estimateReady: true });
-  assert(s6.type !== 'CONFIRMED_NAV' && s6.tone === 'gray', `⑥ confirmed=true 缺 navDate → 不蓝（type=${s6.type}）`);
+  assert(s6 !== null && s6.type !== 'CONFIRMED_NAV' && s6.tone === 'gray', `⑥ confirmed=true 缺 navDate → 不蓝（type=${s6 ? s6.type : 'null'}）`);
 
   // QDII 白名单（isQdiiFund 独立于徽章三态，仍保留回归）
   assert(isQdiiFund({ code: '022184', name: 'x' }) === true, 'QDII 白名单 022184');

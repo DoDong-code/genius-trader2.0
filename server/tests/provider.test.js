@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 
+delete process.env.DATABASE_URL;
+
 // 使用独立临时数据库（必须在 require db 相关模块前设置）
 process.env.FUND_DB_PATH = path.join(os.tmpdir(), `provider-test-${process.pid}.sqlite`);
 

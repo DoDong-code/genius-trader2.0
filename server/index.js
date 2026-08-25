@@ -233,8 +233,8 @@ function startMemoryDiagnostics() {
 // 绝不写 estimate / 绝不污染 confirmed），保证所有基金的最新确认净值持续入库。
 // 注意：不触碰 navCacheService（P3.3-H 冻结），也不改写任何前端逻辑。
 function startNavSyncScheduler() {
-  if (process.env.DISABLE_NAV_SYNC === '1') {
-    console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
+  if (process.env.DISABLE_NAV_SYNC !== '0') {
+    console.log('[NAV-SYNC] disabled by default (set DISABLE_NAV_SYNC=0 to enable)');
     return;
   }
   const { isCloud } = require('./database/dbAsync');

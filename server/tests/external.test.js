@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert');
 
+delete process.env.DATABASE_URL;
+
 const { generateToken, validateToken, revokeTokens } = require('../services/externalTokenService');
 const { handleExternalApi, handleExternalAuthApi } = require('../api/external');
 const { saveUserState } = require('../services/accountStateService');

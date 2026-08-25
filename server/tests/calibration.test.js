@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
+delete process.env.DATABASE_URL;
+
 const temporaryDirectory = fs.mkdtempSync(path.join(__dirname, 'calibration-test-'));
 process.env.FUND_DB_PATH = path.join(temporaryDirectory, 'test-calibration.sqlite');
 

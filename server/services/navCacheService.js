@@ -150,18 +150,30 @@ async function ensureTodayNav(fundCode, options = {}) {
         const timestamps = result?.timestamp;
         const closes = result?.indicators?.quote?.[0]?.close;
         if (Array.isArray(timestamps) && Array.isArray(closes) && timestamps.length > 0) {
-          for (let i = timestamps.length - 1; i >= 0; i--) {
+          let expectedResult = null;
+          for (let i = 0; i < timestamps.length; i++) {
             const timestamp = timestamps[i];
             const nav = Number(closes[i]);
             if (Number.isFinite(nav) && nav > 0) {
               const date = new Intl.DateTimeFormat('en-CA', {
                 timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
               }).format(new Date(timestamp * 1000));
+              await dbAsync.run(
+                `INSERT INTO fund_nav (fund_code, date, nav, acc_nav, source, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT (fund_code, date) DO UPDATE SET
+                   nav = excluded.nav,
+                   acc_nav = CASE WHEN excluded.acc_nav IS NOT NULL AND excluded.acc_nav > 0 THEN excluded.acc_nav ELSE fund_nav.acc_nav END,
+                   source = excluded.source,
+                   fetched_at = CURRENT_TIMESTAMP`,
+                [fundCode, date, nav, nav, 'yahoo']
+              );
               if (date === expected) {
-                return { nav, date, source: 'yahoo' };
+                expectedResult = { nav, date, source: 'yahoo' };
               }
             }
           }
+          if (expectedResult) return expectedResult;
         }
       } catch (err) {
         // ignore
@@ -178,15 +190,29 @@ async function ensureTodayNav(fundCode, options = {}) {
         if (!res) return null;
         const history = Array.isArray(res) ? res : res.history;
         if (Array.isArray(history) && history.length > 0) {
+          let expectedResult = null;
           for (let i = history.length - 1; i >= 0; i--) {
             const item = history[i];
             const date = item.date;
             const nav = Number(item.nav);
-            const accNav = Number(item.accNav);
-            if (date === expected && Number.isFinite(nav) && nav > 0) {
-              return { nav, date, accNav, source: 'eastmoney' };
+            const accNav = Number(item.accNav) || nav;
+            if (date && Number.isFinite(nav) && nav > 0) {
+              await dbAsync.run(
+                `INSERT INTO fund_nav (fund_code, date, nav, acc_nav, source, fetched_at)
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON CONFLICT (fund_code, date) DO UPDATE SET
+                   nav = excluded.nav,
+                   acc_nav = CASE WHEN excluded.acc_nav IS NOT NULL AND excluded.acc_nav > 0 THEN excluded.acc_nav ELSE fund_nav.acc_nav END,
+                   source = excluded.source,
+                   fetched_at = CURRENT_TIMESTAMP`,
+                [fundCode, date, nav, accNav, 'eastmoney']
+              );
+              if (date === expected) {
+                expectedResult = { nav, date, accNav, source: 'eastmoney' };
+              }
             }
           }
+          if (expectedResult) return expectedResult;
         }
       } catch (err) {
         // ignore
@@ -195,8 +221,6 @@ async function ensureTodayNav(fundCode, options = {}) {
     }
 
     const promises = [
-      runExternal(fetchFromXiaobei),
-      runExternal(fetchFromYangjibao),
       runExternal(fetchFromYahoo),
       runExternal(fetchFromTiantian)
     ];

@@ -397,7 +397,13 @@
     } else if (displayState.type === 'TODAY_ESTIMATE') {
       markEstimateBadge(row, fund, '估值');
     } else {
-      markEstimateBadge(row, fund, '暂无数据');
+      var meta = row.querySelector('.fund-info small');
+      if (meta) {
+        var estBadge = meta.querySelector('.nav-estimate-badge');
+        if (estBadge) estBadge.remove();
+        var upBadge = meta.querySelector('.nav-updated-badge');
+        if (upBadge) upBadge.remove();
+      }
     }
 
     diagLog('[BADGE_DECISION]', 'code=' + code,
