@@ -1,5 +1,5 @@
 import { http } from '../../utils/request.js';
-import { computeDataBadge, shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate, isTradingDay } from '../../utils/tradingDay.js';
+import { shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate, isTradingDay, getNavDisplayState } from '../../utils/tradingDay.js';
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct, money } from '../../utils/format.js';
 const app = getApp();
@@ -694,7 +694,11 @@ Page({
       const hasEstimateData = Boolean(navDate)
         || Number.isFinite(Number(f.today))
         || Number.isFinite(Number(f.todayEstimate));
-      const badge = computeDataBadge(f, navDate, source, new Date(), cached ? cached.officialChange : null, hasEstimateData, f.dataStatus);
+      // P4.5 统一三态：蓝色仅来自后端确认净值（dataStatus===CONFIRMED_NAV 或 latest_nav.confirmed），
+      // 灰度一律「估值」，不再用 provider 名 / 时间 / 开盘与否推导（与网页端 live-estimates.js 一致）。
+      const navConfirmed = f.dataStatus === 'CONFIRMED_NAV' || Boolean(f.latest_nav && f.latest_nav.confirmed === true);
+      const displayNavDate = navDate || (f.latest_nav && f.latest_nav.date) || null;
+      const badge = getNavDisplayState({ navConfirmed, navDate: displayNavDate, estimateReady: hasEstimateData });
 
       // 与蓝色「已更新」徽章同源：最新 NAV 已是今天（QDII 为前一交易日）的正式净值时，
       // 今日收益/收益率改用官方当日涨跌幅，避免「蓝日期 + 收益按旧 NAV 算」错位。
@@ -733,7 +737,7 @@ Page({
   },
 
   // 并发拉取每只基金的 latest_nav.date（fast=1 不重算，直接读缓存）
-  // 与网页端 updatedNavDates 同源：已更新净值且是当天的跳过
+  // 当日已确认更新的跳过（避免重复请求）；与网页端三态蓝色判定同源（latest_nav 日期 = 确认净值）
   _refreshNavDatesIfNeeded(funds) {
     if (!Array.isArray(funds) || !funds.length) return;
     const today = shanghaiDate();

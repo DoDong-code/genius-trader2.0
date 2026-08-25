@@ -1,6 +1,6 @@
 // test-regression.mjs — P0+P1 核心逻辑回归单元测试
 // 运行：node test-regression.mjs
-import { computeDataBadge, isQdiiFund, getPreviousTradingDay, isTradingDay, shanghaiDate, officialNavChange, providerDisplayName } from './utils/tradingDay.js';
+import { getNavDisplayState, isQdiiFund, officialNavChange } from './utils/tradingDay.js';
 
 let passed = 0, failed = 0;
 function assert(cond, name) {
@@ -129,44 +129,42 @@ console.log('\n【三】mergeFundsInto');
   assert(target.funds.length === 2, '合并后基金数正确（不重复）');
 }
 
-// ===== 四、computeDataBadge 三态 =====
-console.log('\n【四】computeDataBadge 三态');
+// ===== 四、getNavDisplayState 三态（统一规则，与 Web 一致）=====
+console.log('\n【四】getNavDisplayState 三态');
 {
-  const fundA = { code: '019633', name: '国泰半导体设备ETF联接C' };
-  const qdii = { code: '022184', name: '全球科技基金' };
-  // 2026-08-14 是周五（交易日），2026-08-16 是周日（非交易日）
-  const fri = new Date('2026-08-14T10:00:00+08:00');
-  const sun = new Date('2026-08-16T10:00:00+08:00');
+  // ① confirmed NAV → CONFIRMED_NAV（蓝色日期 MMDD）
+  const s1 = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-24', estimateReady: false });
+  assert(s1.type === 'CONFIRMED_NAV' && s1.tone === 'blue' && s1.text === '0824', `① confirmed NAV → 蓝(${s1.text})`);
 
-  // 状态①：交易日，navDate === expected(today) 且有 officialChange → 蓝已更新
-  const b1 = computeDataBadge(fundA, '2026-08-14', null, fri, 0.012);
-  assert(b1.tone === 'blue' && b1.text === '已更新0814', `状态①交易日已更新 → 蓝(${b1.text})`);
+  // ② estimate READY、无 confirmed NAV → TODAY_ESTIMATE（灰「估值」）
+  const s2 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: true });
+  assert(s2.type === 'TODAY_ESTIMATE' && s2.tone === 'gray' && s2.text === '估值', `② estimate READY → 灰估值(${s2.text})`);
 
-  // 状态① 无 officialChange → 灰估值
-  const b1b = computeDataBadge(fundA, '2026-08-14', null, fri, null);
-  assert(b1b.tone === 'gray', '状态① 无 officialChange → 灰估值');
+  // ③ 无 nav、无 estimate → NO_DATA（灰「暂无数据」）
+  const s3 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: false });
+  assert(s3.type === 'NO_DATA' && s3.tone === 'gray' && s3.text === '暂无数据', `③ 无 nav/estimate → 灰暂无数据(${s3.text})`);
 
-  // 状态②：非交易日，有 navDate → 蓝已更新最近交易日
-  const b2 = computeDataBadge(fundA, '2026-08-14', null, sun, 0.012);
-  assert(b2.tone === 'blue' && b2.text === '已更新0814', `状态②非交易日 → 蓝(${b2.text})`);
+  // ④ estimate/provider 日期不能制造 CONFIRMED_NAV：有 estimate + navDate 但 navConfirmed=false → 绝不蓝
+  const s4 = getNavDisplayState({ navConfirmed: false, navDate: '2026-08-25', estimateReady: true });
+  assert(s4.type !== 'CONFIRMED_NAV' && s4.tone === 'gray', `④ provider 日期不能制造蓝（type=${s4.type}）`);
 
-  // 状态③：交易日盘中，navDate 是上一交易日（≠expected）→ 灰估值
-  const b3 = computeDataBadge(fundA, '2026-08-13', null, fri, 0.012);
-  assert(b3.tone === 'gray' && b3.text === '估值', `状态③盘中 → 灰(${b3.text})`);
+  // ⑤ confirmed=false 即使有 navDate 也不能蓝
+  const s5 = getNavDisplayState({ navConfirmed: false, navDate: '2026-08-24', estimateReady: false });
+  assert(s5.type !== 'CONFIRMED_NAV', `⑤ confirmed=false 不蓝（type=${s5.type}）`);
 
-  // 状态③ 第三方 → 灰小倍/养基宝
-  const b3b = computeDataBadge(fundA, '2026-08-13', 'xiaobeiyangji', fri, 0.012);
-  assert(b3b.tone === 'gray' && b3b.text === '小倍', `状态③第三方 → 灰(${b3b.text})`);
+  // ⑥ confirmed=true 但 navDate 缺失 → 仍不判蓝（防脏数据）
+  const s6 = getNavDisplayState({ navConfirmed: true, navDate: null, estimateReady: true });
+  assert(s6.type !== 'CONFIRMED_NAV' && s6.tone === 'gray', `⑥ confirmed=true 缺 navDate → 不蓝（type=${s6.type}）`);
 
-  // QDII：expected = 前一交易日
-  const b4 = computeDataBadge(qdii, '2026-08-13', null, fri, 0.012);
-  assert(b4.tone === 'blue' && b4.text === '已更新0813', `QDII expected=前一交易日 → 蓝(${b4.text})`);
-
-  // QDII 白名单
+  // QDII 白名单（isQdiiFund 独立于徽章三态，仍保留回归）
   assert(isQdiiFund({ code: '022184', name: 'x' }) === true, 'QDII 白名单 022184');
   assert(isQdiiFund({ code: '014002', name: 'x' }) === true, 'QDII 白名单 014002');
   assert(isQdiiFund({ code: '013309', name: '易方达恒生科技ETF联接(QDII)C' }) === false, '港股恒生排除');
   assert(isQdiiFund({ code: '008702', name: '华夏黄金ETF联接C' }) === false, '黄金非 QDII');
+
+  // officialNavChange 历史涨跌幅仍有效
+  const hc = officialNavChange([{ date: '2026-08-13', nav: 1.00 }, { date: '2026-08-14', nav: 1.02 }], '2026-08-14');
+  assert(Math.abs(hc - 0.02) < 0.0001, 'officialNavChange 涨跌幅 0.02');
 }
 
 // ===== 五、todayEstimate 优先级 =====

@@ -1381,14 +1381,9 @@
     const historyContent = backdrop.querySelector('.detail-history-content');
     if (historyContent) historyContent.innerHTML = '<div class="detail-loading" aria-label="加载历史净值"></div>';
 
-    const initialRefresh = options.forceRefresh === true
-      ? true
-      : (() => {
-          const now = Date.now();
-          const last = detailApiFundCache[String(fund.code)] || 0;
-          return now - last > 5 * 60 * 1000;
-        })();
-
+    // P4.5 历史增量同步：有缓存时先即时渲染（秒开），随后始终触发一次后台增量同步
+    // （mergeFundData 只在已有缓存上增量补齐，不清缓存），确保最新确认净值（如 0824）及时显示，
+    // 不再被 5 分钟窗口挡住。
     const cached = window.fundStore ? window.fundStore.get(fund.code) : null;
     const hasCache = cached && Array.isArray(cached.history) && cached.history.length > 0;
 
@@ -1409,11 +1404,8 @@
       applyMetaSideEffects(fund, backdrop, cachedPayload);
       setupHistoryExplorer(backdrop, cached.history, fund);
       backdrop.fundHistory = cached.history;
-      
-      if (!initialRefresh) {
-        return;
-      }
-      
+
+      // 始终触发一次后台增量同步（不清缓存，仅在已有缓存上补齐最新净值）
       (async () => {
         try {
           const payload = await fetchFundPayload(fund.code, true);
@@ -1438,7 +1430,7 @@
 
     (async () => {
       try {
-        const payload = await fetchFundPayload(fund.code, initialRefresh);
+        const payload = await fetchFundPayload(fund.code, options.forceRefresh === true);
         if (ctl.stopped || !backdrop.isConnected) return;
         detailApiFundCache[String(fund.code)] = Date.now();
         

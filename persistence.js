@@ -548,16 +548,25 @@
   // Network Request Helpers at the Data Layer
   function getApiBase() { return window.FUND_API_BASE || ''; }
 
+  // P4.5：单请求 20s 超时保护——成功/失败/超时都必须 settle，杜绝「永远刷新中」。
+  // 超时后当前请求结束（abort）、保留已有缓存、UI 显示已有数据、不无限重试。
+  var REQUEST_TIMEOUT_MS = 20000;
   function requestJson(url, options) {
     var headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
-    return fetch(url, Object.assign({}, options, { headers: headers })).then(function (response) {
-      if (!response.ok) {
-        var error = new Error('HTTP ' + response.status);
-        error.status = response.status;
-        throw error;
-      }
-      return response.json();
-    });
+    var controller = (typeof AbortController === 'function') ? new AbortController() : null;
+    var timer = controller ? window.setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS) : null;
+    return fetch(url, Object.assign({}, options, { headers: headers, signal: controller ? controller.signal : undefined }))
+      .then(function (response) {
+        if (!response.ok) {
+          var error = new Error('HTTP ' + response.status);
+          error.status = response.status;
+          throw error;
+        }
+        return response.json();
+      })
+      .finally(function () {
+        if (timer !== null) window.clearTimeout(timer);
+      });
   }
   window.requestJson = requestJson;
 

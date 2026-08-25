@@ -69,84 +69,22 @@ export function formatMMDD(dateStr) {
   return m ? `${m[1]}-${m[2]}` : '';
 }
 
-// 数据源 → 中文 label（兼容短名 yjb/xbyj 与长名 yangjibao/xiaobeiyangji）
-export function providerDisplayName(source) {
-  if (source === 'xiaobeiyangji' || source === 'xbyj') return '小倍';
-  if (source === 'yangjibao' || source === 'yjb') return '养基宝';
-  return null;
-}
-
-/**
- * 计算数据徽章（P3.18-ESTIMATE-STATE：优先使用后端统一 data_status；缺失时降级本地判定）
- * @param {object} fund       - 持仓基金（必含 code、name）
- * @param {string|null} navDate - 后端返回的 latest_nav.date（yyyy-mm-dd）
- * @param {string|null} estimateSource - estimate 接口返回的 source（xiaobeiyangji/yangjibao/yjb/xbyj）
- * @param {Date} [now]        - 用于测试的时间
- * @param {number|null} officialChange - 官方涨跌幅（由 history 计算，对齐 Web 需 finite）
- * @param {boolean} [hasEstimateData] - 是否存在有效估值/数据源数据
- * @param {string} [dataStatus] - 后端统一数据状态：CONFIRMED_NAV/PROVIDER_TODAY/PROVIDER_STALE/NO_DATA
- * @returns {{text:string, tone:'blue'|'gray', kind:string, source?:string}}
- *
- * data_status 展示规则（后端唯一权威）：
- *   CONFIRMED_NAV  → 蓝「MMDD」（fund_nav 已确认净值日期）
- *   PROVIDER_TODAY → 灰「小倍/养基宝」（provider 当日数据，估值绝不算净值→不蓝）
- *   PROVIDER_STALE → 灰「小倍/养基宝」（provider 旧数据）
- *   NO_DATA        → 灰「估值」
- * 缺失 data_status（旧后端/降级）→ 回退本地五态判定
- */
-export function computeDataBadge(fund, navDate, estimateSource, now = new Date(), officialChange = null, hasEstimateData = false, dataStatus = null) {
-  const providerLabel = providerDisplayName(estimateSource);
-
-  // —— P3.18 时间模型（用户确认）——
-  // 蓝 = 净值已确认：fund_nav 有 expected 日（CONFIRMED_NAV）/ 非交易日最近净值 / 交易日 9:00 开盘前最近净值
-  // 灰 = 交易日 9:00 开盘后 ～ 净值确认前（盘中/盘后未确认；provider 当日估值【不算】净值 → 不蓝）
-  if (dataStatus === 'CONFIRMED_NAV' && navDate) {
-    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
+// P4.5 统一三态净值显示（与网页端 live-estimates.js 的 getNavDisplayState 完全一致）：
+//   CONFIRMED_NAV   → 蓝「MMDD」（后端确认净值，唯一蓝色来源）
+//   TODAY_ESTIMATE  → 灰「估值」
+//   NO_DATA         → 灰「暂无数据」
+// 蓝色仅来自后端确认净值（dataStatus===CONFIRMED_NAV 或 latest_nav.confirmed）；
+// 禁止用 provider 名 / estimate 日期 / 开盘与否 / 非交易日 / localStorage 推导蓝色。
+// @param {{navConfirmed?:boolean, navDate?:string|null, estimateReady?:boolean}} params
+// @returns {{type:string, tone:'blue'|'gray', text:string}}
+export function getNavDisplayState({ navConfirmed = false, navDate = null, estimateReady = false } = {}) {
+  if (navConfirmed && navDate) {
+    return { type: 'CONFIRMED_NAV', tone: 'blue', text: formatMMDD(navDate).replace('-', '') };
   }
-  if (dataStatus === 'PROVIDER_TODAY') {
-    return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
+  if (estimateReady) {
+    return { type: 'TODAY_ESTIMATE', tone: 'gray', text: '估值' };
   }
-  if (dataStatus === 'PROVIDER_STALE') {
-    return { text: providerLabel || '小倍', tone: 'gray', kind: 'estimate', source: estimateSource || null };
-  }
-  if (dataStatus === 'NO_DATA') {
-    return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
-  }
-
-  const today = shanghaiDate(now);
-  const trading = isTradingDay(now);
-  const expected = isQdiiFund(fund) ? getPreviousTradingDay(today) : today;
-  // 净值已确认：navDate === 预期日期 且 官方涨跌幅为有限数
-  // 注意：用 Number.isFinite(officialChange) 而非 Number.isFinite(Number(officialChange))，
-  // 因为 Number(null)=0 会误判无涨跌幅数据为「涨跌幅 0」；Number.isFinite(null) 正确返回 false。
-  const confirmed = Boolean(navDate && navDate === expected && Number.isFinite(officialChange));
-
-  if (confirmed) {
-    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
-  }
-  if (!trading && navDate) {
-    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
-  }
-  // 交易日 9:00 开盘前：显示最近一次确认净值（蓝）
-  if (trading && isBeforeOpen(now) && navDate) {
-    return { text: formatMMDD(navDate).replace('-', ''), tone: 'blue', kind: 'updated' };
-  }
-  // 交易时段（9:00 后）净值未确认：有估值/数据源数据 → 灰色（数据源名 或「估值」）；数据源不决定颜色
-  if (hasEstimateData) {
-    const label = providerLabel || '估值';
-    return { text: label, tone: 'gray', kind: 'estimate', source: estimateSource || null };
-  }
-  // 无净值、无估值数据 → 灰色「估值」
-  return { text: '估值', tone: 'gray', kind: 'estimate', source: null };
-}
-
-// P3.18：交易日 9:00（北京时间）开盘前判断——开盘前显示最近确认净值（蓝）
-export function isBeforeOpen(d = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-  }).formatToParts(d);
-  const t = Object.fromEntries(parts.map(p => [p.type, p.value]));
-  return Number(t.hour) * 60 + Number(t.minute) < 9 * 60;
+  return { type: 'NO_DATA', tone: 'gray', text: '暂无数据' };
 }
 
 const PROVIDER_SOURCE_SET = new Set(['xiaobeiyangji', 'yangjibao', 'xbyj', 'yjb']);
@@ -163,7 +101,7 @@ export function inferDataStatusFromEstimate(fund, estimate, now = new Date()) {
   if (!estimate) return 'NO_DATA';
   const actualSource = estimate.data_source_actual || estimate.source || estimate.estimate_source;
   if (actualSource && actualSource === 'local') return 'NO_DATA'; // 本地估算不算 provider 当日
-  if (!actualSource || !PROVIDER_SOURCE_SET.has(String(actualSource))) return null; // 非 provider（让 computeDataBadge 走降级）
+  if (!actualSource || !PROVIDER_SOURCE_SET.has(String(actualSource))) return null; // 非 provider（交由后端 data_status 兜底）
   const tradeDate = estimate.trade_date || estimate.nav_date || null;
   if (!tradeDate) return 'PROVIDER_STALE';
   const today = shanghaiDate(now);
