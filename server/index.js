@@ -226,6 +226,118 @@ function startMemoryDiagnostics() {
   if (timer.unref) timer.unref();
 }
 
+// 冻结后台同步调度（2026-08-25）：
+//   - 每日 NAV 增量：每 30 分钟检查一次，仅在上海时间 18:30~23:59 的净值公布窗口内执行；
+//     只处理 fund_nav 中缺少 today/expected 日期的基金，已有今日净值直接跳过。
+//   - 每周历史校对：启动 1 小时后执行首次，之后按 lastRun 间隔 7 天执行。
+//   - 每季度持仓检查：启动 1 小时后执行首次，之后按 lastRun 间隔 91 天执行。
+// 注意：setTimeout/setInterval 上限为 32 位有符号整数（~24.8 天），91 天会溢出变成 1ms，
+// 因此统一用 30 分钟 tick + 内存 lastRun 时间戳控制周期，绝不直接设 7 天/91 天定时器。
+// 每个任务有独立运行锁，防止重叠；DISABLE_NAV_SYNC=1 可整体关闭。
+function startNavSyncScheduler() {
+  if (process.env.DISABLE_NAV_SYNC === '1') {
+    console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
+    return;
+  }
+  const { isCloud } = require('./database/dbAsync');
+  if (!isCloud() && process.env.NODE_ENV !== 'production') {
+    console.log('[NAV-SYNC] disabled in local/dev mode (set NODE_ENV=production or run on cloud to enable)');
+    return;
+  }
+  const {
+    syncTodayNavs,
+    syncWeeklyHistory,
+    syncQuarterlyHoldings
+  } = require('./services/navSyncService');
+
+  let dailyRunning = false;
+  let weeklyRunning = false;
+  let quarterlyRunning = false;
+  let ticking = false;
+  let lastWeeklyRun = 0;
+  let lastQuarterlyRun = 0;
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const QUARTER_MS = 91 * 24 * 60 * 60 * 1000;
+
+  function shanghaiMinutes() {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+    }).formatToParts(new Date());
+    const t = Object.fromEntries(parts.map(p => [p.type, p.value]));
+    return Number(t.hour) * 60 + Number(t.minute);
+  }
+
+  function inEveningWindow() {
+    const minutes = shanghaiMinutes();
+    return minutes >= 18 * 60 + 30 && minutes < 24 * 60;
+  }
+
+  function summarize(results) {
+    if (!Array.isArray(results)) return 'no-results';
+    const ok = results.filter(r => r && !r.error).length;
+    const fail = results.length - ok;
+    return `${ok} ok, ${fail} failed, total ${results.length}`;
+  }
+
+  async function runOnce(label, task, setRunning) {
+    setRunning(true);
+    const startedAt = Date.now();
+    try {
+      const results = await task();
+      console.log(`[NAV-SYNC] ${label} completed in ${Date.now() - startedAt}ms: ${summarize(results)}`);
+    } catch (err) {
+      console.error(`[NAV-SYNC] ${label} failed:`, err && err.message);
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function runDailyNav() {
+    if (!inEveningWindow()) return;
+    if (dailyRunning) return;
+    dailyRunning = true;
+    await runOnce('daily-nav', () => syncTodayNavs({ concurrency: 3 }), (v) => { dailyRunning = v; });
+  }
+
+  async function maybeWeekly() {
+    if (weeklyRunning || Date.now() - lastWeeklyRun < WEEK_MS) return;
+    weeklyRunning = true;
+    await runOnce('weekly-history', () => syncWeeklyHistory({ concurrency: 2 }), (v) => { weeklyRunning = v; });
+    lastWeeklyRun = Date.now();
+  }
+
+  async function maybeQuarterly() {
+    if (quarterlyRunning || Date.now() - lastQuarterlyRun < QUARTER_MS) return;
+    quarterlyRunning = true;
+    await runOnce('quarterly-holdings', () => syncQuarterlyHoldings({ concurrency: 2 }), (v) => { quarterlyRunning = v; });
+    lastQuarterlyRun = Date.now();
+  }
+
+  async function tick() {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await runDailyNav();
+      await maybeWeekly();
+      await maybeQuarterly();
+    } finally {
+      ticking = false;
+    }
+  }
+
+  const initialDaily = setTimeout(() => { runDailyNav(); }, 30 * 1000);
+  if (initialDaily.unref) initialDaily.unref();
+
+  // 首次维护（含每周历史 + 每季度持仓）在启动 1 小时后执行
+  const initialMaintenance = setTimeout(() => { tick(); }, 60 * 60 * 1000);
+  if (initialMaintenance.unref) initialMaintenance.unref();
+
+  const tickTimer = setInterval(() => { tick(); }, 30 * 60 * 1000);
+  if (tickTimer.unref) tickTimer.unref();
+
+  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, quarterly holdings via 30m tick)');
+}
+
 async function startServer(port = 3000, host = '0.0.0.0') {
   const server = await createServer();
   server.listen(port, host, () => {
@@ -241,6 +353,9 @@ async function startServer(port = 3000, host = '0.0.0.0') {
   // Phase 3.3-H：[MEMORY] 轻量内存诊断（每 60s 采样一次，仅打点不刷屏，
   // 不打印 response / 基金对象 / history；可被 DISABLE_MEMORY_DIAGNOSTICS=1 关闭）。
   startMemoryDiagnostics();
+  // 冻结后台同步职责（2026-08-25）：每日 NAV 增量 / 每周历史校对 / 每季度持仓检查。
+  // 增量优先，绝不全量重导；navCacheService.js（P3.3-H）不做任何修改。
+  startNavSyncScheduler();
   const shutdown = () => {
     server.close(() => {
       closeDatabase();

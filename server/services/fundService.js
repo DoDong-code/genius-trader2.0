@@ -238,7 +238,7 @@ async function collectFund(code, options = {}) {
   // force=true（强制重新导入）时必须绕过增量缓存，执行全量历史回填，否则 fund_nav
   // 永远停留在首次入库的那段区间（例如仅 7.16~8.13），历史净值无法补齐。
   const force = Boolean(options.force);
-  const useStoredHoldings = !force && freshSyncState(fundCode, 'holdings');
+  const useStoredHoldings = !force && !options.forceHoldings && freshSyncState(fundCode, 'holdings');
   const useStoredHistory = !force && freshSyncState(fundCode, 'history');
   const storedFund = await dbAsync.get('SELECT fund_name, fund_type, company FROM fund WHERE fund_code = ?', [fundCode]);
 
@@ -475,7 +475,25 @@ async function getFund(code) {
     ORDER BY date DESC
     LIMIT 1
   `, [fundCode]);
-  return { ...fund, latest_nav: latestNav || null };
+  // 通用规则：latest_nav 附带 changePercent（相对前一交易日涨跌幅），
+  // 供前端「正式净值已发布 → 今日收益用净值涨跌幅」直接使用，避免估值覆盖净值。
+  let changePercent = null;
+  if (latestNav) {
+    const previous = await dbAsync.get(`
+      SELECT nav
+      FROM fund_nav
+      WHERE fund_code = ? AND date < ?
+      ORDER BY date DESC
+      LIMIT 1
+    `, [fundCode, latestNav.date]);
+    if (previous && Number(previous.nav) > 0) {
+      changePercent = Number(latestNav.nav) / Number(previous.nav) - 1;
+    }
+  }
+  return {
+    ...fund,
+    latest_nav: latestNav ? { ...latestNav, changePercent } : null
+  };
 }
 
 async function listFunds() {

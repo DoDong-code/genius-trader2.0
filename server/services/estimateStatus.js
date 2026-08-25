@@ -9,8 +9,47 @@
  */
 const { shanghaiDateString, getLatestTradingDay, isTradingDay } = require('./marketService');
 
+// 港股 / 恒生科技类基金：按「当日」规则处理（与美股 QDII 的 T+1 披露规则严格区分）。
+// 判定依据名称关键词（恒生/港股/港美/香港），优先级高于 QDII 判定。
+function isHkFund(fund) {
+  if (!fund) return false;
+  const name = fund.fund_name || '';
+  return /恒生|港股|港美|香港/.test(name);
+}
+
+// 2026 年香港公众假期（香港政府宪报）：周末 + 以下日期为非交易日。
+// 含 2026-05-25（佛诞翌日，佛诞为周日）、2026-10-19（重阳节翌日，重阳为周日）。
+const HK_HOLIDAYS_2026 = new Set([
+  '2026-01-01',
+  '2026-02-17', '2026-02-18', '2026-02-19',
+  '2026-04-03', '2026-04-04', '2026-04-06',
+  '2026-05-01', '2026-05-25',
+  '2026-06-19', '2026-07-01', '2026-09-26',
+  '2026-10-01', '2026-10-19',
+  '2026-12-25', '2026-12-26'
+]);
+
+function isHkTradingDay(dateStr) {
+  const parts = String(dateStr).split('-');
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  const dayOfWeek = d.getDay();
+  if (dayOfWeek === 0 || dayOfWeek === 6) return false;
+  return !HK_HOLIDAYS_2026.has(String(dateStr));
+}
+
+function getLatestHkTradingDay(fromDateStr) {
+  const parts = String(fromDateStr).split('-');
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  while (!isHkTradingDay(shanghaiDateString(d.getTime()))) {
+    d.setDate(d.getDate() - 1);
+  }
+  return shanghaiDateString(d.getTime());
+}
+
 function isQdiiFund(fund) {
   if (!fund) return false;
+  // 港股/恒生科技 ≠ 美股 QDII：先排除，绝不套用 T+1 跨日规则
+  if (isHkFund(fund)) return false;
   const type = fund.fund_type || '';
   const name = fund.fund_name || '';
   return (
@@ -38,6 +77,10 @@ function previousTradingDay(dateStr) {
 
 function expectedNavDateFor(fund, now = new Date()) {
   const today = shanghaiDateString(now.getTime ? now.getTime() : Date.now());
+  // 港股 / 恒生科技：按香港交易日历判断，NAV 状态按「当日」处理
+  if (isHkFund(fund)) {
+    return isHkTradingDay(today) ? today : getLatestHkTradingDay(today);
+  }
   const isTr = isTradingDay(today);
   if (isTr) {
     return isQdiiFund(fund) ? previousTradingDay(today) : today;
@@ -61,4 +104,12 @@ function resolveDataStatus({ confirmedNavDate, expectedNavDate, providerSource, 
   return 'NO_DATA';
 }
 
-module.exports = { resolveDataStatus, expectedNavDateFor, isQdiiFund, PROVIDER_SOURCES };
+module.exports = {
+  resolveDataStatus,
+  expectedNavDateFor,
+  isQdiiFund,
+  isHkFund,
+  isHkTradingDay,
+  getLatestHkTradingDay,
+  PROVIDER_SOURCES
+};

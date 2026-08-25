@@ -60,10 +60,19 @@
     '025422': '数字经济', '014847': '债券', '008173': '债券',
     '020741': '债券', '015736': '纯债', '380006': '纯债',
     '004103': '债券', '009690': '灵活配置', '000001': '混合', '008702': '基金'
+    , '018147': '全球科技', '016665': '全球科技'
   };
 
   function sectorNameOf(f) {
-    return (f && (FUND_SECTORS_BY_CODE[f.code] || f.sector || f.category)) || '其他';
+    if (!f) return '其他';
+    const byCode = FUND_SECTORS_BY_CODE[f.code];
+    if (byCode) return byCode;
+    if (f.sector) return String(f.sector);
+    const name = String(f.name || '');
+    if (/恒生|港股|港美|香港/.test(name)) return '恒生科技';
+    if (/QDII|全球|海外|新兴市场|纳斯达克|纳指|标普|日经|美股|道琼斯|欧洲/.test(name)) return '全球科技';
+    if (f.category) return String(f.category);
+    return '其他';
   }
 
   // 板块 → 大类资产（资产配比分析用，与持仓页板块口径一致）
@@ -523,7 +532,8 @@
         if (data.trading_day && timeStr >= '14:40' && localStorage.getItem(flagKey) !== '1') {
           localStorage.setItem(flagKey, '1');
           localStorage.setItem('TODAY_ADVICE_AUTO_UPDATED_TIME_' + dateStr, timeStr.slice(0, 5));
-          if (typeof window.refreshFundEstimates === 'function') window.refreshFundEstimates();
+          // 14:40 自动更新同样走增量检查（不重拉全量快照/历史）
+          if (typeof window.refreshTodayNav === 'function') window.refreshTodayNav();
           setTimeout(() => { if (view === 'overview') overview(); }, 8000);
         }
       } catch (e) { /* 忽略瞬时网络错误 */ }
@@ -1103,16 +1113,31 @@
 
   function providerApi(path, options) {
     const headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
-    return fetch(path, Object.assign({}, options, { headers })).then(async res => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const err = new Error(data.error || `HTTP ${res.status}`);
-        err.status = res.status;
-        err.data = data;
+    // 统一 20s 超时：第三方慢/挂时必须有明确反馈，禁止无限等待（同步按钮「没反应」根因之一）
+    const controller = (typeof AbortController === 'function') ? new AbortController() : null;
+    const timer = controller ? window.setTimeout(() => controller.abort(), 20000) : null;
+    return fetch(path, Object.assign({}, options, { headers, signal: controller ? controller.signal : undefined }))
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(data.error || `HTTP ${res.status}`);
+          err.status = res.status;
+          err.data = data;
+          throw err;
+        }
+        return data;
+      })
+      .catch(err => {
+        if (err && err.name === 'AbortError') {
+          const timeoutErr = new Error('请求超时，请稍后重试');
+          timeoutErr.timeout = true;
+          throw timeoutErr;
+        }
         throw err;
-      }
-      return data;
-    });
+      })
+      .finally(() => {
+        if (timer !== null) window.clearTimeout(timer);
+      });
   }
 
   // ─────────────────────────────────────────────
@@ -1347,6 +1372,17 @@
     };
   };
 
+  // 登录后立即刷新第三方连接状态：否则数据源选择器一直按「未登录」置灰，
+  // 必须手动进一次设置页才恢复（用户反馈的「重新登录后切源灰色」根因）。
+  window.addEventListener('auth-changed', () => {
+    if (window.auth && window.auth.state && window.auth.state.token) {
+      refreshProviderStatus().then(() => {
+        if (typeof window.refreshDataStatus === 'function') window.refreshDataStatus();
+        if (view === 'setting') applyProviderStatus();
+      }).catch(() => {});
+    }
+  });
+
   function applyProviderStatus() {
     const yjb = providerStatusCache.yangjibao;
     const yjbConnected = Boolean(yjb && yjb.logged_in);
@@ -1472,11 +1508,23 @@
 
   function runProviderImport(sourceName, overwrite) {
     const names = { yangjibao: '养基宝', xiaobeiyangji: '小倍养基' };
+    const importBtn = document.querySelector('#' + sourceName + '-import-btn');
+    const overwriteBtn = document.querySelector('#' + sourceName + '-overwrite-btn');
+    const setBusy = busy => {
+      [importBtn, overwriteBtn].forEach(btn => {
+        if (!btn) return;
+        btn.disabled = busy;
+        btn.style.opacity = busy ? '0.6' : '';
+        btn.textContent = busy ? '同步中…' : (btn === importBtn ? '同步持仓' : '覆盖重导');
+      });
+    };
+    setBusy(true);
     return providerApi(`/api/provider/${sourceName}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ overwrite: Boolean(overwrite) })
     }).then(async data => {
+      setBusy(false);
       const accountCount = (data.accounts || []).length;
       const fundCount = (data.accounts || []).reduce((sum, a) => sum + (a.funds || []).length, 0);
       await refreshProviderStatus().catch(() => {});
@@ -1494,6 +1542,7 @@
       }
       return { accountCount, fundCount };
     }).catch(err => {
+      setBusy(false);
       if (err.data && err.data.token_expired) {
         showToast('登录已过期，请重新登录后再次同步', 'warning');
       } else {

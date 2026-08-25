@@ -36,8 +36,19 @@
     '009690': '\u7075\u6d3b\u914d\u7f6e',
     // 二次验收：与小程序 utils/fundSectors.js 的 FUND_SECTORS_BY_CODE 完全一致（双端同一板块表）
     '000001': '\u6df7\u5408',
-    '008702': '\u57fa\u91d1'
+    '008702': '\u57fa\u91d1',
+    '018147': '\u5168\u7403\u79d1\u6280',
+    '016665': '\u5168\u7403\u79d1\u6280'
   };
+
+  // 名称兜底识别（无代码映射时按名称归板块，避免 QDII/全球基金显示为「基金」）
+  function sectorNameOfFund(fund) {
+    if (!fund) return null;
+    var fundName = String(fund.name || fund.fund_name || '');
+    if (/恒生|港股|港美|香港/.test(fundName)) return '恒生科技';
+    if (/QDII|全球|海外|新兴市场|纳斯达克|纳指|标普|日经|美股|道琼斯|欧洲/.test(fundName)) return '全球科技';
+    return null;
+  }
 
   function formatMoney(value) {
     var amount = Number(value) || 0;
@@ -76,6 +87,12 @@
     return match ? match[1] + '-' + match[2] : '';
   }
 
+  function shanghaiDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
+
   function isTradingDay(date) {
     var weekday = new Intl.DateTimeFormat('en-US', {
       timeZone: 'Asia/Shanghai', weekday: 'short'
@@ -96,102 +113,266 @@
     return holidays.indexOf(yyyymmdd) === -1;
   }
 
-  // P4.5 统一净值显示状态（唯一判定入口，Web 与 mp1 规则完全一致）：
-  //   1. fund.nav.confirmed === true && fund.nav.date 存在 → { type: 'CONFIRMED_NAV', date }
-  //   2. 无确认净值 && fund.estimate.status === 'READY'   → { type: 'TODAY_ESTIMATE' }
-  //   3. 其他                                              → { type: 'NO_DATA' }
-  // 禁止在 UI 层用 provider 名称 / estimate 日期 / 开盘与否 / 非交易日 / localStorage 日期再推导状态。
-  // 蓝色唯一事实 = 后端确认的正式净值（fund_nav）；一切估值永远灰色，estimate 永远不得写 confirmed。
-  function getNavDisplayState(fund) {
-    // 三态唯一入口：蓝色 = 后端确认净值且含有效正值（confirmed===true && date && value>0）。
-    // 增加 value>0 守卫，彻底封堵「res.date 存在但 nav=0/null」被误判为蓝色（旧 0825 假蓝根因）。
-    if (fund && fund.nav && fund.nav.confirmed === true && fund.nav.date &&
-        Number.isFinite(Number(fund.nav.value)) && Number(fund.nav.value) > 0) {
-      return { type: 'CONFIRMED_NAV', date: String(fund.nav.date) };
+  function getPreviousTradingDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    while (true) {
+      d.setDate(d.getDate() - 1);
+      var yyyy = d.getFullYear();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      if (isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+        return yyyy + '-' + mm + '-' + dd;
+      }
     }
-    if (fund && fund.estimate && fund.estimate.status === 'READY') {
+  }
+
+  function getLatestTradingDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    while (true) {
+      var yyyy = d.getFullYear();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      if (isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+        return yyyy + '-' + mm + '-' + dd;
+      }
+      d.setDate(d.getDate() - 1);
+    }
+  }
+
+  // 港股 / 恒生科技类基金：按「当日」规则处理（与美股 QDII 的 T+1 披露规则严格区分）
+  function isHkFund(fund) {
+    if (!fund) return false;
+    var fundName = String(fund.name || fund.fund_name || '');
+    return /恒生|港股|港美|香港/.test(fundName);
+  }
+
+  function isQdiiFund(fund) {
+    if (!fund) return false;
+    var fundName = String(fund.name || fund.fund_name || '');
+    if (/恒生|港股|港美|香港/.test(fundName)) return false;
+    var code = String(fund.code || '');
+    if (code === '022184' || code === '014002') return true;
+    return /QDII|全球|海外|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|道琼斯|欧洲/i.test(fundName);
+  }
+
+  // 2026 年香港公众假期（香港政府宪报）：周末 + 以下日期为非交易日
+  var HK_HOLIDAYS_2026 = [
+    '2026-01-01',
+    '2026-02-17', '2026-02-18', '2026-02-19',
+    '2026-04-03', '2026-04-04', '2026-04-06',
+    '2026-05-01', '2026-05-25',
+    '2026-06-19', '2026-07-01', '2026-09-26',
+    '2026-10-01', '2026-10-19',
+    '2026-12-25', '2026-12-26'
+  ];
+
+  function isHkTradingDay(date) {
+    var weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Asia/Shanghai', weekday: 'short'
+    }).format(date);
+    if (weekday === 'Sat' || weekday === 'Sun') return false;
+    var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(date);
+    return HK_HOLIDAYS_2026.indexOf(yyyymmdd) === -1;
+  }
+
+  function getLatestHkTradingDay(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    while (true) {
+      var yyyy = d.getFullYear();
+      var mm = String(d.getMonth() + 1).padStart(2, '0');
+      var dd = String(d.getDate()).padStart(2, '0');
+      if (isHkTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+        return yyyy + '-' + mm + '-' + dd;
+      }
+      d.setDate(d.getDate() - 1);
+    }
+  }
+
+  // 基金「今日正式净值」业务日期：
+  //   A股            → 中国市场交易日（当日）
+  //   港股/恒生科技   → 香港市场交易日（当日）
+  //   QDII/美股/全球  → 实际 NAV 披露日期（前一交易日），绝不强制等于中国本地日期
+  function expectedNavDateFor(fund) {
+    var today = shanghaiDate();
+    if (isHkFund(fund)) {
+      return isHkTradingDay(new Date(today + 'T00:00:00')) ? today : getLatestHkTradingDay(today);
+    }
+    if (isQdiiFund(fund)) {
+      return getPreviousTradingDay(isTradingDay(new Date(today + 'T00:00:00')) ? today : getLatestTradingDay(today));
+    }
+    return isTradingDay(new Date(today + 'T00:00:00')) ? today : getLatestTradingDay(today);
+  }
+
+  // 冻结三态（2026-08-25 最终规则，Web 与 mp1 完全一致）：
+  //   交易日 + 今日正式 NAV 已确认        → { type: 'CONFIRMED_NAV', date }（蓝色今日日期）
+  //   非交易日 + 最近正式 NAV 已确认      → { type: 'CONFIRMED_NAV', date }（蓝色最近净值日期）
+  //   交易日 + 今日 NAV 未发布 + 有估值   → { type: 'TODAY_ESTIMATE' }（灰色「估值」）
+  //   其他                               → { type: 'NO_DATA' }（UI 留空）
+  // 三态只由「今天是否为交易日 + 今日正式净值是否存在」决定；
+  // 禁止「昨日净值蓝标」：交易日今日 NAV 未发布时，latest NAV=昨日也绝不显示蓝色。
+  function getNavDisplayState(cacheEntry, accountFund) {
+    if (!cacheEntry) return { type: 'NO_DATA' };
+    var today = shanghaiDate();
+    // 市场判定需要基金名称：FundStore 条目可能只含 code，名称来自账户基金对象
+    var marketFund = accountFund || cacheEntry;
+    var trading = isHkFund(marketFund)
+      ? isHkTradingDay(new Date(today + 'T00:00:00'))
+      : isTradingDay(new Date());
+    var expected = expectedNavDateFor(marketFund);
+    var nav = cacheEntry.nav || {};
+    var hasConfirmedNav = nav.confirmed === true && nav.date &&
+      Number.isFinite(Number(nav.value)) && Number(nav.value) > 0;
+    var estimateReady = cacheEntry.estimate && cacheEntry.estimate.status === 'READY' &&
+      cacheEntry.estimate.value !== null && cacheEntry.estimate.value !== undefined;
+    if (hasConfirmedNav && (!trading || String(nav.date) === expected)) {
+      return { type: 'CONFIRMED_NAV', date: String(nav.date) };
+    }
+    if (estimateReady) {
       return { type: 'TODAY_ESTIMATE' };
     }
     return { type: 'NO_DATA' };
   }
   window.getNavDisplayState = getNavDisplayState;
 
-  // P3.18-NET：显式刷新时批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
-  // 只在「刷新数据」按钮调用；切 Tab/切数据源/页面加载不调用（读本地缓存，不发起净值请求）。
-  function refreshTodayNav() {
+  // 冻结刷新语义（2026-08-25）：刷新 = 增量检查当前账户全部持仓基金的最新状态。
+  //   - 缓存中已有今日正式 NAV → 直接跳过，不重复请求；
+  //   - 没有今日 NAV → 请求 today-nav（后端缓存优先，幂等）；
+  //     - 返回有效今日净值 → 写入确认 NAV（confirmed=true）；
+  //     - 今日净值未发布 → 保留已有正式 NAV，仅刷新今日估值；
+  //   - 分批并发（每批 MAX_CONCURRENT）覆盖全部持仓，不裁剪前 20 只；
+  //   - 不调用 /api/fund/:code?refresh=1 全量快照，不清空缓存。
+  function currentAccountFunds() {
     var state = window.portfolioState || {};
     var active = typeof state.getActive === 'function' ? state.getActive() : '';
-    var funds = (state.accounts && state.accounts[active] && state.accounts[active].funds) || [];
-    var codes = [];
-    funds.forEach(function (f) { if (f && f.code && codes.indexOf(String(f.code)) === -1) codes.push(String(f.code)); });
-    codes = codes.slice(0, 20); // 并发上限
+    var account = state.accounts && state.accounts[active];
+    if (!account) return [];
+    var funds = typeof state.effectiveFunds === 'function'
+      ? state.effectiveFunds(account)
+      : (account.funds || []);
+    return Array.isArray(funds) ? funds : [];
+  }
+
+  function hasTodayConfirmedNav(code) {
+    var cached = window.fundStore ? window.fundStore.get(code) : null;
+    if (!cached || !cached.nav) return false;
+    return cached.nav.confirmed === true &&
+      cached.nav.date === shanghaiDate() &&
+      Number.isFinite(Number(cached.nav.value)) && Number(cached.nav.value) > 0;
+  }
+
+  function applyTodayNav(code, date, navValue) {
+    var cached = window.fundStore ? window.fundStore.get(code) : null;
+    if (!cached) return;
+    var changePercent = null;
+    var history = cached._history && Array.isArray(cached._history.data) ? cached._history.data : [];
+    var records = history
+      .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
+      .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
+    var prevRecord = null;
+    for (var i = records.length - 1; i >= 0; i -= 1) {
+      if (String(records[i].date).localeCompare(String(date)) < 0) { prevRecord = records[i]; break; }
+    }
+    if (prevRecord && Number(prevRecord.nav) > 0) {
+      changePercent = navValue / Number(prevRecord.nav) - 1;
+    }
+    window.fundStore.update(code, {
+      nav: {
+        status: 'READY',
+        date: date,
+        value: navValue,
+        percent: changePercent !== null ? changePercent : cached.nav.percent,
+        confirmed: true
+      }
+    });
+    if (typeof window.calculateTodayProfit === 'function') {
+      window.fundStore.update(code, { todayProfit: window.calculateTodayProfit(cached) });
+    }
+  }
+
+  // 从缓存直接计算正式净值涨跌幅（优先 nav.percent/changePercent，其次历史反推）。
+  // 与徽章蓝色判定同源：蓝色正式净值 → 今日收益必须用该涨跌幅，绝不用估值顶替。
+  function officialNavChangeFromCache(cached) {
+    if (!cached || !cached.nav || !cached.nav.date) return null;
+    var nav = cached.nav;
+    if (nav.percent !== undefined && nav.percent !== null && Number.isFinite(Number(nav.percent))) {
+      return Number(nav.percent);
+    }
+    if (nav.changePercent !== undefined && nav.changePercent !== null && Number.isFinite(Number(nav.changePercent))) {
+      return Number(nav.changePercent);
+    }
+    var history = cached._history && Array.isArray(cached._history.data) ? cached._history.data : [];
+    var records = history
+      .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
+      .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
+    var idx = -1;
+    for (var i = 0; i < records.length; i += 1) {
+      if (String(records[i].date) === String(nav.date)) { idx = i; break; }
+    }
+    if (idx > 0 && Number(records[idx - 1].nav) > 0) {
+      return Number(nav.value) / Number(records[idx - 1].nav) - 1;
+    }
+    return null;
+  }
+
+  function refreshEstimateOnly(code) {
+    var fund = currentFund(code);
+    var amount = fund ? (Number(fund.amount) || 0) : 0;
+    return estimateFund(code, amount, true)
+      .then(function (res) {
+        if (res && res.success !== false && typeof window.mergeFundData === 'function') {
+          window.mergeFundData(code, { estimate: res });
+        }
+      })
+      .catch(function () { /* 单只失败不影响其他基金 */ });
+  }
+
+  function refreshTodayNav() {
+    var funds = currentAccountFunds();
+    var stale = [];
+    funds.forEach(function (f) {
+      if (!f || !f.code) return;
+      var code = String(f.code);
+      if (!hasTodayConfirmedNav(code) && stale.indexOf(code) === -1) stale.push(code);
+    });
+    if (stale.length === 0) {
+      markEstimatesRefreshed();
+      return Promise.resolve();
+    }
     var currentSource = preferredEstimateSource();
-    return Promise.all(codes.map(function (code) {
-      return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav?source=' + encodeURIComponent(currentSource))
-        .then(function (res) {
-          if (res && res.success) {
+    var queue = stale.slice();
+    var batchSize = MAX_CONCURRENT;
+
+    function runBatch(codes) {
+      return Promise.all(codes.map(function (code) {
+        return requestJson(getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/today-nav?source=' + encodeURIComponent(currentSource))
+          .then(function (res) {
             var c = String(code);
-            var cached = window.fundStore ? window.fundStore.get(c) : null;
-            // P4.5 统一规则：只有后端返回「有效净值数值」（fund_nav 已确认）才写 confirmed NAV。
-            // 后端契约：res.date 恒为 expected 日期；nav=null（before-close / provider-unavailable）
-            // 表示净值未确认，绝不能只看 res.date 就写——否则盘中会把 value=0 的今日日期污染成蓝色。
-            var navValue = Number(res.nav);
-            if (res.date && Number.isFinite(navValue) && navValue > 0 && cached) {
-              var changePercent = null;
-
-              if (cached._history && Array.isArray(cached._history.data)) {
-                var history = cached._history.data;
-                var records = history
-                  .filter(function (item) {
-                    return item && item.date && Number.isFinite(Number(item.nav));
-                  })
-                  .sort(function (left, right) {
-                    return String(left.date).localeCompare(String(right.date));
-                  });
-
-                var prevNav = null;
-
-                if (records.length > 0) {
-                  var sortedDesc = records.slice().reverse();
-                  var prevRecord = sortedDesc.find(function (r) {
-                    return String(r.date).localeCompare(String(res.date)) < 0;
-                  });
-
-                  if (prevRecord) {
-                    prevNav = Number(prevRecord.nav);
-                  }
-                }
-
-                if (prevNav && prevNav > 0) {
-                  changePercent = navValue / prevNav - 1;
-                }
-              }
-
-              window.fundStore.update(c, {
-                nav: {
-                  status: 'READY',
-                  date: res.date,
-                  value: navValue,
-                  percent: changePercent !== null ? changePercent : cached.nav.percent,
-                  confirmed: true
-                }
-              });
-
-              if (typeof window.calculateTodayProfit === 'function') {
-                var updatedProfit = window.calculateTodayProfit(cached);
-
-                window.fundStore.update(c, {
-                  todayProfit: updatedProfit
-                });
-              }
+            var navValue = res && res.nav !== undefined && res.nav !== null ? Number(res.nav) : NaN;
+            if (res && res.success && res.date && Number.isFinite(navValue) && navValue > 0) {
+              applyTodayNav(c, res.date, navValue);
+              return { code: c, nav: true };
             }
-          }
-          return null;
-        })
-        .catch(function () { return null; }); // P4.5：单只失败不影响其他基金，整体 loading 必须结束
-      }))
-        .catch(function () { return null; }).then(function () {
-      // 重新扫描行徽章（不 force，读缓存）
+            // 今日正式 NAV 尚未发布：保留旧 NAV，刷新今日估值
+            return refreshEstimateOnly(c).then(function () { return { code: c, nav: false }; });
+          })
+          .catch(function () {
+            return refreshEstimateOnly(code).then(function () { return { code: code, nav: false }; })
+              .catch(function () { return { code: code, nav: false, error: true }; });
+          });
+      }));
+    }
+
+    function drain() {
+      if (queue.length === 0) return Promise.resolve();
+      return runBatch(queue.splice(0, batchSize)).then(drain);
+    }
+
+    return drain().catch(function () { /* 整体兜底：不影响后续扫描 */ }).then(function () {
       if (typeof scan === 'function') scan(false, true);
       markEstimatesRefreshed();
     });
@@ -210,7 +391,7 @@
     var meta = row && row.querySelector('.fund-info small');
     if (!meta || !fund) return;
     // 二次验收：兜底与小程序 fundSectors.sectorNameOf 统一为「其他」（双端板块显示一致）
-    var sector = FUND_SECTORS[fund.code] || fund.sector || fund.category || '\u5176\u4ed6';
+    var sector = FUND_SECTORS[fund.code] || fund.sector || sectorNameOfFund(fund) || fund.category || '\u5176\u4ed6';
     var text = fund.code + ' \u00b7 ' + sector;
     // This function is called by a DOM observer.  Do not rewrite an already
     // correct value, otherwise replaceChildren triggers the observer again.
@@ -385,13 +566,30 @@
 
     var cached = window.fundStore.get(code);
 
-    // Resolve change & profit（数值层不变：今日收益仍由 calculateTodayProfit 决定）
-    var change = cached.todayProfit.percent;
-    var profit = cached.todayProfit.value;
-
     // P4.5 统一三态徽章（唯一判定入口 getNavDisplayState，与 mp1 完全一致）：
     //   CONFIRMED_NAV → 蓝色「实际净值日期」；TODAY_ESTIMATE → 灰色「估值」；NO_DATA → 灰色「暂无数据」
-    var displayState = getNavDisplayState(cached);
+    var displayState = getNavDisplayState(cached, fund);
+    // 今日收益与徽章严格同源（通用规则，不针对任何单只基金）：
+    //   蓝色正式净值 → 净值涨跌幅；灰色估值 → 今日估值；无数据 → 待估值
+    var amount = fund ? (Number(fund.amount) || 0) : 0;
+    var change = null;
+    var profit = null;
+    if (displayState.type === 'CONFIRMED_NAV') {
+      change = officialNavChangeFromCache(cached);
+      profit = change === null ? null : amount * change;
+    } else if (displayState.type === 'TODAY_ESTIMATE') {
+      change = (cached.estimate && cached.estimate.value !== null && cached.estimate.value !== undefined)
+        ? Number(cached.estimate.value) : null;
+      profit = change === null ? null : amount * change;
+    }
+    // 同步预计算字段，保证账户汇总/排序等共用同一口径
+    if (cached.todayProfit && (change !== null || profit !== null)) {
+      cached.todayProfit.percent = change;
+      cached.todayProfit.value = profit;
+      cached.todayProfit.status = change === null ? 'EMPTY' : 'READY';
+      // 同步到账户基金对象（f.today / f.todayEstimate），保证顶部汇总/排序同一口径
+      if (typeof window.fundStore.propagate === 'function') window.fundStore.propagate(code);
+    }
     if (displayState.type === 'CONFIRMED_NAV') {
       markNavUpdated(row, displayState.date, fund);
     } else if (displayState.type === 'TODAY_ESTIMATE') {
@@ -441,7 +639,8 @@
     if (hasValidCache && !force && row.dataset.estimateState !== 'loading' && !estimateOnly) {
       renderRowFromStore(row, code, fund);
       
-      // Trigger a non-blocking silent refresh in the background
+      // 静默后台增量：读服务端缓存快照（fast 不触发 importFund）同步最新正式净值日期 + 今日估值，
+      // 不清缓存、不强制重拉——保证登录/页面加载后 QDII 等基金能显示真实 NAV 日期而非一直估值。
       window.fundDataService.refresh(code, false).then(function() {
         renderRowFromStore(row, code, fund);
       }).catch(function() {});

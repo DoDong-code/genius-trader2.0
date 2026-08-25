@@ -1,5 +1,5 @@
 import { http } from '../../utils/request.js';
-import { shanghaiDate, officialNavChange, isQdiiFund, getPreviousTradingDay, inferDataStatusFromEstimate, isTradingDay, getNavDisplayState } from '../../utils/tradingDay.js';
+import { shanghaiDate, officialNavChange, expectedNavDateFor, inferDataStatusFromEstimate, isTradingDay, isHkFund, isHkTradingDay, getNavDisplayState } from '../../utils/tradingDay.js';
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct, money } from '../../utils/format.js';
 const app = getApp();
@@ -315,12 +315,12 @@ Page({
 
     // 自动初始化/预填充 navDateMap，让已有最新净值（周末或今日已更新）的行在首屏秒出蓝色徽章
     const todayStr = shanghaiDate();
-    const isTr = isTradingDay(new Date());
     const initialMap = { ...(this.data.navDateMap || {}) };
     let mapChanged = false;
     funds.forEach(f => {
       const navDate = (f.latest_nav && f.latest_nav.date) || f.navUpdatedAt;
-      const expectedNavDate = isQdiiFund(f) ? getPreviousTradingDay(todayStr) : todayStr;
+      const expectedNavDate = expectedNavDateFor(f, todayStr);
+      const isTr = isHkFund(f) ? isHkTradingDay(new Date()) : isTradingDay(new Date());
       if (navDate && (navDate === expectedNavDate || (!isTr && navDate))) {
         if (!initialMap[f.code] || initialMap[f.code].day !== todayStr) {
           const officialChange = officialNavChange(f.history || [], navDate);
@@ -356,25 +356,28 @@ Page({
 
       // 预估百分比/收益计算（与 filterAndSortFunds 的逻辑完全对齐，彻底消除账户摘要不同步）
       const cached = this.data.navDateMap && this.data.navDateMap[f.code];
-      const expectedNavDate = isQdiiFund(f) ? getPreviousTradingDay(todayStr) : todayStr;
-      const officialUpdated = Boolean(
-        cached && cached.navDate && cached.navDate === expectedNavDate && Number.isFinite(cached.officialChange)
-      );
-      
-      let finalTodayPct = Number(f.today) || 0;
+      const expectedNavDate = expectedNavDateFor(f, todayStr);
+      // 正式净值已发布（navDate 命中期望日期）→ 今日收益必须用净值涨跌幅，估值绝不顶替净值
+      const officialUpdated = Boolean(cached && cached.navDate && cached.navDate === expectedNavDate);
+      let officialChange = null;
       if (officialUpdated) {
-        finalTodayPct = Number(cached.officialChange);
+        officialChange = (cached && Number.isFinite(Number(cached.officialChange))) ? Number(cached.officialChange) : null;
+        if (officialChange === null && f.latest_nav && Number.isFinite(Number(f.latest_nav.changePercent))) {
+          officialChange = Number(f.latest_nav.changePercent);
+        }
       }
       
+      let finalTodayPct = Number(f.today) || 0;
       let finalTodayProfit = Number.isFinite(Number(f.todayEstimate))
         ? Number(f.todayEstimate)
         : amt * finalTodayPct;
       if (officialUpdated) {
-        finalTodayProfit = amt * finalTodayPct;
+        finalTodayPct = officialChange;
+        finalTodayProfit = officialChange === null ? null : amt * officialChange;
       }
 
       totalAssets += amt;
-      todayProfit += finalTodayProfit;
+      todayProfit += Number.isFinite(Number(finalTodayProfit)) ? Number(finalTodayProfit) : 0;
       totalProfit += profitVal;
     });
 
@@ -690,35 +693,45 @@ Page({
       // navDateMap 里的 source 优先（如果该基金有第三方已结算净值）
       if (cached && cached.source) source = cached.source;
       const navDate = cached ? cached.navDate : null;
-      // 是否存在有效估值/数据源数据：有净值日期 或 有限今日涨跌幅 / 估值金额（避免 Number(null)=0 误判）
-      const hasEstimateData = Boolean(navDate)
-        || Number.isFinite(Number(f.today))
+      // 是否存在今日估值数据：有限今日涨跌幅 / 估值金额（navDate 存在不代表有估值，避免昨日净值误判为估值）
+      const hasEstimateData = Number.isFinite(Number(f.today))
         || Number.isFinite(Number(f.todayEstimate));
-      // P4.5 统一三态：蓝色仅来自后端确认净值（fund_nav 的 latest_nav，含有效正值）。
-      // 后端 latest_nav = {date, nav, acc_nav} 不含 confirmed 字段，故以 (date 存在 && nav>0) 推导已确认事实；
-      // 灰度一律「估值」，不再用 provider 名 / 时间 / 开盘与否推导（与网页端 live-estimates.js 一致）。
-      // 交易时段后端 dataStatus 可能为 NO_DATA（confirmedNavDate≠预期日），但 latest_nav 仍持有最近已确认净值，
-      // 据此显示蓝色 MMDD，与网页端一致，消除 Web/mp1 不一致。
+      // 冻结三态（2026-08-25）：交易日 + 今日 NAV → 蓝今日日期；交易日 + 今日 NAV 未发布 → 灰「估值」；
+      // 非交易日 → 蓝最近净值；无数据 → 留空。禁止「昨日净值蓝标」。
+      const todayStr = shanghaiDate();
+      const isTr = isHkFund(f) ? isHkTradingDay(new Date()) : isTradingDay(new Date());
       const ln = f.latest_nav;
       const navConfirmed = f.dataStatus === 'CONFIRMED_NAV' ||
         Boolean(ln && ln.date && Number.isFinite(Number(ln.nav)) && Number(ln.nav) > 0);
       const displayNavDate = navDate || (f.latest_nav && f.latest_nav.date) || null;
-      const badge = getNavDisplayState({ navConfirmed, navDate: displayNavDate, estimateReady: hasEstimateData });
+      const badge = getNavDisplayState({
+        navConfirmed,
+        navDate: displayNavDate,
+        estimateReady: hasEstimateData,
+        isTradingDayFlag: isTr,
+        today: todayStr,
+        fund: f
+      });
 
       // 与蓝色「已更新」徽章同源：最新 NAV 已是今天（QDII 为前一交易日）的正式净值时，
       // 今日收益/收益率改用官方当日涨跌幅，避免「蓝日期 + 收益按旧 NAV 算」错位。
       // （对齐网页端 resolveTodayData 的 officialUpdated 分支；不新增数据层、不改算法）
-      const todayStr = shanghaiDate();
-      const expectedNavDate = isQdiiFund(f) ? getPreviousTradingDay(todayStr) : todayStr;
-      const officialUpdated = Boolean(
-        cached && cached.navDate && cached.navDate === expectedNavDate && Number.isFinite(cached.officialChange)
-      );
+      const expectedNavDate = expectedNavDateFor(f, todayStr);
+      // 正式净值已发布（navDate 命中期望日期）→ 今日收益用净值涨跌幅，估值绝不顶替净值
+      const officialUpdated = Boolean(cached && cached.navDate && cached.navDate === expectedNavDate);
+      let officialChange = null;
+      if (officialUpdated) {
+        officialChange = (cached && Number.isFinite(Number(cached.officialChange))) ? Number(cached.officialChange) : null;
+        if (officialChange === null && ln && Number.isFinite(Number(ln.changePercent))) {
+          officialChange = Number(ln.changePercent);
+        }
+      }
       let finalTodayPct = todayPct;
       let finalTodayProfit = todayProfitVal;
       if (officialUpdated) {
         // 与蓝徽章同一净值分支：收益率 = 官方当日涨跌幅，收益 = 持仓金额 × 官方涨跌幅
-        finalTodayPct = Number(cached.officialChange);
-        finalTodayProfit = amt * finalTodayPct;
+        finalTodayPct = officialChange;
+        finalTodayProfit = officialChange === null ? null : amt * officialChange;
       }
 
       return {
@@ -729,7 +742,9 @@ Page({
         holdingProfitStr: `${profit >= 0 ? '+' : '-'}¥${money(Math.abs(profit))}`,
         holdingRateStr: pct(holdRate),
         todayProfit: finalTodayProfit,
-        todayProfitStr: `${finalTodayProfit >= 0 ? '+' : '-'}¥${money(Math.abs(finalTodayProfit))}`,
+        todayProfitStr: Number.isFinite(Number(finalTodayProfit))
+          ? `${finalTodayProfit >= 0 ? '+' : '-'}¥${money(Math.abs(finalTodayProfit))}`
+          : '—',
         todayProfitPctStr: pct(finalTodayPct),
         // UI 展示：去掉蓝色徽章里的「已更新」前缀，只保留日期，减少行高避免列表下方被遮挡
         dataBadge: badge ? { ...badge, text: badge.text.replace(/^已更新/, '') } : null

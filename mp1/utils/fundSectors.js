@@ -10,6 +10,7 @@ export const FUND_SECTORS_BY_CODE = {
   '025422': '数字经济', '014847': '债券', '008173': '债券',
   '020741': '债券', '015736': '纯债', '380006': '纯债',
   '004103': '债券', '009690': '灵活配置', '000001': '混合', '008702': '基金'
+  , '018147': '全球科技', '016665': '全球科技'
 };
 
 // 板块 → 资产大类（与 analysis.js assetClassOf 的 ASSET_CLASS_BY_SECTOR 对齐）
@@ -34,8 +35,10 @@ export function sectorNameOf(f) {
   const byCode = FUND_SECTORS_BY_CODE[String(f.code || '')];
   if (byCode) return byCode;
   if (f.sector) return String(f.sector);
-  if (f.category) return String(f.category);
   const name = String(f.name || '');
+  if (/恒生|港股|港美|香港/.test(name)) return '恒生科技';
+  if (/QDII|全球|海外|新兴市场|纳斯达克|纳指|标普|日经|美股|道琼斯|欧洲/.test(name)) return '全球科技';
+  if (f.category) return String(f.category);
   for (const item of CLASS_BY_NAME) {
     if (item.re.test(name)) return item.cls;
   }

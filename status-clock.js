@@ -91,7 +91,8 @@
     if (typeof window.triggerSourceRefresh === 'function') {
       window.triggerSourceRefresh({ from: from, to: key });
     } else if (typeof window.refreshFundEstimates === 'function') {
-      window.refreshFundEstimates(true);
+      // 兜底也必须只刷估值：切源绝不重拉 NAV/历史
+      window.refreshFundEstimates(true, { estimateOnly: true });
     }
   }
 
@@ -198,13 +199,11 @@
     button.querySelector('span').textContent = '刷新中…';
 
     var refreshTasks = [];
-    if (typeof window.refreshFundEstimates === 'function') {
-      refreshTasks.push(Promise.resolve(window.refreshFundEstimates()));
-    }
     if (typeof window.refreshMarketIndices === 'function') {
       refreshTasks.push(Promise.resolve(window.refreshMarketIndices()));
     }
-    // P3.18-NET：刷新数据按钮同步当天净值（后端缓存优先，命中不请求 provider；不清空已有当天净值）
+    // 冻结刷新语义：刷新 = 增量检查当前账户全部持仓基金（已有今日 NAV 跳过，
+    // 未发布则保留旧 NAV 并刷新今日估值），不调用全量 snapshot 刷新。
     if (typeof window.refreshTodayNav === 'function') {
       refreshTasks.push(Promise.resolve(window.refreshTodayNav()));
     }

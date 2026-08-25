@@ -62,11 +62,68 @@
         d.setDate(d.getDate() - 1);
       }
     },
+
+    // 港股 / 恒生科技类基金：按「当日」规则处理（与美股 QDII 的 T+1 披露规则严格区分）。
+    isHkFund: function(fund) {
+      if (!fund) return false;
+      var fundName = String(fund.name || fund.fund_name || '');
+      return /恒生|港股|港美|香港/.test(fundName);
+    },
+
+    // 2026 年香港公众假期（香港政府宪报）：周末 + 以下日期为非交易日
+    isHkTradingDay: function(date) {
+      var weekday = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Shanghai', weekday: 'short'
+      }).format(date);
+      if (weekday === 'Sat' || weekday === 'Sun') return false;
+      var yyyymmdd = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+      }).format(date);
+      var hkHolidays = [
+        '2026-01-01',
+        '2026-02-17', '2026-02-18', '2026-02-19',
+        '2026-04-03', '2026-04-04', '2026-04-06',
+        '2026-05-01', '2026-05-25',
+        '2026-06-19', '2026-07-01', '2026-09-26',
+        '2026-10-01', '2026-10-19',
+        '2026-12-25', '2026-12-26'
+      ];
+      return hkHolidays.indexOf(yyyymmdd) === -1;
+    },
+
+    getLatestHkTradingDay: function(dateStr) {
+      var parts = dateStr.split('-');
+      var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      while (true) {
+        var yyyy = d.getFullYear();
+        var mm = String(d.getMonth() + 1).padStart(2, '0');
+        var dd = String(d.getDate()).padStart(2, '0');
+        if (this.isHkTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+          return yyyy + '-' + mm + '-' + dd;
+        }
+        d.setDate(d.getDate() - 1);
+      }
+    },
+
+    // 基金「今日正式净值」业务日期：
+    //   A股            → 中国市场交易日（当日）
+    //   港股/恒生科技   → 香港市场交易日（当日）
+    //   QDII/美股/全球  → 实际 NAV 披露日期（前一交易日），绝不强制等于中国本地日期
+    expectedNavDateFor: function(fund, dateStr) {
+      var base = dateStr || this.shanghaiDate();
+      if (this.isHkFund(fund)) {
+        return this.isHkTradingDay(new Date(base + 'T00:00:00')) ? base : this.getLatestHkTradingDay(base);
+      }
+      if (this.isQdiiFund(fund)) {
+        return this.getPreviousTradingDay(this.isTradingDay(new Date(base + 'T00:00:00')) ? base : this.getLatestTradingDay(base));
+      }
+      return this.isTradingDay(new Date(base + 'T00:00:00')) ? base : this.getLatestTradingDay(base);
+    },
     
     isQdiiFund: function(fund) {
       if (!fund) return false;
       var fundName = String(fund.name || fund.fund_name || '');
-      if (/恒生|港股|港美/.test(fundName)) return false;
+      if (/恒生|港股|港美|香港/.test(fundName)) return false;
       var QDII_CODES = { '022184': true, '014002': true };
       if (QDII_CODES[String(fund.code || '')]) return true;
       return /QDII|全球|海外|纳斯达克|纳指|标普|日经|德国|法国|印度|越南|美国|道琼斯|欧洲/i.test(fundName);
@@ -140,10 +197,11 @@
       return { value: null, percent: null, status: 'ERROR' };
     }
     
-    // 2. Try official nav change
-    if (change === null && fund.nav && fund.nav.status === 'READY') {
+    // 2. Try official nav change（只要存在有效确认净值日期就走净值口径，不依赖 status 字段）
+    if (change === null && fund.nav && fund.nav.date &&
+        Number.isFinite(Number(fund.nav.value)) && Number(fund.nav.value) > 0) {
       var navDate = fund.nav.date;
-      var expectedNavDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+      var expectedNavDate = utils.expectedNavDateFor(fund, sToday);
       var isTr = utils.isTradingDay(new Date());
       var isOfficialUpdated = Boolean(navDate === expectedNavDate || (!isTr && navDate));
       if (isOfficialUpdated) {
@@ -151,20 +209,27 @@
         if (change === null || change === undefined || !Number.isFinite(change)) {
           change = utils.officialNavChange(fund, navDate);
         }
+        // 通用规则：正式净值已就位时，今日收益必须用净值涨跌幅；
+        // 若暂时无法计算，宁可显示等待，绝不用盘中估值顶替净值。
+        if (change === null || change === undefined || !Number.isFinite(change)) {
+          return { value: null, percent: null, status: 'LOADING' };
+        }
       }
     }
     
     // 3. Try intraday estimate change
     if (change === null && fund.estimate && fund.estimate.status === 'READY') {
       var estDate = fund.estimate.date;
-      var expectedEstDate = utils.isQdiiFund(fund) ? utils.getPreviousTradingDay(sToday) : sToday;
+      var expectedEstDate = utils.expectedNavDateFor(fund, sToday);
       if (estDate === expectedEstDate || estDate === sToday || !utils.isTradingDay(new Date())) {
         change = fund.estimate.value;
       }
     }
     
-    // 4. Fallback: try latest NAV change percent
-    if (change === null && fund.nav && fund.nav.status === 'READY') {
+    // 4. Fallback: try latest NAV change percent（仅限「今日 NAV 已发布」或非交易日；
+    //    交易日今日 NAV 未发布时禁止把昨日涨跌幅当成今日收益）
+    if (change === null && fund.nav && fund.nav.status === 'READY' &&
+        (fund.nav.date === sToday || !utils.isTradingDay(new Date()))) {
       change = (fund.nav.percent !== undefined && fund.nav.percent !== null) ? fund.nav.percent : fund.nav.changePercent;
       if (change === null || change === undefined || !Number.isFinite(change)) {
         change = utils.officialNavChange(fund, fund.nav.date);
@@ -206,9 +271,7 @@
       
       if (l_nav && l_nav.date) {
         const sToday = utils.shanghaiDate();
-        const maxAllowedDate = utils.isQdiiFund(fund)
-          ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
-          : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+        const maxAllowedDate = utils.expectedNavDateFor(fund, sToday);
         const isCachedInvalid = fund.nav.date && (String(fund.nav.date).localeCompare(maxAllowedDate) > 0 || !fund.nav.confirmed);
         // Prevent date regression: don't overwrite with older date unless the cached date is invalid
         if (isCachedInvalid || !fund.nav.date || String(l_nav.date).localeCompare(String(fund.nav.date)) >= 0) {
@@ -230,7 +293,16 @@
       
       if (Array.isArray(snap.history) && snap.history.length > 0) {
         console.log('[DATA][MERGE] code=' + code + ' field=history count=' + snap.history.length);
-        fund._history.data = snap.history;
+        // 按日期合并、新日期优先：禁止一次较旧响应把较新历史（如 0824）覆盖成旧日期（0821）。
+        const byDate = new Map();
+        (Array.isArray(fund._history.data) ? fund._history.data : []).forEach(h => {
+          if (h && h.date) byDate.set(String(h.date), h);
+        });
+        snap.history.forEach(h => {
+          if (h && h.date) byDate.set(String(h.date), h);
+        });
+        fund._history.data = [...byDate.values()]
+          .sort((left, right) => String(left.date).localeCompare(String(right.date)));
         fund._history.status = 'READY';
         anyMerged = true;
       }
@@ -256,9 +328,7 @@
       
       if (estDate) {
         const sToday = utils.shanghaiDate();
-        const maxAllowedDate = utils.isQdiiFund(fund)
-          ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
-          : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+        const maxAllowedDate = utils.expectedNavDateFor(fund, sToday);
         const isCachedInvalid = fund.estimate.date && String(fund.estimate.date).localeCompare(maxAllowedDate) > 0;
         if (isCachedInvalid || !fund.estimate.date || String(estDate).localeCompare(String(fund.estimate.date)) >= 0) {
           console.log('[DATA][MERGE] code=' + code + ' field=estimate date=' + estDate);
@@ -294,9 +364,7 @@
     
     if (data.nav && data.nav.date) {
       const sToday = utils.shanghaiDate();
-      const maxAllowedDate = utils.isQdiiFund(fund)
-        ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
-        : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+      const maxAllowedDate = utils.expectedNavDateFor(fund, sToday);
       const isCachedInvalid = fund.nav.date && (String(fund.nav.date).localeCompare(maxAllowedDate) > 0 || !fund.nav.confirmed);
       if (isCachedInvalid || !fund.nav.date || String(data.nav.date).localeCompare(String(fund.nav.date)) >= 0) {
         console.log('[DATA][MERGE] code=' + code + ' field=nav date=' + data.nav.date);
@@ -359,8 +427,27 @@
   const storeMethods = {
     get: function(code) {
       if (!this[code]) {
+        // 缓存条目带上基金名称：三态/板块等按市场判定依赖名称（QDII/港股识别），
+        // 仅凭 code 会把海外基金误判为 A 股。
+        let displayName = String(code || '');
+        try {
+          const s = window.portfolioState;
+          if (s && s.accounts) {
+            Object.keys(s.accounts).some(accName => {
+              const acc = s.accounts[accName];
+              if (!acc || !Array.isArray(acc.funds)) return false;
+              const hit = acc.funds.find(f => f && String(f.code) === String(code));
+              if (hit) {
+                displayName = String(hit.name || hit.fund_name || code);
+                return true;
+              }
+              return false;
+            });
+          }
+        } catch (e) { /* 名称缺失不影响缓存创建 */ }
         this[code] = {
           code: code,
+          name: displayName,
           nav: { value: null, date: null, status: 'EMPTY' },
           estimate: { value: null, date: null, status: 'EMPTY', confidence: null },
           todayProfit: { value: null, percent: null, status: 'EMPTY' },
@@ -763,9 +850,7 @@
           
           const utils = window.fundStoreUtils;
           const sToday = utils.shanghaiDate();
-          const maxAllowedDate = utils.isQdiiFund(fund)
-            ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
-            : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+          const maxAllowedDate = utils.expectedNavDateFor(fund, sToday);
           
           if (savedFund.nav && savedFund.nav.date) {
             const dateStr = String(savedFund.nav.date);
@@ -861,9 +946,7 @@
             const utils = window.fundStoreUtils;
             const sToday = utils.shanghaiDate();
             const fundForQdiiCheck = window.fundStore ? window.fundStore.get(f.code) : f;
-            const maxAllowedDate = utils.isQdiiFund(fundForQdiiCheck)
-              ? utils.getPreviousTradingDay(utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday))
-              : (utils.isTradingDay(new Date()) ? sToday : utils.getLatestTradingDay(sToday));
+            const maxAllowedDate = utils.expectedNavDateFor(fundForQdiiCheck, sToday);
             
             if (f.navUpdatedAt) {
               const dateStr = String(f.navUpdatedAt);
