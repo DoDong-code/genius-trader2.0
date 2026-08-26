@@ -46,13 +46,27 @@ function routeMatch(pathname, expression) {
   return match ? match.slice(1).map(decodeURIComponent) : null;
 }
 
+const MAX_BODY_BYTES = Math.max(1, Number(process.env.MAX_BODY_BYTES || 32 * 1024 * 1024)); // 32MB 硬上限，防止大 JSON 撑爆堆（解 OOM）
 function readJsonBody(request) {
   return new Promise((resolve, reject) => {
-    let chunkStr = '';
-    request.on('data', chunk => { chunkStr += chunk; });
+    const chunks = [];
+    let total = 0;
+    request.on('data', chunk => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+      total += buf.length;
+      if (total > MAX_BODY_BYTES) {
+        // 超过硬上限：立即拒绝并销毁连接，避免巨型 body 驻留堆中
+        reject(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
+        request.destroy();
+        return;
+      }
+      chunks.push(buf);
+    });
     request.on('end', () => {
       try {
-        resolve(chunkStr ? JSON.parse(chunkStr) : {});
+        const raw = chunks.length ? Buffer.concat(chunks).toString('utf8') : '';
+        if (total > 512 * 1024) console.log('[DIAG] large request body bytes=' + total);
+        resolve(raw ? JSON.parse(raw) : {});
       } catch (e) {
         reject(Object.assign(new Error('Invalid JSON'), { statusCode: 400 }));
       }
@@ -209,7 +223,9 @@ async function handleFundApi(request, response, url) {
   }
 
   if (url.pathname === '/api/auth/login' && request.method === 'POST') {
-    const body = await readJsonBody(request);
+    let body;
+    try { body = await readJsonBody(request); }
+    catch (e) { sendJson(response, e.statusCode || 400, { success: false, error: e.message }); return true; }
     const { login } = require('../services/authService');
     const result = await login(body.email, body.password);
     sendJson(response, 200, { success: true, ...result });
@@ -246,7 +262,9 @@ async function handleFundApi(request, response, url) {
     const { getUserState, saveUserState, isEmptyStateOverwrite } = require('../services/accountStateService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0; // 匿名小程序用户用 userId=0
-    const body = await readJsonBody(request);
+    let body;
+    try { body = await readJsonBody(request); }
+    catch (e) { sendJson(response, e.statusCode || 400, { success: false, error: e.message }); return true; }
     if (!body.state) {
       sendJson(response, 400, { success: false, error: '缺少 state' });
       return true;
@@ -282,7 +300,9 @@ async function handleFundApi(request, response, url) {
     const { createBackup, listBackups } = require('../services/accountBackupService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0;
-    const body = await readJsonBody(request);
+    let body;
+    try { body = await readJsonBody(request); }
+    catch (e) { sendJson(response, e.statusCode || 400, { success: false, error: e.message }); return true; }
     if (!body.state) {
       sendJson(response, 400, { success: false, error: '缺少 state' });
       return true;

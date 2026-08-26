@@ -77,17 +77,25 @@
   }
 
   async function logout() {
+    const t0 = Date.now();
     const token = state.token;
-    // 退出前把当前状态（含各账户投资策略等）同步到云端，避免丢失
+    // 退出前把当前状态（含各账户投资策略等）同步到云端；但带 9s 硬上限，超时即放弃，绝不阻塞本地退出
     if (token && typeof window.backupToCloud === 'function') {
-      try { await window.backupToCloud(); } catch (e) { /* 云端同步失败不阻塞退出 */ }
+      try {
+        await Promise.race([
+          window.backupToCloud(),
+          new Promise(function (resolve) { setTimeout(resolve, 9000); })
+        ]);
+      } catch (e) { /* 云端同步失败/超时 不阻塞退出 */ }
     }
     state.user = null;
     state.token = '';
     localStorage.removeItem(TOKEN_KEY);
     if (typeof window.clearLocalData === 'function') window.clearLocalData();
     notify();
+    console.log('[AUTH][DIAG] logout local-clear done in ' + (Date.now() - t0) + 'ms (含云端备份等待)');
     if (token) {
+      // 退出请求 fire-and-forget，不 await，绝不阻塞
       fetch('/api/auth/logout', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token }

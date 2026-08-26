@@ -665,6 +665,10 @@
   }
 
   function scan(force, estimateOnly) {
+    // 退出/未登录时不扫描估值：避免旧账号后台任务在退出后继续抓取、持有旧数据引用
+    var st = window.portfolioState;
+    if (!st || typeof st.getActive !== 'function' || !st.getActive()) return;
+    if (!window.auth || !window.auth.state || !window.auth.state.token) return;
     document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
       // 初次/切换 tab 进入：不强制重抓基金详情，走服务端缓存，避免多基金排队卡顿
       hydrateRow(row, force, estimateOnly);

@@ -803,7 +803,19 @@
   }
 
   let cloudTimer=null;
+  let cloudSaveInFlight=false; // 单飞守卫：同一时刻只允许一个在途云端 PUT，避免大 JSON 并发叠加撑爆内存
+  let syncGeneration=0; // 退出/登录时自增，作废在途/待发的旧账号 PUT（防旧账号数据覆盖新账号）
+  window.__syncGeneration=syncGeneration;
+  let __lastPersistLog=0;
+  function logPersistSize(tag,bytes){
+    const now=Date.now();
+    if(bytes>1024*1024 || now-__lastPersistLog>60000){
+      console.log('[SYNC][DIAG] '+tag+' buildPersistedBytes='+bytes+' (~'+Math.round(bytes/1024)+'KB)');
+      __lastPersistLog=now;
+    }
+  }
   function scheduleCloudSave(){
+    if(cloudSaveInFlight)return; // 已有在途 PUT，避免叠加大 JSON
     if(!window.auth||!window.auth.state||!window.auth.state.token)return;
     // 同步闸门：云端恢复完成前，禁止任何 PUT /api/account/state
     if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true){
@@ -812,13 +824,26 @@
     }
     clearTimeout(cloudTimer);
     cloudTimer=setTimeout(()=>{
+      if(cloudSaveInFlight)return; // 双检：在途 PUT 期间不再叠加
       // 触发时二次校验（防止计时器跨越登录/恢复边界）
       if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true)return;
+      const myGen=syncGeneration; // 捕获代际：PUT 期间若发生退出/登录则作废本次写入
+      cloudSaveInFlight=true;
+      const controller=(typeof AbortController==='function')?new AbortController():null;
+      const timer=controller?setTimeout(function(){controller.abort();},20000):null;
+      const body=JSON.stringify({state:buildPersisted()});
+      logPersistSize('scheduleCloudSave',body.length);
       fetch('/api/account/state',{
         method:'PUT',
         headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
-        body:JSON.stringify({state:buildPersisted()})
-      }).catch(()=>{});
+        body:body,
+        signal:controller?controller.signal:undefined
+      }).then(function(res){
+        if(myGen!==syncGeneration){console.log('[SYNC] SAVE_STALE_DROPPED gen changed');}
+      }).catch(function(){}).finally(function(){
+        if(timer!==null)clearTimeout(timer);
+        cloudSaveInFlight=false;
+      });
     },400);
   }
 
@@ -1194,6 +1219,9 @@
   // 退出登录：清空本地账户数据（云端数据已备份，登录后再恢复）。
   // 清空期间禁止云端 PUT（cloudSyncReady=false），防止空 state 写回云端。
   function clearLocalData(){
+    clearTimeout(cloudTimer); // 取消待发的延迟云端保存（防止退出后仍 PUT 空/旧 state）
+    cloudSaveInFlight=false;
+    syncGeneration+=1; window.__syncGeneration=syncGeneration; // 作废所有在途/待发的旧账号 PUT
     Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
     window.accountRestoreStatus = 'ready';
     window.cloudSyncReady = false;
@@ -1229,18 +1257,37 @@
   window.getSyncAccountMeta=function(name){return syncMetaStore[name]||null;};
   // 手动操作：备份云端 / 恢复本地
   async function backupToCloud(){
+    if(cloudSaveInFlight)return false; // 已有在途保存，避免叠加大 JSON
     if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
     if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true){
       console.log('[SYNC] BACKUP_BLOCKED reason=not-ready status='+window.accountRestoreStatus);
       return false;
     }
-    const response=await fetch('/api/account/state',{
-      method:'PUT',
-      headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
-      body:JSON.stringify({state:buildPersisted()})
-    });
-    if(!response.ok)throw new Error('HTTP '+response.status);
-    return true;
+    const myGen=syncGeneration; // 捕获代际：若退出/登录发生在 PUT 期间，作废本次写入
+    cloudSaveInFlight=true;
+    const controller=(typeof AbortController==='function')?new AbortController():null;
+    const timer=controller?setTimeout(function(){controller.abort();},20000):null;
+    try{
+      const body=JSON.stringify({state:buildPersisted()});
+      logPersistSize('backupToCloud',body.length);
+      const response=await fetch('/api/account/state',{
+        method:'PUT',
+        headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
+        body:body,
+        signal:controller?controller.signal:undefined
+      });
+      if(myGen!==syncGeneration){console.log('[SYNC] BACKUP_STALE_DROPPED gen changed'); return false;}
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      return true;
+    }catch(e){
+      if(myGen!==syncGeneration)return false; // 代际已变，静默丢弃
+      if(e&&e.name==='AbortError'){console.log('[SYNC] BACKUP_ABORTED timeout');}
+      else{console.warn('[SYNC] BACKUP_FAILED',e&&e.message);}
+      return false;
+    }finally{
+      if(timer!==null)clearTimeout(timer);
+      cloudSaveInFlight=false;
+    }
   }
   async function restoreFromCloud(){
     if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
