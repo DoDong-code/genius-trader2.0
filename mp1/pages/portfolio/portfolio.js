@@ -322,17 +322,24 @@ Page({
       const expectedNavDate = expectedNavDateFor(f, todayStr);
       const isTr = isHkFund(f) ? isHkTradingDay(new Date()) : isTradingDay(new Date());
       if (navDate && (navDate === expectedNavDate || (!isTr && navDate))) {
-        if (!initialMap[f.code] || initialMap[f.code].day !== todayStr) {
-          const officialChange = officialNavChange(f.history || [], navDate);
-          initialMap[f.code] = {
-            navDate,
-            source: f.estimateSource || 'local',
-            officialChange,
-            day: todayStr,
-            kind: 'updated'
-          };
-          mapChanged = true;
-        }
+          if (!initialMap[f.code] || initialMap[f.code].day !== todayStr) {
+            // 修复：officialUpdated 时今日收益用官方当日涨跌幅；优先 latest_nav.changePercent（权威，与详情页同源），
+            // 回退 officialNavChange(f.history)。避免本地 history 未含今日 NAV 时 changePercent 误为 null。
+            let officialChange = null;
+            if (f.latest_nav && Number.isFinite(Number(f.latest_nav.changePercent))) {
+              officialChange = Number(f.latest_nav.changePercent);
+            } else {
+              officialChange = officialNavChange(f.history || [], navDate);
+            }
+            initialMap[f.code] = {
+              navDate,
+              source: f.estimateSource || 'local',
+              officialChange,
+              day: todayStr,
+              kind: 'updated'
+            };
+            mapChanged = true;
+          }
       }
     });
     if (mapChanged) {
@@ -361,12 +368,15 @@ Page({
       const officialUpdated = Boolean(cached && cached.navDate && cached.navDate === expectedNavDate);
       let officialChange = null;
       if (officialUpdated) {
-        officialChange = (cached && Number.isFinite(Number(cached.officialChange))) ? Number(cached.officialChange) : null;
+        // 修复：区分 null（未知）与真实 0（平盘）。原 Number.isFinite(Number(null)) 误判为 0，
+        // 导致 officialChange 误用 null→0、跳过 changePercent 兜底（原 BUG：今日收益栏恒为 0）。
+        const raw = cached && cached.officialChange;
+        officialChange = (raw != null && Number.isFinite(Number(raw))) ? Number(raw) : null;
         if (officialChange === null && f.latest_nav && Number.isFinite(Number(f.latest_nav.changePercent))) {
           officialChange = Number(f.latest_nav.changePercent);
         }
       }
-      
+
       let finalTodayPct = Number(f.today) || 0;
       let finalTodayProfit = Number.isFinite(Number(f.todayEstimate))
         ? Number(f.todayEstimate)
@@ -721,7 +731,9 @@ Page({
       const officialUpdated = Boolean(cached && cached.navDate && cached.navDate === expectedNavDate);
       let officialChange = null;
       if (officialUpdated) {
-        officialChange = (cached && Number.isFinite(Number(cached.officialChange))) ? Number(cached.officialChange) : null;
+        // 修复：同上，区分 null 与真实 0，确保 navDateMap.officialChange 为 null 时回退到 ln.changePercent。
+        const raw = cached && cached.officialChange;
+        officialChange = (raw != null && Number.isFinite(Number(raw))) ? Number(raw) : null;
         if (officialChange === null && ln && Number.isFinite(Number(ln.changePercent))) {
           officialChange = Number(ln.changePercent);
         }
@@ -771,7 +783,9 @@ Page({
       while (active < CONCURRENCY && queue.length) {
         const code = queue.shift();
         const entry = map[code];
-        if (entry && entry.day === today && entry.kind === 'updated') continue; // 当日已确认更新，跳过
+        // 修复：仅当「已确认更新 且 今日收益已知(officialChange 为有限数)」才跳过；
+        // 否则（officialChange 仍未知）仍需去服务端拉权威 latest_nav.changePercent 校正，避免今日收益栏恒为 0。
+        if (entry && entry.day === today && entry.kind === 'updated' && Number.isFinite(entry.officialChange)) continue;
         if (this._navDatePending && this._navDatePending.has(code)) continue; // 正在请求中，跳过
         active += 1;
         remaining += 1;
@@ -784,11 +798,16 @@ Page({
             const navDate = fund && fund.latest_nav && fund.latest_nav.date;
             const source = (res && res.data_status && res.data_status.source) || null;
             if (navDate) {
-              // 官方涨跌幅由 history 计算（对齐 Web officialNavChange，用于状态①判定）
-              const officialChange = officialNavChange((res && res.history) || [], navDate);
+              // 官方涨跌幅：优先服务端 latest_nav.changePercent（权威，与详情页 _resolveCurrentNav 同源），
+              // 回退 officialNavChange(serverHistory)。确保今日收益与详情页统一（不再恒为 0）。
+              const latestNav = (res && res.fund && res.fund.latest_nav) || (res && res.latest_nav) || null;
+              let officialChange = officialNavChange((res && res.history) || [], navDate);
+              if (!Number.isFinite(officialChange) && latestNav && Number.isFinite(Number(latestNav.changePercent))) {
+                officialChange = Number(latestNav.changePercent);
+              }
               const next = { ...this.data.navDateMap, [code]: { navDate, source, officialChange, day: today, kind: 'updated' } };
               this.setData({ navDateMap: next });
-              this.filterAndSortFunds(); // 重新渲染徽章
+              this.filterAndSortFunds(); // 重新渲染徽章 + 今日收益
             }
           })
           .catch(() => { /* 单只失败不影响 */ })
