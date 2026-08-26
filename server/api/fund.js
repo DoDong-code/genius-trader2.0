@@ -243,12 +243,22 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/account/state' && request.method === 'PUT') {
     const { userFromRequest } = require('../services/authService');
-    const { saveUserState } = require('../services/accountStateService');
+    const { getUserState, saveUserState, isEmptyStateOverwrite } = require('../services/accountStateService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0; // 匿名小程序用户用 userId=0
     const body = await readJsonBody(request);
     if (!body.state) {
       sendJson(response, 400, { success: false, error: '缺少 state' });
+      return true;
+    }
+    // 防误覆盖保护（2026-08-26）：云端已有账户数据时，拒绝空 state 覆盖。
+    const existing = await getUserState(userId);
+    if (isEmptyStateOverwrite(existing, body.state)) {
+      sendJson(response, 409, {
+        success: false,
+        error: '拒绝覆盖：云端已有账户数据，拒绝写入空/缺失账户状态',
+        code: 'EMPTY_STATE_REJECTED'
+      });
       return true;
     }
     await saveUserState(userId, body.state);
