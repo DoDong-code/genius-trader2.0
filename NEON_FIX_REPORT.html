@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Neon PostgreSQL statement_timeout 兼容性修复</title>
+<style>
+  :root{
+    --bg:#0f1419; --panel:#1a2029; --line:#2d3744;
+    --fg:#e6edf3; --muted:#9aa7b4; --green:#2ea043; --red:#e5534b;
+    --amber:#d29922; --blue:#388bfd; --code:#0d1117;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+    line-height:1.6;padding:28px}
+  .wrap{max-width:940px;margin:0 auto}
+  h1{font-size:24px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:22px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin-bottom:16px}
+  .card h2{font-size:16px;margin:0 0 12px;color:var(--blue)}
+  .tag{display:inline-block;font-size:11px;padding:2px 9px;border-radius:20px;font-weight:600;vertical-align:middle}
+  .ok{background:rgba(46,160,67,.18);color:var(--green);border:1px solid rgba(46,160,67,.4)}
+  pre{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:14px 16px;
+    overflow:auto;font-size:12.5px;line-height:1.5;color:#c9d1d9}
+  .k{color:#ff7b72}.s{color:#a5d6ff}.c{color:#8b949e}.n{color:#79c0ff}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;background:var(--code)}
+  td .pass{color:var(--green);font-weight:600}
+  td .warn{color:var(--amber);font-weight:600}
+  .row{display:flex;gap:12px;flex-wrap:wrap}
+  .pill{background:var(--code);border:1px solid var(--line);border-radius:8px;padding:10px 14px;flex:1;min-width:140px}
+  .pill .t{font-size:22px;font-weight:700;color:var(--green)}
+  .pill .l{font-size:12px;color:var(--muted)}
+  .note{font-size:12.5px;color:var(--muted);margin-top:8px}
+  ul{margin:8px 0;padding-left:20px}li{margin:4px 0}
+  code.i{background:var(--code);padding:1px 6px;border-radius:4px;font-size:12.5px;color:#a5d6ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Neon PostgreSQL <code class="i">statement_timeout</code> 兼容性修复</h1>
+  <div class="sub">文件：<code class="i">server/database/dbAsync.js</code> · 状态：已提交（工作区干净）· 仅移位置、不删保护</div>
+
+  <div class="card">
+    <h2>① 根因</h2>
+    <p>生产同时使用 Render + Neon。Neon 的 pooled connection 不接受把 <code class="i">statement_timeout</code> 作为 PostgreSQL 启动（startup）参数传入：</p>
+    <pre><span class="c"># Render / Neon 启动报错</span>
+unsupported startup parameter in options: statement_timeout
+<span class="c"># 导致 Cloud schema initialization failed → DB 进入 degraded mode</span></pre>
+    <p>原实现把 <code class="i">statement_timeout</code> 放进了 <code class="i">new Pool({ options: '-c statement_timeout=...' })</code> 的建连启动参数，正是 Neon 拒绝的对象。</p>
+  </div>
+
+  <div class="card">
+    <h2>② 修复方案（before / after）</h2>
+    <p><b>移除启动参数</b>（不再触发 Neon 拒绝）：</p>
+    <pre><span class="c">// 修改前</span>
+new Pool({
+  <span class="c">// ...</span>
+  idleTimeoutMillis: 60000,
+  options: <span class="s">`-c statement_timeout=${STATEMENT_TIMEOUT_MS}`</span>   <span class="c">&lt;-- 删除</span>
+});
+
+<span class="c">// 修改后</span>
+new Pool({
+  <span class="c">// ...</span>
+  idleTimeoutMillis: 60000
+  <span class="c">// 不再有 options 启动参数</span>
+});</pre>
+    <p><b>改为建连后按会话设置（保护保留）</b>：</p>
+    <pre>pool.on(<span class="s">'connect'</span>, (client) =&gt; {
+  client.query(<span class="s">`SET statement_timeout = ${STATEMENT_TIMEOUT_MS}`</span>).catch((e) =&gt; {
+    console.error(<span class="s">'[dbAsync] 设置 statement_timeout 失败（非致命）:'</span>, e &amp;&amp; e.message);
+  });
+});</pre>
+    <p><b>事务路径用 SET LOCAL 兜底（Neon 事务池模式会话级超时不跨事务保留）</b>：</p>
+    <pre><span class="k">await</span> client.query(<span class="s">'BEGIN'</span>);
+<span class="k">await</span> client.query(<span class="s">`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`</span>);</pre>
+    <p class="note">超时默认值仍为 <code class="i">15000ms</code>；事务看门狗（PG_TRANSACTION_TIMEOUT_MS=20000，504 ROLLBACK）与 acquire timeout（503 快速失败）均原样保留。</p>
+  </div>
+
+  <div class="card">
+    <h2>③ 验证结果</h2>
+    <div class="row">
+      <div class="pill"><div class="t">90/90</div><div class="l">node --test 全部 PASS</div></div>
+      <div class="pill"><div class="t">✓</div><div class="l">npm run build 成功</div></div>
+      <div class="pill"><div class="t">0</div><div class="l">startup options 含 statement_timeout</div></div>
+      <div class="pill"><div class="t">1</div><div class="l">on('connect') SET 监听器已注册</div></div>
+    </div>
+    <p class="note">原断言旧行为的 <code class="i">statement_timeout 通过 options 注入到建连</code> 测试已更新为断言「startup options 不再含 statement_timeout 且每连接仍经 SET 生效」，属对齐修复机制，非弱化。模块级验证直连目标 Neon 库，查询因沙箱无外联 DB 网络以 <code class="i">POOL_ACQUIRE_TIMEOUT</code> 拒绝（已确认不再是 <code class="i">unsupported startup parameter</code> 错误）。</p>
+  </div>
+
+  <div class="card">
+    <h2>④ 红线核对</h2>
+    <table>
+      <tr><th>项</th><th>结论</th></tr>
+      <tr><td>Tencent / Sina / Eastmoney / Yahoo 未改</td><td class="pass">PASS</td></tr>
+      <tr><td>Provider 顺序 / fallback 优先级未改</td><td class="pass">PASS</td></tr>
+      <tr><td>acquire timeout / transaction watchdog 保留</td><td class="pass">PASS</td></tr>
+      <tr><td>MAX_BODY_BYTES / OOM 防护 / AI bundle 未改</td><td class="pass">PASS</td></tr>
+      <tr><td>package.json 未改</td><td class="pass">PASS</td></tr>
+      <tr><td>stress 测试强度未降（仅更新 1 条旧断言）</td><td class="pass">PASS</td></tr>
+      <tr><td>本次改动文件范围</td><td>仅 <code class="i">dbAsync.js</code> + <code class="i">dbAsync.test.js</code></td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>⑤ 你的下一步（必须你执行）</h2>
+    <ul>
+      <li>在 <b>Render</b> 用本工作区重新部署（改动已 commit，推送后即可）。</li>
+      <li>确认启动日志<b>不再出现</b>：<code class="i">unsupported startup parameter in options: statement_timeout</code> 与 <code class="i">Cloud schema initialization failed</code>。</li>
+      <li><code class="i">GET /api/health</code> 返回 DB 状态为<b>正常（postgres / ok）</b>，而非 <code class="i">degraded</code>。</li>
+    </ul>
+    <p class="note">本地完整 HTTP 冒烟被沙箱环境阻挡（端口 3000 被占用 + 无 Neon 外联网络），与本修复无关；模块级验证已证明启动参数层面的根因已消除。</p>
+  </div>
+</div>
+</body>
+</html>

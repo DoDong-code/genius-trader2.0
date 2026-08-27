@@ -21,7 +21,21 @@
   async function api(path, options = {}) {
     const headers = Object.assign({}, options.headers || {}, authHeaders());
     if (options.body && !headers['Content-Type']) headers['Content-Type'] = 'application/json';
-    const response = await fetch(path, Object.assign({}, options, { headers }));
+    // 超时兜底：避免预览/弱网环境下 fetch 永远不返回导致「登录中」无限转圈。
+    // 同源 API 正常 <1s；15s 仍未响应视为网络异常，明确报错而非卡死。
+    const controller = new AbortController();
+    const timer = setTimeout(function () { controller.abort(); }, 15000);
+    let response;
+    try {
+      response = await fetch(path, Object.assign({}, options, { headers, signal: controller.signal }));
+    } catch (e) {
+      clearTimeout(timer);
+      const err = new Error('网络异常或请求超时，请检查网络后重试');
+      err.status = 0;
+      err.data = null;
+      throw err;
+    }
+    clearTimeout(timer);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const error = new Error(data.error || ('HTTP ' + response.status));

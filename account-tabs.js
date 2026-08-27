@@ -42,6 +42,13 @@
     return holidays.indexOf(yyyymmdd) === -1;
   }
 
+  // 与 detail-api.js 保持一致：返回上海时区今日日期 YYYY-MM-DD（用于判定“今日净值是否已更新”）
+  function shanghaiDate() {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+    }).format(new Date());
+  }
+
   function setText(node, value) {
     if (node && node.textContent !== value) node.textContent = value;
   }
@@ -86,13 +93,17 @@
       return sum + Number(value || 0);
     }, 0);
     var cost = total - holdingProfit;
+    var navUpdatedAtValues = funds.map(function (fund) { return fund.navUpdatedAt; }).filter(Boolean);
+    var navDate = navUpdatedAtValues.length ? navUpdatedAtValues.reduce(function (max, d) { return d > max ? d : max; }) : null;
     return {
       total: total,
       holdingProfit: holdingProfit,
       holdingRate: cost ? holdingProfit / cost : 0,
       todayProfit: todayProfit,
       todayRate: total ? todayProfit / total : 0,
-      navUpdated: funds.length > 0 && funds.every(function (fund) { return Boolean(fund.navUpdatedAt); })
+      // 只有“最新 NAV 日期 == 今日”才算已更新；否则今日收益为估算（净值未到）
+      navUpdated: Boolean(navDate) && navDate === shanghaiDate(),
+      navDate: navDate
     };
   }
 
@@ -108,24 +119,34 @@
     setText(items[1].querySelector('.kpi-value'), '0.00');
     setText(items[1].querySelector('.kpi-sub'), '0.00%');
 
-    function formatMMDD(dateStr) {
-      if (!dateStr || typeof dateStr !== 'string') return '0730';
-      var match = dateStr.match(/(\d{2})[-/](\d{2})$/);
-      return match ? match[1] + match[2] : '0730';
+    function getLatestTradingDayDate() {
+      var d = new Date();
+      while (true) {
+        if (isTradingDay(d)) {
+          return new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
+          }).format(d);
+        }
+        d.setDate(d.getDate() - 1);
+      }
     }
-    var mmdd = formatMMDD(window.latestFundDataDate);
-    var updatedText = mmdd || '0730';
+    function formatMMDD(dateStr) {
+      if (!dateStr || typeof dateStr !== 'string') return '';
+      var match = dateStr.match(/(\d{2})[-/](\d{2})$/);
+      return match ? match[1] + match[2] : '';
+    }
+    var dataDate = data.navDate || window.latestFundDataDate || getLatestTradingDayDate();
+    var mmdd = formatMMDD(dataDate);
+    var labelClass = data.navUpdated ? 'estimate-state updated' : 'estimate-state';
+    var labelText = (data.navUpdated && mmdd) ? mmdd : '估算';
 
-    var trading = isTradingDay(new Date());
     setText(items[2].querySelector('.kpi-label'), '今日收益');
     var v2 = items[2].querySelector('.kpi-value');
     setText(v2, money(data.todayProfit));
     applyTone(v2, data.todayProfit);
     setHtml(
       items[2].querySelector('.kpi-sub'),
-      '<span class="estimate-state updated">' +
-        updatedText +
-      '</span><span>' + percent(data.todayRate) + '</span>'
+      '<span class="' + labelClass + '">' + labelText + '</span><span>' + percent(data.todayRate) + '</span>'
     );
 
     var v3 = items[3].querySelector('.kpi-value');
