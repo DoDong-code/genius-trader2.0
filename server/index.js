@@ -21,23 +21,8 @@ try {
 const fs = require('node:fs');
 const path = require('node:path');
 
-// AI 服务预构建：Docker/CI 在构建阶段用 `npm run build:ai` 生成 server/services/ai/index.js。
-// 仅当预构建产物缺失时，才用本地 esbuild 依赖兜底构建；兜底失败只影响 /api/ai/*，
-// 绝不阻断整个 Node 服务（不使用 npx 临时下载，避免生产环境构建不确定性）。
-const AI_BUILD_TARGET = path.join(__dirname, 'services', 'ai', 'index.js');
-function ensureAiBundle() {
-  if (fs.existsSync(AI_BUILD_TARGET)) return; // 已有预构建产物
-  try {
-    const { execSync } = require('node:child_process');
-    console.warn('[build-ai] 预构建产物缺失，尝试本地 esbuild 兜底构建...');
-    execSync('node node_modules/esbuild/bin/esbuild src/services/ai/index.ts --bundle --platform=node --format=cjs --outfile=server/services/ai/index.js', {
-      cwd: process.cwd(),
-      stdio: 'inherit'
-    });
-  } catch (e) {
-    console.error('[build-ai] AI 服务构建失败（不影响其他接口，仅 /api/ai/* 暂不可用）：', e.message);
-  }
-}
+// AI 服务预构建守卫：见 server/services/aiBundle.js（P1-10，生产环境禁止运行时 execSync 编译）
+const { ensureAiBundle } = require('./services/aiBundle');
 ensureAiBundle();
 
 const http = require('node:http');
@@ -239,7 +224,7 @@ function startNavSyncScheduler() {
     console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
     return;
   }
-  const { isCloud } = require('./database/dbAsync');
+  const { isCloud, getSyncMarker, setSyncMarker } = require('./database/dbAsync');
   if (!isCloud() && process.env.NODE_ENV !== 'production') {
     console.log('[NAV-SYNC] disabled in local/dev mode (set NODE_ENV=production or run on cloud to enable)');
     return;
@@ -249,15 +234,20 @@ function startNavSyncScheduler() {
     syncWeeklyHistory,
     syncQuarterlyHoldings
   } = require('./services/navSyncService');
+  const { withAdvisoryLock } = require('./database/lock');
 
   let dailyRunning = false;
   let weeklyRunning = false;
   let quarterlyRunning = false;
   let ticking = false;
-  let lastWeeklyRun = 0;
-  let lastQuarterlyRun = 0;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   const QUARTER_MS = 91 * 24 * 60 * 60 * 1000;
+
+  // 跨实例“上次成功执行”共享标记：存在 PostgreSQL sync_markers（云端）或 SQLite sync_markers（本地）。
+  // 用共享标记而非进程内 lastRun —— 多副本各自记时会导致每周/每季任务被重复触发、重复打上游。
+  async function isDue(key, intervalMs) {
+    return Date.now() - (await getSyncMarker(key)) >= intervalMs;
+  }
 
   function shanghaiMinutes() {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -279,38 +269,75 @@ function startNavSyncScheduler() {
     return `${ok} ok, ${fail} failed, total ${results.length}`;
   }
 
-  async function runOnce(label, task, setRunning) {
-    setRunning(true);
+  // 进程内快速去重标志（防止同一进程重复进入；跨实例去重交给 PG 建议锁）
+  const dailyRef = { value: false };
+  const weeklyRef = { value: false };
+  const quarterlyRef = { value: false };
+
+  /**
+   * 在「进程内快速去重 + 跨实例 PG 建议锁 + 跨实例共享间隔标记」三重保护下执行一次同步任务。
+   * - 进程内布尔先挡掉同进程重入；
+   * - 间隔未到（读共享 sync_markers）直接跳过，避免多副本各自记时重复触发；
+   * - 跨实例用 pg_try_advisory_xact_lock：被其他实例持有则立即跳过（绝不重复写库/打上游），
+   *   且锁随事务结束 / 连接断开（崩溃）自动释放；
+   * - 进入锁内再次确认间隔（消除抢锁窗口竞态），成功执行后才写回共享标记。
+   */
+  async function runGuarded(label, lockName, runningRef, intervalOk, task, markerKey) {
+    if (runningRef.value) return; // 进程内快速去重
+    if (intervalOk && !(await intervalOk())) return; // 间隔未到（读共享标记）
+    runningRef.value = true;
     const startedAt = Date.now();
     try {
-      const results = await task();
-      console.log(`[NAV-SYNC] ${label} completed in ${Date.now() - startedAt}ms: ${summarize(results)}`);
+      const { acquired, reason, result } = await withAdvisoryLock(lockName, async () => {
+        // 进入锁内再次确认间隔，避免多实例抢锁窗口内的竞态导致重复执行
+        if (markerKey && intervalOk && !(await intervalOk())) {
+          return { __skipped: true };
+        }
+        return await task();
+      });
+      if (!acquired) {
+        console.log(`[NAV-SYNC] ${label} skipped: 另一实例已持有锁（${reason}），多实例去重生效`);
+        return null;
+      }
+      if (result && result.__skipped) {
+        return null; // 锁内复查间隔未到，安全跳过
+      }
+      // 仅在本实例成功执行后更新共享标记（跨实例去重依赖它）
+      if (markerKey) {
+        await setSyncMarker(markerKey, Date.now()).catch((e) => {
+          console.error(`[NAV-SYNC] ${label} 更新 sync_markers 失败:`, e && e.message);
+        });
+      }
+      console.log(`[NAV-SYNC] ${label} completed in ${Date.now() - startedAt}ms: ${summarize(result)}`);
+      return result;
     } catch (err) {
       console.error(`[NAV-SYNC] ${label} failed:`, err && err.message);
     } finally {
-      setRunning(false);
+      runningRef.value = false;
     }
   }
 
   async function runDailyNav() {
     if (!inEveningWindow()) return;
-    if (dailyRunning) return;
-    dailyRunning = true;
-    await runOnce('daily-nav', () => syncTodayNavs({ concurrency: 3 }), (v) => { dailyRunning = v; });
+    await runGuarded('daily-nav', 'nav-sync:daily', dailyRef, null, () => syncTodayNavs({ concurrency: 3 }));
   }
 
   async function maybeWeekly() {
-    if (weeklyRunning || Date.now() - lastWeeklyRun < WEEK_MS) return;
-    weeklyRunning = true;
-    await runOnce('weekly-history', () => syncWeeklyHistory({ concurrency: 2 }), (v) => { weeklyRunning = v; });
-    lastWeeklyRun = Date.now();
+    await runGuarded(
+      'weekly-history', 'nav-sync:weekly', weeklyRef,
+      () => isDue('weekly-history', WEEK_MS),
+      () => syncWeeklyHistory({ concurrency: 2 }),
+      'weekly-history'
+    );
   }
 
   async function maybeQuarterly() {
-    if (quarterlyRunning || Date.now() - lastQuarterlyRun < QUARTER_MS) return;
-    quarterlyRunning = true;
-    await runOnce('quarterly-holdings', () => syncQuarterlyHoldings({ concurrency: 2 }), (v) => { quarterlyRunning = v; });
-    lastQuarterlyRun = Date.now();
+    await runGuarded(
+      'quarterly-holdings', 'nav-sync:quarterly', quarterlyRef,
+      () => isDue('quarterly-holdings', QUARTER_MS),
+      () => syncQuarterlyHoldings({ concurrency: 2 }),
+      'quarterly-holdings'
+    );
   }
 
   async function tick() {

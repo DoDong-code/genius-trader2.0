@@ -13,6 +13,8 @@ const dbAsync = require('../database/dbAsync');
 const { fetchProviderEstimate } = require('./providerEstimate');
 const { expectedNavDateFor } = require('./estimateStatus');
 const { shanghaiDateString } = require('./marketService');
+// P0-6：统一出站 HTTP 客户端（timeout/abort/retry），避免裸 fetch。
+const { fetchWithTimeout } = require('../utils/httpClient');
 
 // 进程内并发锁：fund_code -> Promise（同一基金并发请求共享同一次获取）
 const inFlight = new Map();
@@ -137,12 +139,12 @@ async function ensureTodayNav(fundCode, options = {}) {
       try {
         const symbol = `${fundCode}.OF`;
         const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=5d`;
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
             'Referer': 'https://finance.yahoo.com/'
           },
-          signal: AbortSignal.timeout(4000)
+          timeout: 4000
         });
         if (!response.ok) return null;
         const json = await response.json();

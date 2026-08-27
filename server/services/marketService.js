@@ -9,6 +9,7 @@ const EASTMONEY_STOCK_HIS_DELAY_API = 'https://push2hisdelay.eastmoney.com';
 
 // Phase 3.3-H：全局出站并发闸门（钳制同时进行的 fetch 数量，解 OOM 主因 B/F/G）。
 const { withLimit } = require('./concurrencyLimit');
+const { fetchWithTimeout } = require('../utils/httpClient');
 
 function sleep(milliseconds) {
   return new Promise(resolve => setTimeout(resolve, milliseconds));
@@ -23,14 +24,14 @@ async function fetchText(url, options = {}) {
       // Phase 3.3-H：真实 fetch + 响应体缓冲（response.text()）统一经全局出站闸门，
       // 钳制并发出站数量，避免大量并发请求同时驻留 response body 造成 RSS 暴涨（G 次因）。
       const result = await withLimit(async () => {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
+          timeout: Number(options.timeout || 15000),
           headers: {
             Accept: options.accept || 'application/json,text/html,application/javascript;q=0.9,*/*;q=0.8',
             Referer: options.referer || `${EASTMONEY_FUND}/`,
             'User-Agent': options.userAgent || 'Mozilla/5.0 GeniusTraderFundData/2.0',
             ...(options.extraHeaders || {}) // Phase 3.17-E：允许附加头（如 Nasdaq 的 Origin），默认行为不变
-          },
-          signal: AbortSignal.timeout(Number(options.timeout || 15000))
+          }
         });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const text = await response.text();

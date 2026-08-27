@@ -9,22 +9,43 @@
  * 从而在 Render 上持久化；行情/估值等可重建缓存仍留在本地 SQLite。
  */
 const { Pool } = require('pg');
-const { getDatabase } = require('./db');
 
 let pool = null;
+
+// 懒加载本地 SQLite 访问层：仅在非云端（无 DATABASE_URL）模式下才会真正 require，
+// 避免云端启动时加载 node:sqlite 与打开本地库文件，也便于云端单元测试注入 mock。
+let _localDb = null;
+function getDatabase() {
+  if (!_localDb) {
+    _localDb = require('./db').getDatabase();
+  }
+  return _localDb;
+}
 
 function isCloud() {
   return Boolean(process.env.DATABASE_URL);
 }
+
+// 每条语句的超时（statement_timeout）：通过连接选项在每次物理建连时设置，
+// 覆盖单行查询与事务内所有语句（等价于 query timeout / transaction timeout）。
+// 用 options 一次性设置，避免每条查询额外 SET 往返。
+const STATEMENT_TIMEOUT_MS = Number(process.env.PG_STATEMENT_TIMEOUT_MS || 15000);
+
+// 获取连接时的“池满快速失败”超时：超过该时间仍未拿到连接则直接 reject（503），
+// 绝不无限排队，避免请求链路永久 pending。超时后若连接稍后到达会自动 release，杜绝连接泄漏。
+const ACQUIRE_TIMEOUT_MS = Number(process.env.PG_ACQUIRE_TIMEOUT_MS || 5000);
 
 async function getPool() {
   if (!pool) {
     pool = new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
-      max: 15, // Increase max clients to handle concurrency without queuing bottlenecks
-      connectionTimeoutMillis: 30000, // Wait up to 30 seconds for serverless Neon database cold starts
-      idleTimeoutMillis: 60000 // Keep idle clients connected longer to minimize handshakes
+      max: Number(process.env.PG_POOL_MAX || 15),
+      // 建连超时：从 30s 降到 10s（合理值），避免单条建连长时间挂起占用事件循环
+      connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 10000),
+      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 60000),
+      // 在物理建连时生效的会话级语句超时（覆盖 query 与 transaction 内全部语句）
+      options: `-c statement_timeout=${STATEMENT_TIMEOUT_MS}`
     });
     // P0 健壮性修复（Phase 3.1.2）：PG idle client / 连接错误若未监听会冒泡为
     // 未处理的 'error' 事件，导致 Node 进程退出（Render 自动重启）。
@@ -36,9 +57,49 @@ async function getPool() {
   return pool;
 }
 
-// 建立连接的重试包装器，防止因冷启动、网络波动或握手缓慢产生建连超时
+/**
+ * 从连接池获取一个客户端，并自带“池满快速失败”语义：
+ * - 在 ACQUIRE_TIMEOUT_MS 内未拿到连接 → reject（code POOL_ACQUIRE_TIMEOUT, 503），绝不无限排队。
+ * - 超时放弃后，若连接稍后到达会自动 release，避免连接泄漏。
+ * - 返回的连接由调用方在 finally 中 release。
+ */
+async function acquireClient() {
+  const poolInstance = await getPool();
+  const connectPromise = poolInstance.connect();
+  let timedOut = false;
+  let timer = null;
+  // 若已超时放弃，连接稍后到达时自动归还池中，避免连接泄漏。
+  // 注意：成功拿到连接后本闭包不会进入 release 分支（timedOut=false）。
+  connectPromise.then(
+    (c) => { if (timedOut) { try { c.release(); } catch (e) {} } },
+    () => {}
+  );
+  const timeoutPromise = new Promise((_, reject) => {
+    // 严禁 unref —— 若请求是进程唯一工作，unref 会让定时器永不触发，
+    // 请求无限挂起，彻底违背“池满快速失败”初衷。定时器必须在 ACQUIRE_TIMEOUT_MS 时真实触发。
+    timer = setTimeout(() => {
+      timedOut = true;
+      const err = new Error('[dbAsync] 连接池已满，快速失败（acquire timeout）');
+      err.code = 'POOL_ACQUIRE_TIMEOUT';
+      err.statusCode = 503;
+      reject(err);
+    }, ACQUIRE_TIMEOUT_MS);
+  });
+  let client;
+  try {
+    client = await Promise.race([connectPromise, timeoutPromise]);
+  } finally {
+    // 无论成功/超时/异常，都清除定时器：成功路径下定时器尚未触发，必须主动清除以杜绝定时器泄漏；
+    // 超时路径下定时器已触发，clearTimeout 为 no-op，无害。
+    if (timer) clearTimeout(timer);
+  }
+  return client;
+}
+
+// 建立连接的重试包装器（仅用于启动期 ensureCloudSchema 的冷启动/握手抖动，非请求路径）：
+// 仅在连接层超时/网络错误时有限重试（默认 2 次），不重试鉴权错误，避免放大 PG 压力。
 async function connectWithRetry(poolInstance) {
-  let attempts = 3;
+  let attempts = Number(process.env.PG_CONNECT_RETRIES || 2);
   while (attempts > 0) {
     try {
       return await poolInstance.connect();
@@ -51,8 +112,8 @@ async function connectWithRetry(poolInstance) {
         err.message.includes('ECONNREFUSED')
       );
       if (isConnectTimeout && attempts > 0) {
-        console.warn(`[dbAsync] DB connection timeout/error, retrying in 1500ms... (${attempts} attempts left):`, err.message);
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        console.warn(`[dbAsync] DB connection timeout/error, retrying in 1000ms... (${attempts} attempts left):`, err.message);
+        await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
       throw err;
@@ -60,10 +121,9 @@ async function connectWithRetry(poolInstance) {
   }
 }
 
-// 统一包装云端查询，自动实现连接生命周期管理与连接重试
+// 统一包装云端查询，自动实现连接生命周期管理与 finally release
 async function queryCloud(sql, params = []) {
-  const poolInstance = await getPool();
-  const client = await connectWithRetry(poolInstance);
+  const client = await acquireClient();
   try {
     return await client.query(convertPlaceholders(sql), params);
   } finally {
@@ -115,31 +175,48 @@ async function exec(sql) {
  */
 async function transaction(work) {
   if (isCloud()) {
-    const poolInstance = await getPool();
-    const client = await connectWithRetry(poolInstance);
+    const client = await acquireClient();
+    // 事务整体超时看门狗：statement_timeout 已覆盖单语句，这里兜底“整体预算”。
+    // 超预算时必须真实 reject（而非仅静默 ROLLBACK），否则一个卡死的事务会永久占用 PG client。
+    const txnTimeoutMs = Number(process.env.PG_TRANSACTION_TIMEOUT_MS || 20000);
+    let watchdog = null;
+    const timeoutError = new Error('[dbAsync] transaction 整体超时，强制 ROLLBACK');
+    timeoutError.code = 'TRANSACTION_TIMEOUT';
+    timeoutError.statusCode = 504;
     try {
       await client.query('BEGIN');
-      const helpers = {
-        all: async (sql, params = []) => (await client.query(convertPlaceholders(sql), params)).rows,
-        get: async (sql, params = []) => {
-          const rows = (await client.query(convertPlaceholders(sql), params)).rows;
-          return rows[0];
-        },
-        run: async (sql, params = []) => {
-          const result = await client.query(convertPlaceholders(sql), params);
-          return {
-            changes: Number(result.rowCount || 0),
-            lastInsertRowid: result.rows && result.rows[0] && result.rows[0].id != null ? Number(result.rows[0].id) : 0
-          };
-        }
-      };
-      const result = await work(helpers);
+      // work 包成 Promise：即使 work 内部同步抛错也能被正确 race/reject，不会泄漏。
+      const workPromise = Promise.resolve().then(() => {
+        const helpers = {
+          all: async (sql, params = []) => (await client.query(convertPlaceholders(sql), params)).rows,
+          get: async (sql, params = []) => {
+            const rows = (await client.query(convertPlaceholders(sql), params)).rows;
+            return rows[0];
+          },
+          run: async (sql, params = []) => {
+            const result = await client.query(convertPlaceholders(sql), params);
+            return {
+              changes: Number(result.rowCount || 0),
+              lastInsertRowid: result.rows && result.rows[0] && result.rows[0].id != null ? Number(result.rows[0].id) : 0
+            };
+          }
+        };
+        return work(helpers);
+      });
+      const timeoutPromise = new Promise((_, reject) => {
+        // 严禁 unref —— 保证 watchdog 在事务卡死（无其他事件）时仍能真实触发。
+        watchdog = setTimeout(() => {
+          reject(timeoutError);
+        }, txnTimeoutMs);
+      });
+      const result = await Promise.race([workPromise, timeoutPromise]);
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       throw error;
     } finally {
+      if (watchdog) clearTimeout(watchdog); // 成功或超时都清除定时器，杜绝泄漏
       client.release();
     }
   }
@@ -274,6 +351,16 @@ async function ensureCloudSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE INDEX IF NOT EXISTS idx_account_backups_user ON account_backups (user_id, id DESC)`,
+    // —— P0-5 CAS 修订号表：user_data 写入前比对 revision，冲突即拒绝（消除 last-write-wins）——
+    `CREATE TABLE IF NOT EXISTS user_data_rev (
+      user_id INTEGER PRIMARY KEY,
+      revision INTEGER NOT NULL DEFAULT 0
+    )`,
+    // —— P1-9 跨实例调度去重共享标记：与 SQLite sync_markers 对齐，云端也用 PG 存储「上次成功执行」时间戳 ——
+    `CREATE TABLE IF NOT EXISTS sync_markers (
+      key TEXT PRIMARY KEY,
+      last_run BIGINT NOT NULL DEFAULT 0
+    )`,
     // —— 持久化迁移（A3 修复）：stock_price / fund_calibration 从本地 SQLite 迁至 PostgreSQL ——
     // 此前这两张表落在 Render 的临时 SQLite，实例重启/重新部署后被清空，导致 calibration 样本归零。
     // 现与账号层共用同一 DATABASE_URL 的 PostgreSQL，保证跨重启持久。本地无 DATABASE_URL 时仍走 SQLite 回退。
@@ -326,7 +413,7 @@ async function ensureCloudSchema() {
   let client;
   try {
     const poolInstance = await getPool();
-    client = await poolInstance.connect();
+    client = await connectWithRetry(poolInstance);
     await client.query("SET lock_timeout = '10s'");
     await client.query("SET statement_timeout = '30s'");
     for (let i = 0; i < statements.length; i++) {
@@ -352,6 +439,47 @@ async function ensureCloudSchema() {
   }
 }
 
+/**
+ * 连接池监控指标（active/idle/waiting/total），供健康探针/日志使用。
+ * 未初始化时返回全 0，不会触发建连。
+ */
+function poolStats() {
+  if (!pool) return { total: 0, idle: 0, waiting: 0, active: 0 };
+  return {
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+    active: pool.totalCount - pool.idleCount
+  };
+}
+
+// 仅供测试：读取当前连接池 / 重置（避免跨测试串池）
+function __getPool() {
+  return pool;
+}
+function __resetForTest() {
+  pool = null;
+  _localDb = null;
+}
+
+/**
+ * 跨实例调度共享标记（P1-9）：读写「某任务上次成功执行」的时间戳。
+ * 云端走 PostgreSQL sync_markers 表；本地走 SQLite sync_markers 表（db.js 已建）。
+ * 两者都用 IF NOT EXISTS 创建，且使用 upsert，绝不破坏现有数据。
+ */
+async function getSyncMarker(key) {
+  const row = await get('SELECT last_run FROM sync_markers WHERE key = ?', [key]);
+  return row ? Number(row.last_run) : 0;
+}
+
+async function setSyncMarker(key, ts) {
+  await run(
+    'INSERT INTO sync_markers (key, last_run) VALUES (?, ?) ' +
+    'ON CONFLICT (key) DO UPDATE SET last_run = EXCLUDED.last_run',
+    [key, ts]
+  );
+}
+
 module.exports = {
   isCloud,
   all,
@@ -359,5 +487,11 @@ module.exports = {
   run,
   exec,
   transaction,
-  ensureCloudSchema
+  ensureCloudSchema,
+  poolStats,
+  acquireClient,
+  getSyncMarker,
+  setSyncMarker,
+  __getPool,
+  __resetForTest
 };

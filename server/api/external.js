@@ -19,13 +19,16 @@ const {
   validateToken,
   generateToken,
   revokeTokens,
-  tokenStatus
+  tokenStatus,
+  hashToken,
+  rateLimitAllowed
 } = require('../services/externalTokenService');
 const { buildAnalysisPortfolio, listAnalysisAccounts } = require('../services/portfolioAnalysisService');
 const { getFund } = require('../services/fundService');
 const { getHistory } = require('../services/navService');
 const { fetchProviderEstimate } = require('../services/providerEstimate');
 const { calculateFundEstimate } = require('../services/estimateEngine');
+const { runInRequestScope } = require('../utils/requestScope');
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -75,11 +78,24 @@ function readJsonBody(request) {
  * 只读数据接口（Bearer 只读 Token 鉴权）
  */
 async function handleExternalApi(request, response, url) {
+  // OPTIONS 预检提前返回（不需要请求作用域）
   if (request.method === 'OPTIONS') {
     response.writeHead(204, CORS_HEADERS);
     response.end();
     return true;
   }
+
+  // P1-7：外部 API 速率限制（滑动窗口）。key 用 token 哈希或客户端 IP，绝不记录明文 token。
+  const preToken = resolveToken(request, url);
+  const rlKey = preToken ? hashToken(preToken) : (request.socket && request.socket.remoteAddress) || 'anon';
+  if (!rateLimitAllowed(rlKey)) {
+    sendJson(response, 429, { success: false, error: '请求过于频繁，请稍后重试' });
+    return true;
+  }
+
+  // 先完成鉴权，拿到 userId —— 必须在进入请求作用域之前确定，
+  // 否则把 { userId } 作为 runInRequestScope 的 meta 实参时，userId 尚处于回调内部作用域，
+  // 会触发 ReferenceError（生产环境该接口每次调用都会 500）。
   const token = resolveToken(request, url);
   const auth = token ? await validateToken(token) : null;
   if (!auth) {
@@ -88,6 +104,9 @@ async function handleExternalApi(request, response, url) {
   }
   const userId = auth.userId;
 
+  // P0-2：整次请求包裹在请求作用域内，使多账户分析循环共享去重缓存（同基金只构建一次）；
+  // 同时把 userId 写入 scope.meta，供 P0-4 账号生命周期竞态防护在写入前校验身份。
+  return runInRequestScope(async () => {
   if (url.pathname === '/api/external/analysis/portfolio' && request.method === 'GET') {
     // accountId 优先于 account；两者都必须是 Token 所属用户自己的真实账户
     const accountId = url.searchParams.get('accountId') || undefined;
@@ -248,6 +267,7 @@ async function handleExternalApi(request, response, url) {
 
   sendJson(response, 404, { success: false, error: '接口不存在' });
   return true;
+  }, { userId });
 }
 
 /**

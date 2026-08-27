@@ -10,6 +10,7 @@
  * 请求签名：md5(pathname + path + token + timestamp + SECRET)
  */
 const crypto = require('node:crypto');
+const { fetchWithTimeout } = require('../utils/httpClient');
 const QRCode = require('qrcode');
 const BaseProvider = require('./baseProvider');
 // Phase 3.3-H：provider 出站请求经全局并发闸门（与股票行情/Yahoo 共享同一把锁），
@@ -49,11 +50,11 @@ class YangJiBaoProvider extends BaseProvider {
     // 封住"第二条无界外部 HTTP 路径"——providerEstimate 的 per-fund 兜底 tryProviderEstimate
     // 在冷缓存/批量预取失败时可能 fan-out 至 2×基金数且不受限。
     const result = await withLimit(async () => {
-      const response = await fetch(this.BASE_URL + path, {
+      const response = await fetchWithTimeout(this.BASE_URL + path, {
+        timeout: 30000,
         method,
         headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30000)
+        body: body ? JSON.stringify(body) : undefined
       });
       if (!response.ok) {
         const err = new Error(`养基宝接口请求失败 (HTTP ${response.status})`);

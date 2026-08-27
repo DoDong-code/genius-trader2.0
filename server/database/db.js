@@ -174,6 +174,17 @@ function initialize(db) {
       reason TEXT NOT NULL DEFAULT '',
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS user_data_rev (
+      user_id INTEGER PRIMARY KEY,
+      revision INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- P1-9 跨实例调度去重：共享“上次成功执行”时间戳，避免多副本各自记时导致每周/每季任务被重复触发
+    CREATE TABLE IF NOT EXISTS sync_markers (
+      key TEXT PRIMARY KEY,
+      last_run BIGINT NOT NULL DEFAULT 0
+    );
   `);
 
   const stockColumns = db.prepare('PRAGMA table_info(stock_price)').all();

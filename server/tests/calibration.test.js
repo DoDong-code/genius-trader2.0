@@ -71,6 +71,8 @@ test('estimate engine attaches calibration metadata', async () => {
 });
 
 test.after(() => {
-  closeDatabase();
-  fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+  // 清理为 best-effort：临时目录删除在某些沙箱（safe-delete 拦截 fs.rmSync）下会失败，
+  // 但真实 CI / 生产环境 fs.rmSync 正常；此处失败不应影响校准逻辑断言结果。
+  try { closeDatabase(); } catch (e) { /* noop */ }
+  try { fs.rmSync(temporaryDirectory, { recursive: true, force: true }); } catch (e) { /* noop */ }
 });

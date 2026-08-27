@@ -6,6 +6,8 @@ const { calibrateFund } = require('./calibrationEngine');
 const config = require('../config/estimateConfig');
 // Phase 3.3-H：全局出站并发闸门（解 OOM 主因 B/F/G）。
 const { withLimit, externalConcurrencyStats } = require('./concurrencyLimit');
+// P0-6：统一出站 HTTP 客户端（timeout/abort/retry），避免裸 fetch。
+const { fetchWithTimeout } = require('../utils/httpClient');
 
 function round(value, digits = 6) {
   const factor = 10 ** digits;
@@ -188,7 +190,7 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
         // Phase 3.3-H：真实 fetch + 响应体缓冲（response.json()）经全局出站闸门，
         // 钳制并发出站数量并避免大量响应体同时驻留内存（解 B/F/G）。
         const fetched = await withLimit(async () => {
-          const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+          const response = await fetchWithTimeout(url, { timeout: 2000 });
           if (!response.ok) return null;
           return response.json();
         });
@@ -220,8 +222,8 @@ async function fetchHistoricalChange(stockCode, date, options = {}) {
       try {
         // Phase 3.3-H：fetch + response.json() 经全局出站闸门（解 B/F/G）。
         const j = await withLimit(async () => {
-          const response = await fetch(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
-            signal: AbortSignal.timeout(3000)
+          const response = await fetchWithTimeout(`https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=1mo`, {
+            timeout: 3000
           });
           if (!response.ok) return null;
           return response.json();

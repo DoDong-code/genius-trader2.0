@@ -7,6 +7,7 @@ const {
   fetchHoldings,
   fetchRealtimeEstimate
 } = require('./marketService');
+const { fetchWithTimeout } = require('../utils/httpClient');
 
 const EASTMONEY_FUND_URL = 'https://fund.eastmoney.com';
 const cacheDirectory = path.join(__dirname, '..', 'data', 'cache');
@@ -38,13 +39,13 @@ async function fetchText(url, attempts = 3) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
+        timeout: 15000,
         headers: {
           Accept: 'text/html,application/javascript;q=0.9,*/*;q=0.8',
           Referer: EASTMONEY_FUND_URL,
           'User-Agent': 'Mozilla/5.0 GeniusTraderFundData/1.0'
-        },
-        signal: AbortSignal.timeout(15000)
+        }
       });
       if (!response.ok) {
         throw new Error(`天天基金返回 HTTP ${response.status}`);
@@ -188,18 +189,19 @@ function cachePath(code) {
   return path.join(cacheDirectory, `${code}.json`);
 }
 
-function readDailyCache(code) {
+// P0-3：每日缓存读写改为异步（fs.promises），HTTP 请求路径不再同步阻塞文件 IO。
+async function readDailyCache(code) {
   try {
-    const cache = JSON.parse(fs.readFileSync(cachePath(code), 'utf8'));
+    const cache = JSON.parse(await fs.promises.readFile(cachePath(code), 'utf8'));
     return cache?.version === 4 && cache?.cacheDate === shanghaiDate() ? cache.data : null;
   } catch {
     return null;
   }
 }
 
-function writeDailyCache(code, data) {
-  fs.mkdirSync(cacheDirectory, { recursive: true });
-  fs.writeFileSync(cachePath(code), JSON.stringify({
+async function writeDailyCache(code, data) {
+  await fs.promises.mkdir(cacheDirectory, { recursive: true });
+  await fs.promises.writeFile(cachePath(code), JSON.stringify({
     version: 4,
     cacheDate: shanghaiDate(),
     fetchedAt: new Date().toISOString(),
@@ -230,7 +232,7 @@ function markSyncState(resourceKey, dataType, ttlMilliseconds) {
 async function collectFund(code, options = {}) {
   const fundCode = assertFundCode(code);
   if (!options.force) {
-    const cached = readDailyCache(fundCode);
+    const cached = await readDailyCache(fundCode);
     if (cached) return { ...cached, fromCache: true };
   }
 
@@ -337,7 +339,7 @@ async function collectFund(code, options = {}) {
       holdings: useStoredHoldings ? 'db-cache' : (holdings.length ? 'fund-archives' : null)
     }
   };
-  writeDailyCache(fundCode, data);
+  await writeDailyCache(fundCode, data);
   return { ...data, fromCache: false, refreshedHoldings: !useStoredHoldings };
 }
 
@@ -529,5 +531,7 @@ module.exports = {
   parseFundScript,
   parseFundProfile,
   parseFundNameFromProfile,
-  readJavaScriptValue
+  readJavaScriptValue,
+  readDailyCache,
+  writeDailyCache
 };

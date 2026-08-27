@@ -13,7 +13,13 @@ const { getFund } = require('./fundService');
 const { getHistory, getLatestPair } = require('./navService');
 const { fetchProviderEstimate } = require('./providerEstimate');
 const { calculateFundEstimate } = require('./estimateEngine');
+const { requestMemo } = require('../utils/requestScope');
 const config = require('../config/estimateConfig');
+
+// P0-2：单次分析历史数据规模上限（约 1 年交易日），禁止无条件加载完整历史。
+const ANALYSIS_HISTORY_LIMIT = Number(process.env.ANALYSIS_HISTORY_LIMIT || 260);
+// P0-2：Analysis 整体软超时（到点即 reject，避免请求无限挂起）。
+const ANALYSIS_TIMEOUT_MS = Number(process.env.ANALYSIS_TIMEOUT_MS || 20000);
 
 async function loadUserAccounts(userId) {
   const accounts = [];
@@ -145,7 +151,7 @@ async function listAnalysisAccounts(userId) {
  * - 外部分析（严格模式）：accountId 优先于 account；未指定且多账户时返回账户列表，不猜测、不使用 active
  * - DeepSeek 内部分析：useActive=true，使用当前登录用户自己的活动账户（保持现有行为）
  */
-async function buildAnalysisPortfolio(userId, options = {}) {
+async function _buildAnalysisPortfolio(userId, options = {}) {
   const accounts = await loadUserAccounts(userId);
   let target = null;
   if (options.accountId) {
@@ -195,12 +201,22 @@ async function buildAnalysisPortfolio(userId, options = {}) {
   for (const fund of accountFunds) {
     if (!fund || !fund.code) continue;
     const base = enrichFund(fund, accountFunds, strategy, userId);
-    const today = await resolveFundToday(fund.code, Number(fund.amount) || 0, userId, Number.isFinite(Number(fund.today)) ? Number(fund.today) : undefined);
+    // P0-2：同一次分析内，同一基金只解析一次「今日估值 / history / metadata」。
+    const code = String(fund.code);
+    const savedToday = Number.isFinite(Number(fund.today)) ? Number(fund.today) : undefined;
+    const today = await requestMemo(
+      `today:${code}`,
+      () => resolveFundToday(code, Number(fund.amount) || 0, userId, savedToday)
+    );
     base.todayEstimate = today;
     base.today_change = (Number(fund.amount) || 0) * today;
     base.positionType = classifyPositionType({ ...fund, today }, accountFunds, strategy);
     try {
-      const history = await getHistory(String(fund.code));
+      // P0-2：history 按分析需要限量读取，禁止无条件加载完整历史。
+      const history = await requestMemo(
+        `hist:${code}`,
+        () => getHistory(code, { limit: ANALYSIS_HISTORY_LIMIT })
+      );
       base.history = history;
       base.ret7d = periodReturn(history, 7);
       base.ret30d = periodReturn(history, 30);
@@ -211,7 +227,7 @@ async function buildAnalysisPortfolio(userId, options = {}) {
       base.ret30d = null;
       base.ret60d = null;
     }
-    const fundMeta = await getFund(String(fund.code)) || {};
+    const fundMeta = await requestMemo(`fund:${code}`, () => getFund(code)) || {};
     if (!base.name || base.name === String(fund.code)) base.name = fundMeta.fund_name || base.name;
     if (!base.type || base.type === '基金') base.type = fundMeta.fund_type || base.type;
     holdings.push(base);
@@ -230,6 +246,21 @@ async function buildAnalysisPortfolio(userId, options = {}) {
     holdings,
     accounts: accounts.map(a => ({ name: a.name, source: a.source, totalValue: (a.funds || []).reduce((s, f) => s + (Number(f.amount) || 0), 0) }))
   };
+}
+
+// P0-2：软超时护栏——到点即 reject，避免单次 Analysis 无限挂起（底层 fetch 仍有各自 timeout）。
+async function buildAnalysisPortfolio(userId, options = {}) {
+  const timeoutMs = Number(options.timeoutMs || ANALYSIS_TIMEOUT_MS);
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Analysis timeout after ${timeoutMs}ms`)), timeoutMs);
+    // 严禁 unref —— 若分析请求是进程唯一工作，unref 会让定时器永不触发，分析无限挂起。
+  });
+  try {
+    return await Promise.race([_buildAnalysisPortfolio(userId, options), timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 module.exports = {

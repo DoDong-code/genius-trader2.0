@@ -1,63 +1,94 @@
-// Phase 3.3-H：共享出站请求并发闸门。
-// 目的：钳制"同时进行的出站 fetch 数量"，杜绝 calculateAccountEstimate 的
-//   Promise.all(positions.map(calculateFundEstimate))
-//     → Promise.all(holdings.map(quoteFor))
-//       → fetchStockQuote / fetchHistoricalChange
-//         → fetch()
-// 在冷缓存时制造数百~上千并发出站请求（B 刷新并发无限制 + F Promise.all 瞬时峰值），
-// 进而使 fetchText 的 response.body 同时驻留内存造成 RSS 暴涨（G response 缓冲未释放）。
+// 全局出站请求并发闸门（重写于 2026-08-26，修复 heldSlots 跨请求串号根因）。
 //
-// 复用 navCacheService 的 externalQueue / 信号量思想：固定并发 + FIFO 队列，
-// 队列本身不限制入队数量（由上游调用决定），但"同时驻留的 Promise / response buffer"
-// 数量被钳制在 MAX_EXTERNAL_CONCURRENCY，从根本上消除瞬时内存尖峰。
+// 设计目标：
+//  1. 真正的全局最大并发限制：active 永远 <= MAX_EXTERNAL_CONCURRENCY。
+//  2. 调用链隔离：每个异步调用链（AsyncLocalStorage）独立记录自己“持有”的 slot 层数，
+//     嵌套 withLimit 直接复用当前链已持有的 slot，绝不跨请求复用别人的 slot。
+//  3. 等待队列硬上限：queue 长度 >= QUEUE_MAX 时立即 reject，禁止无限 enqueue。
+//  4. 零 slot 泄漏：无论 success / timeout / Abort / exception，slot 都在 finally 释放。
 //
-// 与 navCacheService 的区别：这里是全局唯一的出站闸门，所有 provider（股票行情、
-// 历史 K 线、基金估值、指数、Yahoo）共享同一把锁，避免多个独立队列叠加放大并发。
+// 与原实现的关键差异：
+//  原 heldSlots 是进程级全局可变计数器，不同用户/不同请求链会错误地共享同一个计数，
+//  导致一个请求“持有”的 slot 会被另一个请求的嵌套调用误判为已持有 → 绕过全局限制
+//  （或死锁）。新实现用 AsyncLocalStorage 把“持有层数”绑定到当前异步调用链，
+//  全局 active 才是唯一的真实并发计数。
+
+const { AsyncLocalStorage } = require('node:async_hooks');
 
 const MAX_EXTERNAL_CONCURRENCY = Math.max(
   1,
   Number(process.env.ESTIMATE_EXTERNAL_CONCURRENCY || 6)
 );
 
-const queue = [];
+// 等待队列硬上限：超过即立即失败，防止无限内存增长与无限 enqueue。
+const QUEUE_MAX = Math.max(
+  8,
+  Number(process.env.ESTIMATE_EXTERNAL_QUEUE_MAX || 200)
+);
+
+// 当前真实进行中的出站任务数（唯一的全局并发计数）。
 let active = 0;
-// 当前调用链已持有的闸门名额数：用于识别「嵌套 withLimit」。
-// 根因修复（2026-08-25）：estimateEngine.quoteFor 用 withLimit 包裹 fetchStockQuote，
-// 而 fetchStockQuote → fetchText 内部又调用 withLimit —— 外层 6 个名额被占满后，
-// 内层请求永远排不到队首 → 死锁（ext active=6、queued 只增不减），
-// 导致 /estimate、第三方同步导入全部排队饿死（用户看到的「同步没反应」）。
-// 修复：调用链已持有名额时，内层调用直接执行（不再入队），
-// 并发上限仍由外层名额控制，内存/出站并发保护不变。
-let heldSlots = 0;
+
+// FIFO 等待队列：仅保存尚未拿到 slot 的任务。
+const queue = [];
+
+// 每个异步调用链通过 AsyncLocalStorage 记录自己持有的 slot 层数。
+const slotStore = new AsyncLocalStorage();
 
 function pump() {
-  if (active >= MAX_EXTERNAL_CONCURRENCY) return;
-  const next = queue.shift();
-  if (!next) return;
-  active += 1;
-  heldSlots += 1;
-  Promise.resolve()
-    .then(next.task)
-    .then(next.resolve, next.reject)
-    .finally(() => {
-      active -= 1;
-      heldSlots -= 1;
-      pump();
+  // 只要还有空余全局名额且队列非空，就尽可能多地放行。
+  while (active < MAX_EXTERNAL_CONCURRENCY && queue.length > 0) {
+    const next = queue.shift();
+    active += 1;
+    // 在本调用链上下文里运行：该链现在“持有”1 个 slot（depth=1）。
+    // 内层嵌套 withLimit 会检测到这个 store 而直接执行，不再二次入队。
+    slotStore.run({ depth: 1 }, () => {
+      Promise.resolve()
+        .then(next.task)
+        .then(next.resolve, next.reject)
+        .finally(() => {
+          active -= 1;
+          pump(); // 释放后立即尝试放行下一个等待任务
+        });
     });
+  }
 }
 
 /**
- * 限制 task 的并发执行数量，返回 task 的结果。
- * task 内部可安全地进行顺序的、非嵌套持有的 fetch（不会死锁）。
+ * 限制 task 的并发执行数量。
+ *
+ * - 若当前异步调用链已经持有 slot（嵌套调用），直接执行，复用当前链已持有的名额，
+ *   既不死锁也不会再占用一个全局名额。
+ * - 否则入队等待；若队列已满立即 reject（硬背压，禁止无限 enqueue）。
+ *
  * @param {Function<Promise<any>>} task
  * @returns {Promise<any>}
  */
 function withLimit(task) {
-  // 嵌套调用：当前调用链已持有名额，直接执行，避免自死锁（见文件头注释）
-  if (heldSlots > 0) {
-    return Promise.resolve().then(task);
+  const store = slotStore.getStore();
+  if (store) {
+    // 嵌套调用：本链已持有 slot，直接执行，不占用新的全局名额。
+    return Promise.resolve().then(() => {
+      store.depth += 1;
+      try {
+        return task();
+      } finally {
+        store.depth -= 1;
+      }
+    });
   }
+
   return new Promise((resolve, reject) => {
+    if (queue.length >= QUEUE_MAX) {
+      // 队列已满：立即失败，不让调用方无限 pending。
+      const err = new Error(
+        `[concurrencyLimit] 等待队列已满，拒绝入队 (queue=${queue.length}, QUEUE_MAX=${QUEUE_MAX})`
+      );
+      err.code = 'QUEUE_OVERFLOW';
+      err.statusCode = 503;
+      reject(err);
+      return;
+    }
     queue.push({ task, resolve, reject });
     pump();
   });
@@ -67,12 +98,21 @@ function externalConcurrencyStats() {
   return {
     active,
     queued: queue.length,
-    max: MAX_EXTERNAL_CONCURRENCY
+    max: MAX_EXTERNAL_CONCURRENCY,
+    queueMax: QUEUE_MAX
   };
+}
+
+/** 仅用于测试：重置全局状态（不重置已运行中的任务）。 */
+function __resetForTest() {
+  active = 0;
+  queue.length = 0;
 }
 
 module.exports = {
   withLimit,
   externalConcurrencyStats,
-  MAX_EXTERNAL_CONCURRENCY
+  MAX_EXTERNAL_CONCURRENCY,
+  QUEUE_MAX,
+  __resetForTest
 };

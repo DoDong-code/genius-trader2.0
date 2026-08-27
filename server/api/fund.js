@@ -17,7 +17,6 @@ const { getDatabase } = require('../database/db');
 const dbAsync = require('../database/dbAsync');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('node:crypto');
 
 function sendJson(response, statusCode, payload) {
   response.writeHead(statusCode, {
@@ -30,15 +29,19 @@ function sendJson(response, statusCode, payload) {
   response.end(JSON.stringify(payload));
 }
 
-// 诊断接口保护：复用现有 DEBUG_KEY；若未设置则生成一次性随机令牌（仅本次进程有效，非永久密钥，仅打印到服务端日志一次，绝不通过 API 返回）
-let __diagToken = null;
-function getDiagnosticKey() {
-  if (process.env.DEBUG_KEY) return process.env.DEBUG_KEY;
-  if (!__diagToken) {
-    __diagToken = crypto.randomBytes(16).toString('hex');
-    console.log('[diag] 临时只读诊断令牌(仅本次进程有效，非永久密钥):', __diagToken);
+// AI bundle 安全加载：产物缺失或被 ensureAiBundle 标记为缺失时，显式返回 null
+// （让调用方返回 503 降级），绝不抛出 500 / 崩溃。避免每次请求都 try/catch require。
+function loadAiBundle() {
+  if (process.env.__AI_BUNDLE_MISSING === '1') return null;
+  try {
+    return require('../services/ai/index');
+  } catch (e) {
+    if (e && e.code === 'MODULE_NOT_FOUND') {
+      process.env.__AI_BUNDLE_MISSING = '1';
+      return null;
+    }
+    throw e;
   }
-  return __diagToken;
 }
 
 function routeMatch(pathname, expression) {
@@ -75,130 +78,9 @@ function readJsonBody(request) {
   });
 }
 
-// 账户摘要：只返回 name / accountType / syncSource / convertedFromSync，绝不返回持仓、金额、token 等
-function summarizeAccount(name, acc) {
-  if (!acc || typeof acc !== 'object') return { name: String(name || ''), accountType: null, accountTypeLabel: null, syncSource: null, convertedFromSync: false };
-  const type = acc.accountType || (acc.syncSource || acc.__source ? 'sync' : 'local');
-  const typeLabel = type === 'sync' ? '同步账户' : type === 'local' ? '本地账户' : String(type);
-  return {
-    name: String(name || acc.name || ''),
-    accountType: type,
-    accountTypeLabel: typeLabel,
-    syncSource: acc.syncSource || null,
-    convertedFromSync: Boolean(acc.convertedFromSync)
-  };
-}
-
 async function handleFundApi(request, response, url) {
   if (request.method === 'OPTIONS') {
     sendJson(response, 204, {});
-    return true;
-  }
-
-  // ---- 临时只读数据库诊断接口（DEBUG_KEY 鉴权，仅 GET，严禁写）----
-  if (url.pathname === '/api/debug/database' && request.method === 'GET') {
-    const debugKey = process.env.DEBUG_KEY || '';
-    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
-    if (!debugKey || providedKey !== debugKey) {
-      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
-      return true;
-    }
-    try {
-      const { all } = require('../database/dbAsync');
-      const userData = await all('SELECT user_id, length(data) AS data_length, updated_at FROM user_data ORDER BY user_id');
-      const credentials = await all('SELECT user_id, source_name, token FROM source_credentials ORDER BY user_id, source_name');
-      const backups = await all('SELECT COUNT(*) AS count FROM account_backups');
-      // 只返回元信息，绝不返回 data 全文、token 原文
-      sendJson(response, 200, {
-        success: true,
-        user_data: {
-          count: (userData || []).length,
-          rows: (userData || []).map(r => ({ user_id: r.user_id, data_length: Number(r.data_length) || 0, updated_at: r.updated_at }))
-        },
-        source_credentials: {
-          count: (credentials || []).length,
-          rows: (credentials || []).map(r => ({ user_id: r.user_id, provider: r.source_name, has_credential: Boolean(r.token) }))
-        },
-        account_backups: {
-          count: Number((backups && backups[0] && backups[0].count) || 0)
-        }
-      });
-    } catch (e) {
-      sendJson(response, 500, { success: false, error: '诊断查询失败：' + (e.message || '未知错误') });
-    }
-    return true;
-  }
-
-  // ---- 临时只读账户摘要接口（DEBUG_KEY 鉴权，仅 GET）----
-  if (url.pathname === '/api/debug/account-summary' && request.method === 'GET') {
-    const debugKey = process.env.DEBUG_KEY || '';
-    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
-    if (!debugKey || providedKey !== debugKey) {
-      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
-      return true;
-    }
-    try {
-      const { all } = require('../database/dbAsync');
-      const rows = await all('SELECT user_id, data, updated_at FROM user_data ORDER BY user_id');
-      const users = (rows || []).map(r => {
-        let parsed = null;
-        try { parsed = JSON.parse(r.data); } catch (e) { parsed = null; }
-        // 兼容 accounts 在顶层或 state 内、对象或数组
-        let accountsSource = null;
-        if (parsed && parsed.accounts) accountsSource = parsed.accounts;
-        else if (parsed && parsed.state && parsed.state.accounts) accountsSource = parsed.state.accounts;
-        const accountSummaries = [];
-        if (accountsSource && typeof accountsSource === 'object' && !Array.isArray(accountsSource)) {
-          Object.keys(accountsSource).forEach(name => accountSummaries.push(summarizeAccount(name, accountsSource[name])));
-        } else if (Array.isArray(accountsSource)) {
-          accountsSource.forEach(acc => accountSummaries.push(summarizeAccount(acc && acc.name, acc)));
-        }
-        // providerStatus 只返回 connected 布尔，不返回 token/credential
-        const providerRaw = (parsed && parsed.providerStatus) || (parsed && parsed.state && parsed.state.providerStatus) || {};
-        const providerSummary = {};
-        Object.keys(providerRaw || {}).forEach(k => {
-          if (k === 'yjbConnected' || k === 'xbyjConnected') providerSummary[k] = Boolean(providerRaw[k]);
-        });
-        return {
-          user_id: Number(r.user_id),
-          account_count: accountSummaries.length,
-          accounts: accountSummaries,
-          active: parsed ? (parsed.active || parsed.activeAccount || parsed.activeAccountName || null) : null,
-          providerStatus: providerSummary,
-          updatedAt: parsed ? (parsed.updatedAt || null) : null,
-          db_updated_at: r.updated_at
-        };
-      });
-      sendJson(response, 200, { success: true, users });
-    } catch (e) {
-      sendJson(response, 500, { success: false, error: '摘要查询失败：' + (e.message || '未知错误') });
-    }
-    return true;
-  }
-
-  // ---- 临时只读诊断：source_credentials 安全状态（仅返回 count / credential_count，绝不返回任何 token/secret/DATABASE_URL）----
-  if (url.pathname === '/api/debug/credentials-status' && request.method === 'GET') {
-    const providedKey = url.searchParams.get('key') || request.headers['x-debug-key'] || '';
-    const expectedKey = getDiagnosticKey();
-    if (!expectedKey || providedKey !== expectedKey) {
-      sendJson(response, 401, { success: false, error: 'DEBUG_KEY 缺失或不正确' });
-      return true;
-    }
-    try {
-      const { get } = require('../database/dbAsync');
-      const total = await get('SELECT COUNT(*) AS count FROM source_credentials');
-      // 注意：schema 中 token 为 NOT NULL DEFAULT ''，故用 <> '' 判定“存在加密凭证”（与现有 debug 接口的 Boolean(r.token) 一致）
-      const cred = await get("SELECT COUNT(*) AS count FROM source_credentials WHERE token <> '' OR refresh_token <> '' OR cookie <> ''");
-      sendJson(response, 200, {
-        success: true,
-        source_credentials: {
-          count: Number(total && total.count) || 0,
-          credential_count: Number(cred && cred.count) || 0
-        }
-      });
-    } catch (e) {
-      sendJson(response, 500, { success: false, error: '诊断查询失败：' + (e.message || '未知错误') });
-    }
     return true;
   }
 
@@ -279,7 +161,12 @@ async function handleFundApi(request, response, url) {
       });
       return true;
     }
-    await saveUserState(userId, body.state);
+    try {
+      await saveUserState(userId, body.state);
+    } catch (e) {
+      sendJson(response, e.statusCode || 500, { success: false, error: e.message, code: e.code });
+      return true;
+    }
     sendJson(response, 200, { success: true });
     return true;
   }
@@ -331,7 +218,7 @@ async function handleFundApi(request, response, url) {
         await saveUserState(userId, snapshot);
         sendJson(response, 200, { success: true, state: snapshot });
       } catch (e) {
-        sendJson(response, 500, { success: false, error: '恢复失败：' + (e.message || '未知错误') });
+        sendJson(response, e.statusCode || 500, { success: false, error: '恢复失败：' + (e.message || '未知错误'), code: e.code });
       }
       return true;
     }
@@ -448,7 +335,11 @@ async function handleFundApi(request, response, url) {
           config.apiKey = headerKey;
         }
         
-        const ai = require('../services/ai/index');
+        const ai = loadAiBundle();
+        if (!ai) {
+          sendJson(response, 503, { success: false, error: 'AI 服务暂不可用（构建产物缺失，请先执行 npm run build:ai）' });
+          return true;
+        }
         try {
           const reply = await ai.chat(message, config);
           sendJson(response, 200, { success: true, reply });
@@ -488,7 +379,11 @@ async function handleFundApi(request, response, url) {
           portfolio.userQuery = body.userQuery;
         }
 
-        const ai = require('../services/ai/index');
+        const ai = loadAiBundle();
+        if (!ai) {
+          sendJson(response, 503, { success: false, error: 'AI 服务暂不可用（构建产物缺失，请先执行 npm run build:ai）' });
+          return true;
+        }
         try {
           const analysis = await ai.analyzePortfolio(portfolio, config);
           // 服务端兜底：按持仓逐只补齐 suggestions（无论 AI 是否返回）

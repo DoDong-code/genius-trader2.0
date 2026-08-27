@@ -1,0 +1,107 @@
+==================================================
+  Genius Trader 生产压力测试最终报告
+  生成时间: 2026-08-26T21:41:43.781Z
+==================================================
+
+【一、总体指标】
+  测试人数(虚拟用户池): 110
+  请求总数:            2,750,410
+  成功数(2xx):         2,691,923
+  失败数(非2xx/错误):  58,483
+  P50:                 25 ms
+  P95:                 25 ms
+  P99:                 50 ms
+  最大响应时间:        30013 ms
+  测试开始 heapUsed:   14 MB
+  测试结束 heapUsed:   12 MB
+  最大 heapUsed:       38 MB
+  RSS 峰值:            164 MB
+  event loop delay 峰值: 58 ms
+  PG waiting 峰值:     167
+  Provider queue 峰值: 106
+  OOM 次数:            0
+  SIGABRT 次数:        0
+  账号串数据次数:      0
+  CAS 冲突次数:        2886  (被拒绝的 stale revision)
+  超时次数(503/504/408/aborted/error): 566
+  Provider 未触发(缓存/凭证门,非故障): 1265112
+  Provider 穿透请求总量(全模式累计): 1939
+
+【二、状态分布】
+  200: 2,691,924
+  429: 57,921
+  503: 562
+  aborted: 4
+
+【三、各并发梯度 / 故障场景】
+  [normal-10] 并发=10 时长=60s 通过=PASS 请求=16176 失败=352 P99=25 ms 隔离违规=0 CAS=OK 登出=17 ms(<9s:true)
+  [normal-25] 并发=25 时长=60s 通过=PASS 请求=41220 失败=821 P99=25 ms 隔离违规=0 CAS=OK 登出=15 ms(<9s:true)
+  [normal-50] 并发=50 时长=60s 通过=PASS 请求=80177 失败=1695 P99=50 ms 隔离违规=0 CAS=OK 登出=14 ms(<9s:true)
+  [normal-100] 并发=100 时长=60s 通过=PASS 请求=103334 失败=33 P99=150 ms 隔离违规=0 CAS=OK 登出=14 ms(<9s:true)
+  [pg-pool-full] pg=pool-full prov=normal 通过=PASS 请求=154 状态={"200":16,"503":137,"aborted":1} pgWaiting=67 provRatio=0
+  [pg-slow-query] pg=slow-query prov=normal 通过=PASS 请求=141 状态={"200":18,"503":122,"aborted":1} pgWaiting=67 provRatio=0
+  [pg-transaction-timeout] pg=transaction-timeout prov=normal 通过=PASS 请求=172 状态={"200":24,"503":146,"aborted":2} pgWaiting=136 provRatio=0
+  [pg-acquire-timeout] pg=acquire-timeout prov=normal 通过=PASS 请求=173 状态={"200":16,"503":157} pgWaiting=167 provRatio=0
+  [prov-500] pg=normal prov=500 通过=PASS 请求=21546 状态={"200":21546} pgWaiting=167 provRatio=0.041
+  [prov-timeout] pg=normal prov=timeout 通过=PASS 请求=19677 状态={"200":19172,"429":505} pgWaiting=167 provRatio=0.001
+  [prov-abort] pg=normal prov=abort 通过=PASS 请求=21666 状态={"200":21643,"429":23} pgWaiting=167 provRatio=0.041
+  [prov-slow] pg=normal prov=slow 通过=PASS 请求=19330 状态={"200":18873,"429":457} pgWaiting=167 provRatio=0.002
+
+【四、30 分钟长压 + 5 分钟观察】
+  长压: 并发=50 请求=2426645 失败=54035 P99=50 ms 隔离=0 CAS=OK 登出=15 ms(<9s:true)
+  观察: heapUsedStart=27 MB heapUsedEnd=12 MB 稳定=true heapPeak=38 MB rssPeak=164 MB elPeak=58 ms
+  终检 CAS: accepted=1 conflicts=299 integrity=true staleRejected=true pass=true
+
+【五、明确结论 PASS/FAIL】
+  10 并发:   PASS
+  25 并发:   PASS
+  50 并发:   PASS
+  100 并发:  PASS
+  30分钟长压: PASS
+  Provider 穿透(不崩溃+全穿透): PASS
+
+【五之一、Provider 强制穿透验证（独立分组）】
+  服务端在故障下未崩溃(红线): YES
+  被穿透 Provider: eastmoney, xiaobeiyangji, yangjibao, yahoo, tencent, sina, other
+  全 Provider 均被穿透(无删除/跳过): YES
+  模式=normal 服务端状态={"200":60} providerActivePeak(累计)=6
+     eastmoney: req=6 ok=6 err=0 timeout=0 abort=0 fallback=0
+     xiaobeiyangji: req=13 ok=13 err=0 timeout=0 abort=0 fallback=0
+     yangjibao: req=14 ok=14 err=0 timeout=0 abort=0 fallback=0
+     yahoo: req=2 ok=2 err=0 timeout=0 abort=0 fallback=0
+     tencent: req=12 ok=12 err=0 timeout=0 abort=0 fallback=0
+     sina: req=12 ok=12 err=0 timeout=0 abort=0 fallback=0
+  模式=500 服务端状态={"200":60} providerActivePeak(累计)=6
+     eastmoney: req=48 ok=0 err=48 timeout=0 abort=0 fallback=0
+     xiaobeiyangji: req=12 ok=0 err=12 timeout=0 abort=0 fallback=0
+     yangjibao: req=12 ok=0 err=12 timeout=0 abort=0 fallback=0
+     yahoo: req=2 ok=0 err=2 timeout=0 abort=0 fallback=0
+     tencent: req=24 ok=0 err=24 timeout=0 abort=0 fallback=0
+     sina: req=24 ok=0 err=24 timeout=0 abort=0 fallback=0
+     other: req=24 ok=0 err=24 timeout=0 abort=0 fallback=0
+  模式=timeout 服务端状态={"aborted":60} providerActivePeak(累计)=6
+     xiaobeiyangji: req=9 ok=0 err=0 timeout=6 abort=0 fallback=6
+     yangjibao: req=9 ok=0 err=0 timeout=6 abort=0 fallback=6
+     yahoo: req=2 ok=0 err=0 timeout=2 abort=0 fallback=2
+     tencent: req=12 ok=0 err=0 timeout=12 abort=0 fallback=12
+  模式=abort 服务端状态={"200":60} providerActivePeak(累计)=6
+     eastmoney: req=96 ok=0 err=0 timeout=0 abort=96 fallback=96
+     xiaobeiyangji: req=16 ok=0 err=0 timeout=3 abort=16 fallback=19
+     yangjibao: req=16 ok=0 err=0 timeout=3 abort=16 fallback=19
+     tencent: req=36 ok=0 err=0 timeout=0 abort=36 fallback=36
+     sina: req=48 ok=0 err=0 timeout=0 abort=48 fallback=48
+     other: req=48 ok=0 err=0 timeout=0 abort=48 fallback=48
+  模式=slow 服务端状态={"200":60} providerActivePeak(累计)=6
+     eastmoney: req=24 ok=24 err=0 timeout=0 abort=0 fallback=0
+     xiaobeiyangji: req=24 ok=24 err=0 timeout=0 abort=0 fallback=0
+     yangjibao: req=24 ok=24 err=0 timeout=0 abort=0 fallback=0
+     yahoo: req=2 ok=2 err=0 timeout=0 abort=0 fallback=0
+     tencent: req=12 ok=12 err=0 timeout=0 abort=0 fallback=0
+     sina: req=12 ok=12 err=0 timeout=0 abort=0 fallback=0
+  fallback 总次数(各 Provider 失败触发服务端降级): 292
+
+【六、OOM / 内存稳定性判定】
+  heapUsed 峰值 < 1.2GB 且观察窗稳定(无泄漏): YES (peak=38 MB obsStable=true)
+  持续单调增长(观察窗内): NO
+  接近 Node heap limit: NO (peak=38 MB)
+  SIGABRT/status134: NO
