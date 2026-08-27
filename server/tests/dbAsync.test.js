@@ -6,7 +6,7 @@
  *  1) 池满（connect 延迟超过 acquire timeout）时 acquireClient 在 ACQUIRE_TIMEOUT_MS 内快速失败（503，不无限排队）
  *  2) 超时被放弃后，迟到连接自动 release（无连接泄漏）
  *  3) query 异常路径：client 在 finally 中 release
- *  4) 每条语句带 statement_timeout（通过 options 注入）
+ *  4) 每条语句带 statement_timeout（通过 connect 事件 SET，不再用 startup options 注入——Neon 兼容）
  *  5) transaction：work 抛错 → ROLLBACK + release；正常 → COMMIT + release
  *  6) transaction 卡死：watchdog 真实触发 → TRANSACTION_TIMEOUT + ROLLBACK + release（绝不永久占用 client）
  *  7) 连续 timeout 不造成 pool waiting 无限增长
@@ -41,6 +41,7 @@ function makeFakePg() {
   class FakePool {
     constructor(cfg) {
       this.cfg = cfg || {};
+      this._listeners = {};
       this.totalCount = 0;
       this.idleCount = 0;
       this.waitingCount = 0;
@@ -65,6 +66,7 @@ function makeFakePg() {
           this.totalCount++;
           this.idleCount++;
           this.lastClient = c;
+          this._emit('connect', c);
           resolve(c);
         };
         // 模拟池满：connect 在 ACQUIRE_TIMEOUT 之后才返回，触发“池满快速失败”路径。
@@ -73,9 +75,13 @@ function makeFakePg() {
         else finish();
       });
     }
-    // 与真实 pg.Pool 对齐：on('error', ...) 为 no-op，避免 getPool 注册监听时报错
-    on() {
+    // 与真实 pg.Pool 对齐：支持 'error' 与 'connect' 监听（connect 在物理连接建立后触发）
+    on(event, cb) {
+      (this._listeners[event] = this._listeners[event] || []).push(cb);
       return this;
+    }
+    _emit(event, ...args) {
+      (this._listeners[event] || []).forEach((cb) => cb(...args));
     }
   }
   FakePool._last = null;
@@ -145,16 +151,21 @@ test('query 异常路径：client 在 finally 释放', async () => {
   assert.strictEqual(fake.lastClient.released, true, '异常后 client 必须 release');
 });
 
-test('statement_timeout 通过 options 注入到建连', async () => {
+test('statement_timeout 不再通过 startup options 注入（Neon 兼容）且每连接仍 SET', async () => {
   setDefaults({ connectDelayMs: 0, failConnect: false, failAllQueries: false });
   dbAsync.__resetForTest();
   const p = dbAsync.all('SELECT 1');
   const fake = FakePool._last;
   await p;
+  // Neon 兼容性：startup options 不得再含 statement_timeout（否则 Neon pooler 拒绝并报告
+  // "unsupported startup parameter in options: statement_timeout"）。
   assert.ok(
-    /statement_timeout=15000/.test(fake.cfg.options || ''),
-    `建连 options 应包含 statement_timeout=15000，实际: ${fake.cfg.options}`
+    !/statement_timeout/.test(fake.cfg.options || ''),
+    `建连 startup options 不得含 statement_timeout，实际: ${fake.cfg.options}`
   );
+  // 超时保护仍在：pool 'connect' 事件对每条物理连接执行 SET statement_timeout（会话级，覆盖后续 query）。
+  const connectSets = fake.lastClient.queries.filter((q) => /SET statement_timeout = 15000/i.test(q));
+  assert.ok(connectSets.length >= 1, '每条物理连接应通过 SET statement_timeout 生效（保护未丢失）');
   assert.strictEqual(fake.lastClient.released, true);
 });
 
@@ -183,6 +194,8 @@ test('transaction：成功 → COMMIT + release', async () => {
   assert.strictEqual(result, 'ok');
   const queries = fake.lastClient.queries.map(String);
   assert.ok(queries.some((q) => /COMMIT/i.test(q)), '应发出 COMMIT');
+  // Neon 事务池模式下会话级 statement_timeout 不跨事务保留；必须经 SET LOCAL 对本事务生效。
+  assert.ok(queries.some((q) => /SET LOCAL statement_timeout/i.test(q)), '事务内应经 SET LOCAL statement_timeout 生效');
   assert.strictEqual(fake.lastClient.released, true);
 });
 

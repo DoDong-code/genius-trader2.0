@@ -26,9 +26,10 @@ function isCloud() {
   return Boolean(process.env.DATABASE_URL);
 }
 
-// 每条语句的超时（statement_timeout）：通过连接选项在每次物理建连时设置，
+// 每条语句的超时（statement_timeout）：建连后通过 SQL 设置，而非 startup option，
+// 否则 Neon 连接池会拒绝并报告 unsupported startup parameter in options: statement_timeout。
 // 覆盖单行查询与事务内所有语句（等价于 query timeout / transaction timeout）。
-// 用 options 一次性设置，避免每条查询额外 SET 往返。
+// 在 pool 'connect' 事件中按物理连接设置一次，避免每条查询额外 SET 往返。
 const STATEMENT_TIMEOUT_MS = Number(process.env.PG_STATEMENT_TIMEOUT_MS || 15000);
 
 // 获取连接时的“池满快速失败”超时：超过该时间仍未拿到连接则直接 reject（503），
@@ -43,15 +44,22 @@ async function getPool() {
       max: Number(process.env.PG_POOL_MAX || 15),
       // 建连超时：从 30s 降到 10s（合理值），避免单条建连长时间挂起占用事件循环
       connectionTimeoutMillis: Number(process.env.PG_CONNECTION_TIMEOUT_MS || 10000),
-      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 60000),
-      // 在物理建连时生效的会话级语句超时（覆盖 query 与 transaction 内全部语句）
-      options: `-c statement_timeout=${STATEMENT_TIMEOUT_MS}`
+      idleTimeoutMillis: Number(process.env.PG_IDLE_TIMEOUT_MS || 60000)
     });
     // P0 健壮性修复（Phase 3.1.2）：PG idle client / 连接错误若未监听会冒泡为
     // 未处理的 'error' 事件，导致 Node 进程退出（Render 自动重启）。
     // 注册错误监听，仅记录不吞掉查询异常——查询 await 失败仍按原路径抛出 → API 返回 500。
     pool.on('error', (err) => {
       console.error('[dbAsync] PostgreSQL pool idle/connection error (non-fatal, 不终止进程):', err && err.message);
+    });
+    // Neon 兼容性修复：statement_timeout 不得作为 startup option（Neon pooler 拒绝并返回
+    // "unsupported startup parameter in options: statement_timeout"）。改为每条物理连接建立后
+    // 通过 SQL 设置一次（会话级，覆盖该连接后续全部 query / transaction）。事务路径另有
+    // JS 侧 transaction watchdog（PG_TRANSACTION_TIMEOUT_MS）兜底，互不冲突。
+    pool.on('connect', (client) => {
+      client.query(`SET statement_timeout = ${STATEMENT_TIMEOUT_MS}`).catch((e) => {
+        console.error('[dbAsync] 设置 statement_timeout 失败（非致命）:', e && e.message);
+      });
     });
   }
   return pool;
@@ -185,6 +193,9 @@ async function transaction(work) {
     timeoutError.statusCode = 504;
     try {
       await client.query('BEGIN');
+      // Neon 事务池模式下会话级 statement_timeout 不跨事务保留；
+      // 用 SET LOCAL 确保本事务内所有语句受控（效果等同原 startup option，且不触发 Neon 拒绝）。
+      await client.query(`SET LOCAL statement_timeout = ${STATEMENT_TIMEOUT_MS}`);
       // work 包成 Promise：即使 work 内部同步抛错也能被正确 race/reject，不会泄漏。
       const workPromise = Promise.resolve().then(() => {
         const helpers = {
