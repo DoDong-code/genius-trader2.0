@@ -2494,7 +2494,8 @@
         if (navDate) f.navUpdatedAt = navDate;
       } catch (e) { /* 单只基金刷新失败不阻塞整体 */ }
     }));
-    if (typeof window.savePortfolioState === 'function') window.savePortfolioState();
+    // 估值/净值派生字段刷新（系统更新，非用户持仓编辑）：仅落本地，不触发云端 PUT
+    if (typeof window.savePortfolioState === 'function') window.savePortfolioState({ system: true });
   }
 
   // 诊断入口：先刷新最新数据，再执行 AI 诊断

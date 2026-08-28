@@ -6,6 +6,11 @@ const STORAGE_KEY = 'genius-trader-portfolio-v2';
 const DATA_UPDATED_AT_KEY = 'genius-trader-data-updated-at';
 const DATA_FRESHNESS_TTL_MS = 30 * 60 * 1000; // 30 分钟，与网页端一致
 
+// 云端同步防抖 / 重试参数（与网页端 persistence.js 对齐）
+const CLOUD_DEBOUNCE_MS = 400;
+const CLOUD_RETRY_BASE_MS = 2000;
+const CLOUD_RETRY_MAX_MS = 30000;
+
 App({
   globalData: {
     accounts: {},
@@ -54,6 +59,14 @@ App({
     // 3. Load or restore state (local first, instant)
     this.loadState();
 
+    // 3a. 初始化云端同步运行时状态（单飞 + dirty + 退避重试）。
+    //     恢复登录态前先 block，避免未鉴权时把本地数据误推到云端（防「空账号覆盖」）。
+    this._cloudDirty = false;        // 本地已改、云端尚未一致
+    this._cloudFailCount = 0;        // 连续失败次数（指数退避）
+    this._cloudTimer = null;         // 防抖计时器
+    this._cloudSaveBlocked = true;   // 登录态恢复前禁止自动云端 PUT
+    this._syncGeneration = 0;        // 切换/退出时自增，使旧请求失效
+
     // 3b. If cloud sync is enabled, pull latest account data in background
     if (wx.getStorageSync('use_cloud_db')) {
       this.loadStateFromCloud()
@@ -66,6 +79,16 @@ App({
 
     // 4. 恢复登录态（正式多用户：token → GET /api/auth/me）
     this.restoreAuth();
+  },
+
+  // 回到前台：补一次云端同步（防 onHide 时网络不可用导致漏推）
+  onShow() {
+    this.flushCloudSaveNow();
+  },
+
+  // 切后台 / 退出小程序：立即把待同步数据推到云端（兜底，对应网页端 pagehide/visibilitychange）
+  onHide() {
+    this.flushCloudSaveNow();
   },
 
   // 恢复登录态：有 token 则校验并进入正式用户模式，否则回游客模式（不删本地账户数据）
@@ -81,6 +104,8 @@ App({
       if (res && res.user) {
         this.globalData.auth = { token, user: res.user };
         this.globalData.authState = 'authenticated';
+        this._cloudSaveBlocked = false;   // 已鉴权：解除自动云端 PUT 保护
+        this._syncGeneration += 1;        // 失效退出前可能残留的在途请求
         console.log('[Auth] restoring account state');
         // 登录用户：后台拉取该用户的云端 account/state
         this.loadStateFromCloud()
@@ -90,6 +115,8 @@ App({
             this.notifyAccountsChanged();
             // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
             this.refreshProviderStatus().catch(() => {});
+            // 恢复登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送
+            this.scheduleCloudSave();
           })
           .catch(() => {});
       } else {
@@ -115,6 +142,8 @@ App({
     setAuthToken(res.token);
     this.globalData.auth = { token: res.token, user: res.user || null };
     this.globalData.authState = 'authenticated';
+    this._cloudSaveBlocked = false;   // 已鉴权：解除自动云端 PUT 保护
+    this._syncGeneration += 1;        // 失效退出前可能残留的在途请求
     console.log('[Auth] login success');
     // ═══ 临时调试：登录身份确认（诊断后删除）═══
     console.log('[Login-Debug] auth set | user_id =', res.user && res.user.id, '| email =', res.user && res.user.email, '| token len =', (res.token || '').length);
@@ -131,6 +160,8 @@ App({
       // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
       await this.refreshProviderStatus();
       console.log('[Auth] provider state restored');
+      // 登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送
+      this.scheduleCloudSave();
     } catch (e) { /* 云端无数据/拉取失败不影响登录 */ }
     return { user: res.user, cloudSynced };
   },
@@ -159,6 +190,13 @@ App({
       return { syncOk: true, done: true };
     }
     this.globalData.authState = 'logging_out';
+
+    // 切换/退出保护：禁止任何残留自动云端 PUT，并使在途请求失效，清理排程（防账号 A→B 串写）
+    this._cloudSaveBlocked = true;
+    this._syncGeneration += 1;
+    if (this._cloudTimer) { clearTimeout(this._cloudTimer); this._cloudTimer = null; }
+    this._cloudDirty = false;
+    this._cloudFailCount = 0;
 
     // 1. 强制同步（先保存最新数据，此时第三方仍为 connected 状态；不受 localUpdatedAt/cloudUpdatedAt 影响）
     let syncOk = true;
@@ -251,6 +289,11 @@ App({
   // 清理当前用户相关本地数据，恢复「未登录默认状态」。
   // 保留公共配置：api_base_url / ai 配置 / experimentalMode / estimate_source / columnOrder / user_info 等（与用户无关的数据不删）。
   _clearLocalUserData() {
+    // 二次保险：清理后任何残留自动 PUT 都被 block，dirty 置否，绝不会把「清空后的默认账号」推到云端
+    this._cloudSaveBlocked = true;
+    this._cloudDirty = false;
+    this._cloudFailCount = 0;
+    if (this._cloudTimer) { clearTimeout(this._cloudTimer); this._cloudTimer = null; }
     this.globalData.accounts = { '主账户': { name: '主账户', funds: [] } };
     this.globalData.activeAccountName = '主账户';
     this.globalData.providerStatus = {
@@ -322,7 +365,53 @@ App({
     } catch (e) {
       console.error('[App] Local state persistence failed:', e);
     }
-    // 手动同步模式：不再每次改动自动同步云端，由用户点「立即同步」显式推送
+    // 本地已即时落盘（同步、安全）；若已登录且未被切换/退出保护，则触发防抖云端同步
+    this.scheduleCloudSave();
+  },
+
+  // 防抖云端同步调度：仅登录态(authenticated)且未被 block 时排程；
+  // 连续编辑只保留最后状态（dirty 标记），避免并发旧请求覆盖新数据、避免请求刷屏。
+  scheduleCloudSave() {
+    if (this._cloudSaveBlocked) return;
+    if (this.globalData.authState !== 'authenticated') return;
+    this._cloudDirty = true;
+    if (this._cloudTimer || this._cloudSavePending) return; // 已有排程/在途，等待其后再判断 dirty
+    this._cloudTimer = setTimeout(() => {
+      this._cloudTimer = null;
+      this.doCloudSave();
+    }, CLOUD_DEBOUNCE_MS);
+  },
+
+  // 立即把当前 dirty 状态推到云端（onHide/退出前兜底、onShow 补推、恢复登录后补推）
+  flushCloudSaveNow() {
+    if (this._cloudSaveBlocked) return;
+    if (this.globalData.authState !== 'authenticated') return;
+    if (!this._cloudDirty || this._cloudSavePending) return;
+    if (this._cloudTimer) { clearTimeout(this._cloudTimer); this._cloudTimer = null; }
+    this.doCloudSave();
+  },
+
+  // 单飞云端写：串行化（saveStateToCloud 内部已用 _cloudSavePending 防并发），
+  // 捕获 generation 防止切换/退出后旧请求写回；成功清 dirty，失败保留 dirty 并退避重试。
+  doCloudSave() {
+    if (this._cloudSaveBlocked) return;
+    if (this.globalData.authState !== 'authenticated') return;
+    const myGen = this._syncGeneration;
+    this.saveStateToCloud().then(ok => {
+      if (myGen !== this._syncGeneration) return; // 切换/退出后失效，丢弃结果
+      if (ok) {
+        this._cloudDirty = false;
+        this._cloudFailCount = 0;
+      } else if (this._cloudDirty && !this._cloudTimer && !this._cloudSavePending) {
+        // 网络失败：保留 dirty，按指数退避延时重发（恢复后仍可补全，本地数据不丢）
+        this._cloudFailCount += 1;
+        const delay = Math.min(
+          CLOUD_RETRY_MAX_MS,
+          CLOUD_RETRY_BASE_MS * Math.pow(2, this._cloudFailCount - 1)
+        );
+        this._cloudTimer = setTimeout(() => { this._cloudTimer = null; this.doCloudSave(); }, delay);
+      }
+    }).catch(() => {});
   },
 
   // ---------- Cloud Account Sync (mirrors accounts to Render backend) ----------

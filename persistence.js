@@ -420,7 +420,7 @@
     window.fundStore.propagate(code);
     
     if (typeof window.savePortfolioState === 'function') {
-      window.savePortfolioState();
+      window.savePortfolioState({ system: true });
     }
     
     window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
@@ -547,10 +547,10 @@
       this.propagate(code);
       
       if (changed) {
-        if (typeof window.savePortfolioState === 'function') {
-          window.savePortfolioState();
-        }
-        window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
+      if (typeof window.savePortfolioState === 'function') {
+        window.savePortfolioState({ system: true });
+      }
+      window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
       }
       return fund;
     },
@@ -806,6 +806,11 @@
   let cloudSaveInFlight=false; // 单飞守卫：同一时刻只允许一个在途云端 PUT，避免大 JSON 并发叠加撑爆内存
   let syncGeneration=0; // 退出/登录时自增，作废在途/待发的旧账号 PUT（防旧账号数据覆盖新账号）
   window.__syncGeneration=syncGeneration;
+  let cloudDirty=false; // 本地已修改、云端尚未一致（用于关闭/刷新/切后台兜底与失败重试）
+  let cloudFailCount=0; // 连续失败次数，用于指数退避重试
+  const CLOUD_DEBOUNCE_MS=400; // 防抖：连续修改只保存最终 state
+  const CLOUD_RETRY_BASE_MS=2000;
+  const CLOUD_RETRY_MAX_MS=30000;
   let __lastPersistLog=0;
   function logPersistSize(tag,bytes){
     const now=Date.now();
@@ -814,40 +819,95 @@
       __lastPersistLog=now;
     }
   }
+  function cloudReady(){
+    return Boolean(window.auth&&window.auth.state&&window.auth.state.token) &&
+      window.accountRestoreStatus==='ready' && window.cloudSyncReady===true;
+  }
+  // 标记需要同步并安排防抖上传；闸门未就绪时仅标记 dirty，待恢复完成后由 save() 触发
   function scheduleCloudSave(){
-    if(cloudSaveInFlight)return; // 已有在途 PUT，避免叠加大 JSON
     if(!window.auth||!window.auth.state||!window.auth.state.token)return;
-    // 同步闸门：云端恢复完成前，禁止任何 PUT /api/account/state
     if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true){
-      console.log('[SYNC] CLOUD_SAVE_SCHEDULE_BLOCKED status='+window.accountRestoreStatus+' cloudSyncReady='+window.cloudSyncReady);
+      cloudDirty=true; // 恢复完成前标记，恢复后 save() 会真正上传
       return;
     }
+    cloudDirty=true;
+    if(cloudSaveInFlight)return; // 在途 PUT 期间不再叠加；结束后由 finally 重新排期
     clearTimeout(cloudTimer);
-    cloudTimer=setTimeout(()=>{
-      if(cloudSaveInFlight)return; // 双检：在途 PUT 期间不再叠加
-      // 触发时二次校验（防止计时器跨越登录/恢复边界）
-      if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true)return;
-      const myGen=syncGeneration; // 捕获代际：PUT 期间若发生退出/登录则作废本次写入
-      cloudSaveInFlight=true;
-      const controller=(typeof AbortController==='function')?new AbortController():null;
-      const timer=controller?setTimeout(function(){controller.abort();},20000):null;
-      const body=JSON.stringify({state:buildPersisted()});
-      logPersistSize('scheduleCloudSave',body.length);
+    cloudTimer=setTimeout(doCloudSave,CLOUD_DEBOUNCE_MS);
+  }
+  function doCloudSave(){
+    if(cloudSaveInFlight)return; // 双检：单飞
+    if(!cloudReady())return; // 跨越登录/恢复边界则放弃本次（保留 dirty）
+    const myGen=syncGeneration; // 捕获代际：PUT 期间若发生退出/登录则作废本次写入
+    cloudSaveInFlight=true;
+    const controller=(typeof AbortController==='function')?new AbortController():null;
+    const timer=controller?setTimeout(function(){controller.abort();},20000):null;
+    const body=JSON.stringify({state:buildPersisted()});
+    logPersistSize('doCloudSave',body.length);
+    fetch('/api/account/state',{
+      method:'PUT',
+      headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
+      body:body,
+      signal:controller?controller.signal:undefined
+    }).then(function(res){
+      if(myGen!==syncGeneration){console.log('[SYNC] SAVE_STALE_DROPPED gen changed');return;}
+      if(res.ok){
+        cloudDirty=false; cloudFailCount=0;
+        console.log('[SYNC] CLOUD_SAVE_OK');
+      } else if(res.status===409){
+        // 服务端拒绝空覆盖：云端有数据而本地为空 → 以云端为准，停止重试（本地数据仍安全）
+        console.warn('[SYNC] CLOUD_SAVE_REJECTED_409 keep-local');
+        cloudDirty=false; cloudFailCount=0;
+      } else {
+        throw new Error('HTTP '+res.status);
+      }
+    }).catch(function(err){
+      if(myGen!==syncGeneration)return;
+      cloudFailCount+=1;
+      console.warn('[SYNC] CLOUD_SAVE_FAILED will-retry attempt='+cloudFailCount,(err&&err.message)||err);
+    }).finally(function(){
+      if(timer!==null)clearTimeout(timer);
+      cloudSaveInFlight=false;
+      if(myGen!==syncGeneration)return;
+      // 仍有未同步修改（成功但已过时 / 失败重试）→ 重新排期；失败按指数退避
+      if(cloudDirty){
+        const delay=cloudFailCount>0?Math.min(CLOUD_RETRY_MAX_MS,CLOUD_RETRY_BASE_MS*Math.pow(2,cloudFailCount-1)):CLOUD_DEBOUNCE_MS;
+        clearTimeout(cloudTimer);
+        cloudTimer=setTimeout(doCloudSave,delay);
+      }
+    });
+  }
+  // 页面隐藏（切后台/最小化）：页面仍存活，立即把待同步修改推送到云端
+  function flushCloudSaveNow(){
+    if(cloudSaveInFlight||!cloudDirty)return;
+    if(!cloudReady())return;
+    doCloudSave();
+  }
+  // 页面关闭/卸载：用 keepalive 兜底（请求可跨卸载存活），本地数据本身已同步落盘不会丢
+  function flushCloudSaveUnload(){
+    if(cloudSaveInFlight||!cloudDirty)return;
+    if(!cloudReady())return;
+    const myGen=syncGeneration;
+    const body=JSON.stringify({state:buildPersisted()});
+    try{
       fetch('/api/account/state',{
         method:'PUT',
         headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
         body:body,
-        signal:controller?controller.signal:undefined
-      }).then(function(res){
-        if(myGen!==syncGeneration){console.log('[SYNC] SAVE_STALE_DROPPED gen changed');}
-      }).catch(function(){}).finally(function(){
-        if(timer!==null)clearTimeout(timer);
-        cloudSaveInFlight=false;
+        keepalive:true
       });
-    },400);
+      if(myGen===syncGeneration)cloudDirty=false;
+    }catch(e){/* best-effort */}
+  }
+  if(typeof document!=='undefined'){
+    document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')flushCloudSaveNow(); });
+  }
+  if(typeof window!=='undefined'){
+    window.addEventListener('pagehide',flushCloudSaveUnload);
+    window.addEventListener('beforeunload',flushCloudSaveUnload);
   }
 
-  function save(){
+  function save(opts){
     if (window.accountRestoreStatus === 'restoring') {
       console.log('[SYNC] SAVE_BLOCKED reason=restoring (cloud restore in progress)');
       return;
@@ -871,7 +931,10 @@
       });
       syncMetaStore=merged;
       if (window.auth && window.auth.state && window.auth.state.token) {
-        if (window.cloudSyncReady === true) {
+        if (opts && opts.system) {
+          // 系统/行情刷新/水合更新：只落本地，不触发云端 PUT（防被当成用户修改）
+          console.log('[SYNC] SAVE_LOCAL_ONLY reason=system-update (no cloud PUT)');
+        } else if (window.cloudSyncReady === true) {
           console.log('[SYNC] SAVE_ALLOWED');
           scheduleCloudSave();
         } else {
@@ -1221,6 +1284,7 @@
   function clearLocalData(){
     clearTimeout(cloudTimer); // 取消待发的延迟云端保存（防止退出后仍 PUT 空/旧 state）
     cloudSaveInFlight=false;
+    cloudDirty=false; cloudFailCount=0; // 切换/退出账号：清理旧账号的待同步标记，严禁串数据
     syncGeneration+=1; window.__syncGeneration=syncGeneration; // 作废所有在途/待发的旧账号 PUT
     Object.keys(state.accounts).forEach(name=>delete state.accounts[name]);
     window.accountRestoreStatus = 'ready';
@@ -1251,8 +1315,8 @@
     originalSetActive(name);
     save();
   };
-  state.persist=save;
-  window.savePortfolioState=save;
+  state.persist=function(opts){ save(opts); };
+  window.savePortfolioState=function(opts){ save(opts); };
   // 供 app-refactor 在刷新同步账户时合并其本地策略元数据
   window.getSyncAccountMeta=function(name){return syncMetaStore[name]||null;};
   // 手动操作：备份云端 / 恢复本地
