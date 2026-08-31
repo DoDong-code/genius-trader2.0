@@ -101,7 +101,7 @@ Page({
     sortState: 'default',
 
     // Column customization
-    columnOrder: ['holdingProfit', 'todayProfit', 'amount'],
+    columnOrder: ['todayProfit', 'holdingProfit', 'amount'],
     columnLabels: COLUMN_LABELS,
     headerColumns: [],
     gridTemplateColumns: '',
@@ -161,9 +161,9 @@ Page({
       windowWidth = info.windowWidth || 375;
     } catch (e) { /* ignore */ }
 
-    const savedOrder = wx.getStorageSync('genius-trader-column-order') || ['holdingProfit', 'todayProfit', 'amount'];
+    const savedOrder = wx.getStorageSync('genius-trader-column-order') || ['todayProfit', 'holdingProfit', 'amount'];
     const validOrder = savedOrder.filter(k => COLUMN_LABELS[k]);
-    if (validOrder.length !== 3) validOrder.push(...['holdingProfit', 'todayProfit', 'amount'].filter(k => !validOrder.includes(k)));
+    if (validOrder.length !== 3) validOrder.push(...['todayProfit', 'holdingProfit', 'amount'].filter(k => !validOrder.includes(k)));
 
     this.setData({
       statusBarHeight: app.globalData.statusBarHeight,
