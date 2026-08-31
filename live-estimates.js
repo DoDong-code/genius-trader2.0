@@ -419,7 +419,7 @@
   }
 
   function updateTodayCell(row, change, profit) {
-    var cell = row.querySelector('.fund-today') || row.children[2];
+    var cell = row.querySelector('.fund-today');
     if (!cell) return;
     delete cell.dataset.estimateUnavailable;
     cell.innerHTML = '<strong>' + formatMoney(profit) + '</strong><span>' + formatPercent(change) + '</span>';
@@ -428,7 +428,7 @@
   }
 
   function showEstimateUnavailable(row) {
-    var cell = row.querySelector('.fund-today') || row.children[2];
+    var cell = row.querySelector('.fund-today');
     if (!cell) return;
     cell.dataset.estimateUnavailable = 'true';
     cell.innerHTML = '<strong>—</strong><span>待估值</span>';

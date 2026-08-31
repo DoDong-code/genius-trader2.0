@@ -723,16 +723,16 @@
         ${subTabsHtml}
         <div class="holding-head">
           <span data-col-key="fund">基金</span>
-          <span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span>
           <span data-col-key="todayProfit"><span class="desktop-label">今日收益</span><span class="mobile-label">今日</span></span>
+          <span data-col-key="holdingProfit"><span class="desktop-label">持有收益</span><span class="mobile-label">持有</span></span>
           <span data-col-key="amount"><span class="desktop-label">持有金额</span><span class="mobile-label">金额</span></span>
         </div>
         <div class="fund-list">
           ${funds.length ? funds.map(f => `
             <button class="fund-row" data-code="${f.code}" title="${esc(f.name)}">
               <div class="fund-info" data-col-key="fund"><b title="${esc(f.name)}">${esc(f.name)}${f.autoInvest && f.autoInvest.enabled ? '<span style="display:inline-block;background:#0071e3;color:#fff;border-radius:4px;font-size:10px;line-height:1;padding:2px 4px;margin-left:4px;vertical-align:middle;font-weight:600;">定</span>' : ''}</b><small class="fund-meta"><span class="fund-code-text">${f.code}</span><span class="fund-meta-sep"> · </span><span class="fund-sector-text">${esc(f.category)}</span>${f.subAccount ? `<span class="fund-meta-sep"> · </span><span class="fund-sub-tag">${esc(f.subAccount)}</span>` : ''}</small></div>
-              <div class="fund-est" data-col-key="holdingProfit"><strong>${(f.amount * f.hold > 0 ? '+' : '')}${money2(f.amount * f.hold)}</strong><span>${(f.hold > 0 ? '+' : '')}${((f.hold * 100).toFixed(2))}%</span></div>
               <div class="fund-today" data-col-key="todayProfit"><strong>${money2(todayProfitOf(f))}</strong><span>${((f.today * 100).toFixed(2))}%</span></div>
+              <div class="fund-est" data-col-key="holdingProfit"><strong>${(f.amount * f.hold > 0 ? '+' : '')}${money2(f.amount * f.hold)}</strong><span>${(f.hold > 0 ? '+' : '')}${((f.hold * 100).toFixed(2))}%</span></div>
               <div class="fund-amount" data-col-key="amount"><strong>${money2(f.amount)}</strong><span>${((((Number.isFinite(f.holdingRate) ? f.holdingRate : f.hold) || 0) * 100).toFixed(2))}%</span></div>
             </button>
           `).join('') : `<div class="empty-state" style="padding:45px 10px;color:#86868b;text-align:center;font-size:13px;">暂无持仓，点击右上角「增加基金」开始管理</div>`}
