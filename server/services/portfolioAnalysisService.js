@@ -78,7 +78,11 @@ function classifyPositionType(fund, accountFunds, strategy) {
 }
 
 async function resolveFundToday(code, amount, userId, savedToday) {
-  if (Number.isFinite(Number(savedToday))) return Number(savedToday);
+  const saved = Number(savedToday);
+  // 仅当云端快照里存在「非零」的有效估值时才直接采用。
+  // 0 / null / undefined 一律继续走实时估值链：前端持仓页刷新的估值只落在本地（system 更新不推云端），
+  // 云端快照常为 0，若此处把 0 当成有效值直接返回，就会用 0 覆盖掉本来能取到的实时估值。
+  if (Number.isFinite(saved) && saved !== 0) return saved;
   try {
     const provider = await fetchProviderEstimate(String(code), amount, { userId });
     if (provider && Number.isFinite(Number(provider.estimate_change))) return Number(provider.estimate_change);

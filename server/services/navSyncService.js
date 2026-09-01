@@ -9,7 +9,8 @@
 const dbAsync = require('../database/dbAsync');
 const { listFunds, importFund } = require('./fundService');
 const { ensureTodayNav } = require('./navCacheService');
-const { expectedNavDateFor } = require('./estimateStatus');
+const { expectedNavDateFor, isHkFund, isHkTradingDay } = require('./estimateStatus');
+const { isTradingDay, shanghaiDateString } = require('./marketService');
 
 // 简单并发限制：避免后台任务同时打爆第三方 / 内存
 async function mapLimit(items, concurrency, worker) {
@@ -64,26 +65,75 @@ async function syncTodayNavs(options = {}) {
 }
 
 /**
- * 每周历史完整性校对：最新净值日期早于 expected（或缺失）的基金，用 importFund 增量补齐。
- * importFund 非 force 只回填缺失日期 + 最近若干条，不做全量历史重建。
+ * 生成「截至 today、向前取 count 个交易日」的期望 NAV 日期集合。
+ * - 纯交易日历计算，不访问任何第三方数据源；仅用于缺口检测。
+ * - 港股/恒生基金用香港交易日历（isHkTradingDay），其余用 A 股交易日历（isTradingDay）。
+ * - 返回升序（早 → 晚）。
+ */
+function isExpectedTradingDay(dateStr, fund) {
+  return isHkFund(fund) ? isHkTradingDay(dateStr) : isTradingDay(dateStr);
+}
+
+function buildExpectedTradingWindow(count, fund, now = new Date()) {
+  const window = [];
+  let cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  while (window.length < count) {
+    const ds = shanghaiDateString(cursor.getTime());
+    if (isExpectedTradingDay(ds, fund)) window.push(ds);
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  // 向前回溯时按“新→旧”收集，反转后返回升序（早 → 晚）；
+  // expected[0] 为最早日期，供 detectNavGaps 的 `date >= ?` 正确取窗口。
+  return window.reverse();
+}
+
+/**
+ * detectNavGaps()：纯数据库缺口检测，不访问任何第三方数据源。
+ * 对每只基金读取「最近 windowDays 个交易日」窗口内的 fund_nav 记录，与交易日历比较，
+ * 仅返回存在缺失交易日的基金及其缺失日期列表。发现缺口才进入补偿队列。
+ */
+async function detectNavGaps(options = {}) {
+  const windowDays = Math.min(Math.max(Number(options.windowDays) || 60, 10), 120);
+  const funds = await listFunds();
+  const gaps = [];
+  for (const fund of funds) {
+    const code = fund.fund_code;
+    const expected = buildExpectedTradingWindow(windowDays, fund);
+    if (!expected.length) continue;
+    const rows = await dbAsync.all(
+      'SELECT date FROM fund_nav WHERE fund_code = ? AND date >= ? ORDER BY date ASC',
+      [code, expected[0]]
+    );
+    const have = new Set(rows.map(r => String(r.date)));
+    const missing = expected.filter(d => !have.has(d));
+    if (missing.length) gaps.push({ fund_code: code, missingDates: missing });
+  }
+  return gaps;
+}
+
+/**
+ * 历史净值缺口补偿：复用现有 importFund 增量补齐机制。
+ * - 先 detectNavGaps()（纯 DB）找出缺口基金，仅对这些基金补偿，绝不全量扫所有基金；
+ * - 并发 1~2，单基金内部串行（importFund 本身串行写库）；
+ * - 无长期队列、无无限 retry，单只失败仅记录、不重试、不阻塞其余。
+ * 目标：宁可慢一点补完，也绝不瞬时打爆第三方 / 内存。
  */
 async function syncWeeklyHistory(options = {}) {
-  const funds = await listFunds();
-  const results = await mapLimit(funds, options.concurrency || 2, async (fund) => {
-    const code = fund.fund_code;
-    const expected = expectedNavDateFor(fund);
-    const latest = await dbAsync.get(
-      'SELECT MAX(date) AS max_date FROM fund_nav WHERE fund_code = ?',
-      [code]
-    );
-    const latestDate = latest && latest.max_date;
-    if (latestDate && String(latestDate).localeCompare(String(expected)) >= 0) {
-      return { fund_code: code, skipped: true };
+  const gaps = await detectNavGaps(options);
+  if (!gaps.length) {
+    return { gaps: 0, filled: [] };
+  }
+  const concurrency = Math.min(Math.max(Number(options.concurrency) || 1, 1), 2);
+  const filled = await mapLimit(gaps, concurrency, async (gap) => {
+    const code = gap.fund_code;
+    try {
+      const result = await importFund(code, {});
+      return { fund_code: code, missingDates: gap.missingDates, records: result.records, inserted: result.inserted };
+    } catch (err) {
+      return { fund_code: code, missingDates: gap.missingDates, error: err && err.message ? err.message : String(err) };
     }
-    const result = await importFund(code, {});
-    return { fund_code: code, records: result.records, inserted: result.inserted };
   });
-  return results;
+  return { gaps: gaps.length, filled };
 }
 
 /** 当前季度起始日（yyyy-mm-dd），用于判断持仓报告是否过季 */
@@ -121,6 +171,8 @@ async function syncQuarterlyHoldings(options = {}) {
 module.exports = {
   syncTodayNavs,
   syncWeeklyHistory,
+  detectNavGaps,
+  buildExpectedTradingWindow,
   syncQuarterlyHoldings,
   currentQuarterStart
 };

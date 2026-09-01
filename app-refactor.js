@@ -2813,39 +2813,102 @@
 
     const externalCopyJsonBtn = e.target.closest('#external-copy-json-btn');
     if (externalCopyJsonBtn) {
-      const token = localStorage.getItem('genius_external_token');
-      if (!token) {
-        showToast('复制失败：请先点击上方“生成”按钮生成 Token', 'error');
-        return;
-      }
-      const apiBase = window.FUND_API_BASE || window.location.origin;
-      const fullUrl = `${apiBase}/api/external/analysis/ai?token=${token}`;
+      // 估值：取前端持仓页已刷新的 f.today / f.todayEstimate（服务端接口读云端快照，不含前端实时估值）。
+      // 历史净值：从服务端 /api/fund/:code/history 读取近 NAV_HISTORY_DAYS 个交易日。
+      (async () => {
+        const st = window.portfolioState;
+        const activeName = st && typeof st.getActive === 'function' ? st.getActive() : null;
+        const account = activeName && st.accounts ? st.accounts[activeName] : null;
+        if (!account) {
+          showToast('复制失败：未找到当前账户', 'error');
+          return;
+        }
 
-      showToast('正在获取最新 JSON 数据...');
-      fetch(fullUrl)
-        .then(res => {
-          if (!res.ok) throw new Error(`HTTP 错误 ${res.status}`);
-          return res.json();
-        })
-        .then(data => {
-          const jsonText = JSON.stringify(data, null, 2);
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            return navigator.clipboard.writeText(jsonText)
-              .then(() => showToast('已成功复制完整 AI 分析 JSON 数据！'))
-              .catch(() => { throw new Error('浏览器剪贴板权限受限'); });
-          } else {
-            const tempInput = document.createElement('textarea');
-            tempInput.value = jsonText;
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
-            showToast('已成功复制完整 AI 分析 JSON 数据！');
+        const NAV_HISTORY_DAYS = 15;
+        const funds = effectiveFundsOf(account);
+        const totalValue = funds.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
+        const uniqueCodes = [...new Set(funds.map(f => String(f.code || '')).filter(c => /^\d{6}$/.test(c)))];
+
+        showToast('正在获取近 15 个交易日净值…');
+        const navHistoryMap = new Map();
+        await Promise.all(uniqueCodes.map(async code => {
+          const controller = typeof AbortController === 'function' ? new AbortController() : null;
+          const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+          try {
+            const res = await fetch(`/api/fund/${code}/history?limit=${NAV_HISTORY_DAYS}`,
+              controller ? { signal: controller.signal } : undefined);
+            if (!res.ok) return;
+            const data = await res.json();
+            const rows = Array.isArray(data && data.history) ? data.history : [];
+            const list = rows
+              .map(r => ({ date: String(r.date || ''), nav: Number(r.nav) }))
+              .filter(r => r.date && Number.isFinite(r.nav))
+              .slice(-NAV_HISTORY_DAYS);
+            if (list.length) navHistoryMap.set(code, list);
+          } catch (err) {
+            // 单只基金拉取失败不影响整体复制
+          } finally {
+            if (timer) clearTimeout(timer);
           }
-        })
-        .catch(err => {
-          showToast(`获取/复制失败：${err.message}`, 'error');
-        });
+        }));
+
+        const payload = {
+          generatedAt: new Date().toISOString(),
+          account: {
+            name: activeName,
+            type: account.accountType || 'manual',
+            fundCount: funds.length,
+            totalValue: Number(totalValue.toFixed(2))
+          },
+          strategies: Array.isArray(account.strategy) ? account.strategy.slice() : [],
+          holdings: funds.map(f => {
+            const amount = Number(f.amount) || 0;
+            const profit = Number(f.holdingProfit ?? f.profit ?? 0) || 0;
+            const cost = (Number.isFinite(Number(f.cost)) && Number(f.cost) > 0)
+              ? Number(f.cost)
+              : Number((amount - profit).toFixed(2));
+            const todayChange = Number(f.today) || 0;
+            const todayProfit = Number.isFinite(Number(f.todayEstimate))
+              ? Number(f.todayEstimate)
+              : Number((amount * todayChange).toFixed(2));
+            return {
+              code: String(f.code || ''),
+              name: String(f.name || f.code || ''),
+              category: String(f.category || ''),
+              subAccount: f.subAccount || undefined,
+              amount: Number(amount.toFixed(2)),
+              cost: Number(cost.toFixed(2)),
+              profit: Number(profit.toFixed(2)),
+              profitRate: amount > 0 ? Number((profit / amount).toFixed(4)) : 0,
+              todayChange: Number(todayChange.toFixed(4)),
+              todayProfit: Number(todayProfit.toFixed(2)),
+              navUpdatedAt: f.navUpdatedAt || (f.latest_nav && f.latest_nav.date) || null,
+              navHistory: navHistoryMap.get(String(f.code || '')) || []
+            };
+          })
+        };
+
+        const jsonText = JSON.stringify(payload, null, 2);
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(jsonText)
+            .then(() => showToast(`已复制当前账户「${activeName}」的分析 JSON`))
+            .catch(() => showToast('复制失败，请手动选择复制', 'error'));
+        } else {
+          const tempInput = document.createElement('textarea');
+          tempInput.value = jsonText;
+          tempInput.style.position = 'fixed';
+          tempInput.style.opacity = '0';
+          document.body.appendChild(tempInput);
+          tempInput.select();
+          try {
+            document.execCommand('copy');
+            showToast(`已复制当前账户「${activeName}」的分析 JSON`);
+          } catch (err) {
+            showToast('复制失败，请手动选择复制', 'error');
+          }
+          document.body.removeChild(tempInput);
+        }
+      })();
       return;
     }
 
