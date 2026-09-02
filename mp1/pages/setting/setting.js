@@ -31,7 +31,7 @@ Page({
     testFundCode: '000001',
     testApiResult: '',
     isTestingApi: false,
-    testAiQuestion: '今天几号',
+    testAiQuestion: '现在几点了',
     testAiResult: '',
     isTestingAi: false,
 
@@ -395,7 +395,7 @@ Page({
     const baseURL = this.data.aiBaseUrl;
     const apiKey = this.data.aiApiKey;
     const modelName = this.data.aiModelName;
-    const question = this.data.testAiQuestion || '请分析当前基金市场风险';
+    const question = this.data.testAiQuestion || '现在几点了';
 
     this.setData({
       isTestingAi: true,

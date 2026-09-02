@@ -1916,7 +1916,7 @@
                 
                 <div>
                   <label style="display: block; font-size: 11px; color: #86868b; margin-bottom: 4px;">测试问题</label>
-                  <input type="text" id="test-ai-question" value="请分析当前基金市场风险"
+                  <input type="text" id="test-ai-question" value="现在几点了"
                          style="width: 100%; padding: 8px 10px; border: 1px solid rgba(0,0,0,0.12); border-radius: 6px; font-size: 12px; background: #fff; outline: none; box-sizing: border-box; color: #1d1d1f; height: 32px;" />
                 </div>
 
@@ -2037,7 +2037,7 @@
               </div>
             </div>
             <div class="panel-body-external" style="display: ${window.settingsCollapsedState.external ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">只读 Token 仅用于 AI 分析账户数据，不允许修改、删除、同步或交易。</p>
+              <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">把API或者JSON发送给第三方AI 即可分析当日操作建议，内容包含当日估值+15个交易日历史净值</p>
               <div style="font-size: 13px; color: #1d1d1f; margin-bottom: 12px;">状态：<b id="external-status-text">检查中…</b></div>
               
               <!-- API 地址 Area -->
@@ -2048,7 +2048,6 @@
                     <span>AI 专属精简 API (首选)</span>
                     <span style="font-size: 10px; font-weight: 500; padding: 1px 5px; border-radius: 4px; background: #e3f2fd; color: #0d47a1;">推荐</span>
                   </div>
-                  <div style="font-size: 11px; color: #86868b; margin-bottom: 6px; line-height: 1.4;">最适合外部大模型 (如 GPT / Claude / DeepSeek) 深度分析，体积超轻、节省 Token。</div>
                   <div id="external-api-url-ai" style="display: none;"></div>
                   <div style="display: flex; gap: 8px; width: 100%;">
                     <button class="secondary-button" id="external-copy-api-btn-ai" style="flex: 1; padding: 8px 6px; font-size: 11px; border-radius: 6px; cursor: not-allowed; text-align: center; justify-content: center; font-weight: 500; opacity: 0.4; pointer-events: none; display: inline-flex;" disabled>复制API</button>
@@ -3209,7 +3208,7 @@
       const baseURL = document.querySelector('#ai-base-url-input')?.value.trim() || '';
       const apiKey = document.querySelector('#ai-api-key-input')?.value.trim() || window.AI_API_KEY || '';
       const modelName = document.querySelector('#ai-model-name-input')?.value.trim() || 'gpt-5-mini';
-      const question = document.querySelector('#test-ai-question')?.value.trim() || '请分析当前基金市场风险';
+      const question = document.querySelector('#test-ai-question')?.value.trim() || '现在几点了';
       
       const resultDiv = document.querySelector('#test-ai-result');
       if (resultDiv) {
@@ -3222,15 +3221,15 @@
       fetch('/api/ai/chat', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'X-AI-API-Key': apiKey
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           message: question,
           config: {
             provider,
             baseURL,
-            model: modelName
+            model: modelName,
+            apiKey
           }
         })
       })

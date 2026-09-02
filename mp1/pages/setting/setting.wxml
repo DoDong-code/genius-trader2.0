@@ -103,7 +103,7 @@
       <view class="wx-subcard wx-test-box wx-test-box-green">
         <text class="wx-test-title wx-test-title-green">天才服务连通性测试</text>
         <view class="wx-input-row">
-          <input class="wx-input" value="{{testAiQuestion}}" bindinput="onInputTestAiQuestion" placeholder="请分析当前基金市场风险" />
+          <input class="wx-input" value="{{testAiQuestion}}" bindinput="onInputTestAiQuestion" placeholder="现在几点了" />
           <button class="btn btn-primary btn-test wx-test-btn-green" bindtap="onTestAi" disabled="{{isTestingAi}}">{{isTestingAi ? '测试中...' : '一键测试'}}</button>
         </view>
         <scroll-view scroll-y show-scrollbar="{{false}}" wx:if="{{testAiResult}}" class="wx-test-result"><text class="wx-test-result-text">{{testAiResult}}</text></scroll-view>

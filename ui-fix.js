@@ -47,14 +47,92 @@
       }
     })
   }
-  function showDeleteConfirm(names){
+  function getStrategyArr(name){ const acc=window.portfolioState&&window.portfolioState.accounts?window.portfolioState.accounts[name]:null; return (acc&&Array.isArray(acc.strategy))?acc.strategy:[]; }
+  function hasStrategy(name){ return getStrategyArr(name).length>0; }
+  function deleteAccounts(names){
+    names.forEach(function(name){
+      const account=window.portfolioState.accounts[name];
+      if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))){
+        fetch('/api/portfolio/delete',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},window.auth&&window.auth.authHeaders?window.auth.authHeaders():{}),body:JSON.stringify({account_id:name})}).catch(function(){})
+      }
+      Object.values(window.portfolioState.accounts).forEach(function(a){if(Array.isArray(a.children)){const i=a.children.indexOf(name);if(i!==-1)a.children.splice(i,1)}});
+      const target=window.portfolioState.accounts[name];
+      if(target&&Array.isArray(target.children)){target.children.forEach(function(cn){if(window.portfolioState.accounts[cn])window.portfolioState.accounts[cn].parent=undefined})}
+      delete window.portfolioState.accounts[name];
+    });
+    const active=window.portfolioState.getActive();
+    if(!window.portfolioState.accounts[active])window.portfolioState.setActive(Object.keys(window.portfolioState.accounts)[0]||'');
+    window.savePortfolioState?.();
+  }
+  function showInfoDialog(title,msg){
+    const overlay=document.createElement('div');overlay.className='confirm-overlay';
+    overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true"><div class="confirm-icon">!</div><h2 id="confirm-title">'+title+'</h2><p>'+msg+'</p><div class="confirm-actions"><button type="button" data-info="ok">知道了</button></div></div>';
+    document.body.appendChild(overlay);requestAnimationFrame(function(){overlay.classList.add('visible')});
+    const close=function(){overlay.classList.remove('visible');setTimeout(function(){overlay.remove()},180)};
+    overlay.addEventListener('click',function(e){if(e.target===overlay||e.target.closest('[data-info="ok"]'))close()});
+    overlay.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+  }
+  function showTargetPicker(names,withStrategy){
+    const others=Object.keys(window.portfolioState.accounts).filter(function(n){return names.indexOf(n)===-1});
+    if(others.length===0){ showInfoDialog('无法保留','当前没有其他账户，无法保留策略。请选择“不保留”直接删除。'); return; }
+    const overlay=document.createElement('div');overlay.className='confirm-overlay';
+    let opts='';
+    others.forEach(function(n){ opts+='<label style="display:flex;align-items:center;gap:8px;padding:10px 4px;cursor:pointer;"><input type="radio" name="retain-target" value="'+n.replace(/"/g,'&quot;')+'">'+n+'</label>'; });
+    overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true"><h2 id="confirm-title">保留投资策略</h2><p>请选择将投资策略移动到哪个账户</p><div style="max-height:240px;overflow:auto;margin:8px 0 4px 0;">'+opts+'</div><div class="confirm-actions"><button type="button" data-target="cancel">取消</button><button type="button" class="confirm-delete" data-target="ok" disabled>确认保留</button></div></div>';
+    document.body.appendChild(overlay);requestAnimationFrame(function(){overlay.classList.add('visible')});
+    const close=function(){overlay.classList.remove('visible');setTimeout(function(){overlay.remove()},180)};
+    const okBtn=overlay.querySelector('[data-target="ok"]');
+    overlay.addEventListener('change',function(e){ if(e.target&&e.target.name==='retain-target'){ okBtn.disabled=false; } });
+    overlay.addEventListener('click',function(e){
+      if(e.target===overlay||e.target.closest('[data-target="cancel"]')){ close(); return; }
+      if(e.target.closest('[data-target="ok"]')){
+        const sel=overlay.querySelector('input[name="retain-target"]:checked');
+        if(!sel) return;
+        const targetName=sel.value;
+        const target=window.portfolioState.accounts[targetName];
+        if(!target){ close(); return; }
+        const collected=[];
+        withStrategy.forEach(function(n){ getStrategyArr(n).forEach(function(s){collected.push(s)}) });
+        try {
+          target.strategy=dedupeStrategies((target.strategy||[]).concat(collected));
+          window.savePortfolioState?.();
+        } catch(err){
+          showInfoDialog('保存失败','策略合并保存失败，已取消删除，原账户与策略均已保留。'); close(); return;
+        }
+        deleteAccounts(names);
+        close();
+        root.querySelector('[data-action="toggle-edit"]')?.click();
+        showInfoDialog('已保留','已将策略合并到“'+targetName+'”并删除原账户。');
+      }
+    });
+    overlay.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+  }
+  function showStrategyConfirm(names,withStrategy){
+    const overlay=document.createElement('div');overlay.className='confirm-overlay';
+    overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true"><div class="confirm-icon">!</div><h2 id="confirm-title">账户有投资策略</h2><p>该账户包含投资策略，删除后策略也会被删除，是否保留？</p><div class="confirm-actions"><button type="button" data-strategy="keep">保留</button><button type="button" class="confirm-delete" data-strategy="drop">不保留</button></div></div>';
+    document.body.appendChild(overlay);requestAnimationFrame(function(){overlay.classList.add('visible')});
+    const close=function(){overlay.classList.remove('visible');setTimeout(function(){overlay.remove()},180)};
+    overlay.querySelector('[data-strategy="drop"]').focus();
+    overlay.addEventListener('click',function(e){
+      if(e.target===overlay){ close(); return; }
+      if(e.target.closest('[data-strategy="drop"]')){ deleteAccounts(names); close(); root.querySelector('[data-action="toggle-edit"]')?.click(); return; }
+      if(e.target.closest('[data-strategy="keep"]')){ close(); showTargetPicker(names,withStrategy); return; }
+    });
+    overlay.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+  }
+  function showGenericDeleteConfirm(names){
     const overlay=document.createElement('div');overlay.className='confirm-overlay';
     overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title"><div class="confirm-icon">!</div><h2 id="confirm-title">删除账户？</h2><p>将永久删除选中的 '+names.length+' 个账户，此操作无法撤销。</p><div class="confirm-actions"><button type="button" data-confirm="cancel">取消</button><button type="button" class="confirm-delete" data-confirm="delete">删除</button></div></div>';
-    document.body.appendChild(overlay);requestAnimationFrame(()=>overlay.classList.add('visible'));
+    document.body.appendChild(overlay);requestAnimationFrame(function(){overlay.classList.add('visible')});
     overlay.querySelector('[data-confirm="cancel"]').focus();
-    const close=()=>{overlay.classList.remove('visible');setTimeout(()=>overlay.remove(),180)};
-    overlay.addEventListener('click',e=>{if(e.target===overlay||e.target.closest('[data-confirm="cancel"]')){close();return}if(e.target.closest('[data-confirm="delete"]')){names.forEach(name=>{const account=window.portfolioState.accounts[name];if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))){fetch('/api/portfolio/delete',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},window.auth&&window.auth.authHeaders?window.auth.authHeaders():{}),body:JSON.stringify({account_id:name})}).catch(function(){})}Object.values(window.portfolioState.accounts).forEach(a=>{if(Array.isArray(a.children)){const i=a.children.indexOf(name);if(i!==-1)a.children.splice(i,1)}});const target=window.portfolioState.accounts[name];if(target&&Array.isArray(target.children)){target.children.forEach(cn=>{if(window.portfolioState.accounts[cn])window.portfolioState.accounts[cn].parent=undefined})}delete window.portfolioState.accounts[name]});const active=window.portfolioState.getActive();if(!window.portfolioState.accounts[active])window.portfolioState.setActive(Object.keys(window.portfolioState.accounts)[0]||'');window.savePortfolioState?.();close();root.querySelector('[data-action="toggle-edit"]')?.click()}});
-    overlay.addEventListener('keydown',e=>{if(e.key==='Escape')close()});
+    const close=function(){overlay.classList.remove('visible');setTimeout(function(){overlay.remove()},180)};
+    overlay.addEventListener('click',function(e){if(e.target===overlay||e.target.closest('[data-confirm="cancel"]')){close();return}if(e.target.closest('[data-confirm="delete"]')){deleteAccounts(names);close();root.querySelector('[data-action="toggle-edit"]')?.click()}});
+    overlay.addEventListener('keydown',function(e){if(e.key==='Escape')close()});
+  }
+  function showDeleteConfirm(names){
+    const withStrategy=names.filter(hasStrategy);
+    if(withStrategy.length===0){ showGenericDeleteConfirm(names); return; }
+    showStrategyConfirm(names,withStrategy);
   }
   function syncDelete(){
     const checks=[...root.querySelectorAll('[data-check]')],chosen=checks.filter(x=>x.checked).length;

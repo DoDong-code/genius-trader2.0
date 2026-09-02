@@ -2,6 +2,7 @@
 const app = getApp();
 import { http } from '../../utils/request.js';
 import { pct } from '../../utils/format.js';
+const { dedupeStrategies } = require('../../strategyMerge.js');
 
 Page({
   data: {
@@ -488,24 +489,76 @@ Page({
   deleteSelected() {
     const toDelete = Object.keys(this.data.selectedAccounts).filter(k => this.data.selectedAccounts[k]);
     if (!toDelete.length) return;
-
+    const accounts = app.globalData.accounts || {};
+    const withStrategy = toDelete.filter(n => Array.isArray(accounts[n] && accounts[n].strategy) && accounts[n].strategy.length);
+    if (withStrategy.length === 0) {
+      this.confirmDeleteGeneric(toDelete);
+      return;
+    }
+    wx.showModal({
+      title: '账户有投资策略',
+      content: '该账户包含投资策略，删除后策略也会被删除，是否保留？',
+      confirmText: '不保留',
+      confirmColor: '#ff3b30',
+      cancelText: '保留',
+      success: (res) => {
+        if (res.confirm) {
+          this.doDeleteAccounts(toDelete);
+        } else if (res.cancel) {
+          this.pickTargetAndRetain(toDelete, withStrategy);
+        }
+      }
+    });
+  },
+  confirmDeleteGeneric(toDelete) {
     wx.showModal({
       title: '删除确认',
       content: `确定要删除这 ${toDelete.length} 个交易账户吗？该操作不可撤销，且会清除账户下的所有基金持仓。`,
       confirmText: '确认删除',
       confirmColor: '#ff3b30',
       cancelText: '取消',
-      success: async (res) => {
+      success: (res) => {
         if (res.confirm) {
-          wx.showLoading({ title: '删除中...', mask: true });
-          for (const name of toDelete) {
-            await app.deleteAccount(name);
-          }
-          wx.hideLoading();
-          wx.showToast({ title: '已成功删除账户' });
-          this.setData({ isEditing: false, selectedAccounts: {}, hasSelections: false, selectedCount: 0 });
-          this.refreshData();
+          this.doDeleteAccounts(toDelete);
         }
+      }
+    });
+  },
+  doDeleteAccounts(toDelete) {
+    wx.showLoading({ title: '删除中...', mask: true });
+    toDelete.forEach((name) => { app.deleteAccount(name); });
+    wx.hideLoading();
+    wx.showToast({ title: '已成功删除账户' });
+    this.setData({ isEditing: false, selectedAccounts: {}, hasSelections: false, selectedCount: 0 });
+    this.refreshData();
+  },
+  pickTargetAndRetain(toDelete, withStrategy) {
+    const accounts = app.globalData.accounts || {};
+    const others = Object.keys(accounts).filter(n => toDelete.indexOf(n) === -1);
+    if (others.length === 0) {
+      wx.showModal({ title: '无法保留', content: '当前没有其他账户，无法保留策略。请选择“不保留”直接删除。', showCancel: false });
+      return;
+    }
+    wx.showActionSheet({
+      itemList: others,
+      success: (res) => {
+        const targetName = others[res.tapIndex];
+        const target = accounts[targetName];
+        if (!target) return;
+        const collected = [];
+        withStrategy.forEach((n) => {
+          const a = accounts[n];
+          if (a && Array.isArray(a.strategy)) collected.push(...a.strategy);
+        });
+        try {
+          target.strategy = dedupeStrategies((target.strategy || []).concat(collected));
+          app.saveState();
+        } catch (e) {
+          wx.showModal({ title: '保存失败', content: '策略合并保存失败，已取消删除，原账户与策略均已保留。', showCancel: false });
+          return;
+        }
+        this.doDeleteAccounts(toDelete);
+        wx.showToast({ title: '已保留策略并删除原账户', icon: 'none' });
       }
     });
   },
