@@ -15,7 +15,9 @@ Page({
     authUser: null, // 正式用户 { id, email }；null = 游客模式
     cloudReady: false,
     lastSyncTime: '',
-    backups: []
+    backups: [],
+    restoringLocal: false,
+    restoringBackupId: ''
   },
 
   onLoad() {
@@ -37,6 +39,7 @@ Page({
         const list = (res && res.backups) || [];
         this.setData({ backups: list.map(b => ({
           ...b,
+          id: String(b.id),
           created_at: b.created_at ? this._formatTime(new Date(b.created_at).getTime()) : ''
         })) });
       })
@@ -55,27 +58,20 @@ Page({
       cancelText: '取消',
       success: (res) => {
         if (!res.confirm) return;
+        this.setData({ restoringBackupId: id });
         wx.showLoading({ title: '恢复中...', mask: true });
         http.post(`/api/account/backups/${id}/restore`, {}, { silent: true })
           .then(r => {
-            const state = r && r.state;
-            if (state && state.accounts) {
-              app.globalData.accounts = state.accounts;
-              app.globalData.activeAccountName = state.active || Object.keys(state.accounts)[0] || '主账户';
-              if (state.providerStatus) app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
-              app.saveState();
-              app.notifyAccountsChanged();
-              wx.hideLoading();
-              wx.showToast({ title: '已恢复备份', icon: 'success' });
-            } else {
-              wx.hideLoading();
-              wx.showToast({ title: '恢复失败', icon: 'none' });
-            }
+            const ok = this._applyRestoredState(r && r.state);
+            wx.showToast({ title: ok ? '已恢复备份' : '恢复失败', icon: ok ? 'success' : 'none' });
           })
           .catch(err => {
-            wx.hideLoading();
             const msg = (err && err.message) || '恢复失败';
             wx.showToast({ title: msg, icon: 'none' });
+          })
+          .finally(() => {
+            wx.hideLoading();
+            this.setData({ restoringBackupId: '' });
           });
       }
     });
@@ -208,32 +204,53 @@ Page({
     return formatShanghaiTime(ts);
   },
 
-  // 恢复本地：从后端拉取账户与持仓覆盖本地
+  // 恢复本地：从最近云端备份恢复账户与持仓覆盖本地
   onRestoreLocal() {
     wx.showModal({
       title: '恢复本地',
-      content: '从服务器拉取账户、持仓与第三方凭证，覆盖本地数据？',
+      content: '将用最近云端备份覆盖当前本地数据？',
       confirmText: '恢复',
       confirmColor: '#0071e3',
       success: (res) => {
         if (!res.confirm) return;
+        this.setData({ restoringLocal: true });
         wx.showLoading({ title: '恢复中...', mask: true });
-        app.loadStateFromCloud()
-          .then(synced => {
-            wx.hideLoading();
-            if (synced) {
-              app.notifyAccountsChanged();
-              wx.showToast({ title: '已恢复本地数据', icon: 'success' });
-            } else {
-              wx.showToast({ title: '服务器暂无数据', icon: 'none' });
+        http.get('/api/account/backups', null, { silent: true })
+          .then(r => {
+            const backups = (r && r.backups) || [];
+            if (!backups.length) {
+              wx.showToast({ title: '云端暂无备份', icon: 'none' });
+              return;
             }
+            return http.post(`/api/account/backups/${backups[0].id}/restore`, {}, { silent: true })
+              .then(r2 => {
+                const ok = this._applyRestoredState(r2 && r2.state);
+                wx.showToast({ title: ok ? '已恢复本地数据' : '恢复失败', icon: ok ? 'success' : 'none' });
+              });
           })
-          .catch(() => {
+          .catch(err => {
+            wx.showToast({ title: (err && err.message) || '恢复失败', icon: 'none' });
+          })
+          .finally(() => {
             wx.hideLoading();
-            wx.showToast({ title: '恢复失败', icon: 'none' });
+            this.setData({ restoringLocal: false });
           });
       }
     });
+  },
+
+  _applyRestoredState(state) {
+    if (state && state.accounts && typeof state.accounts === 'object') {
+      app.globalData.accounts = state.accounts;
+      app.globalData.activeAccountName = state.active || Object.keys(state.accounts)[0] || '主账户';
+      if (state.providerStatus && typeof state.providerStatus === 'object') {
+        app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
+      }
+      app.saveState();
+      app.notifyAccountsChanged();
+      return true;
+    }
+    return false;
   },
 
   // 退出登录：强制同步 → 退第三方 → auth logout → 清本地 → logged_out

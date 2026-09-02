@@ -45,7 +45,7 @@
   </view>
   <view class="actions" style="padding-top: 12rpx;">
     <button wx:if="{{!authUser}}" class="btn btn-secondary" bindtap="goLogin">登录 / 注册</button>
-    <button wx:if="{{authUser}}" class="btn btn-secondary" bindtap="onRestoreLocal">恢复本地</button>
+    <button wx:if="{{authUser}}" class="btn btn-secondary" bindtap="onRestoreLocal" disabled="{{restoringLocal || restoringBackupId}}">{{restoringLocal ? '恢复中...' : '恢复本地'}}</button>
     <button wx:if="{{authUser}}" class="btn btn-danger" bindtap="onLogout">退出登录</button>
   </view>
 
@@ -63,7 +63,7 @@
         <text class="status-label">{{item.account_count}} 个账户 · {{item.reason === 'logout' ? '退出前' : item.reason === 'manual' ? '手动备份' : item.reason}}</text>
       </view>
       <view style="display:flex; gap: 28rpx; flex-shrink: 0; align-items: center;">
-        <button class="text-link-btn" data-id="{{item.id}}" bindtap="onRestoreBackup">恢复</button>
+        <button class="text-link-btn" data-id="{{item.id}}" bindtap="onRestoreBackup" disabled="{{restoringBackupId === item.id || restoringLocal}}">{{restoringBackupId === item.id ? '恢复中...' : '恢复'}}</button>
         <button class="text-link-btn danger" data-id="{{item.id}}" bindtap="onDeleteBackup">删除</button>
       </view>
     </view>

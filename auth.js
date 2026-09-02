@@ -224,7 +224,11 @@
       try {
         const ok = await window.createCloudBackup('manual');
         if (ok) window.showToast('已同步到云端');
-        else window.showToast('请先登录账号', 'warning');
+        else {
+          // 区分「真未登录」与「同步闸门未就绪」：后者是恢复竞态/失败，并非没登录
+          if (window.auth && window.auth.state && window.auth.state.token) window.showToast('同步未就绪，请稍候重试', 'warning');
+          else window.showToast('请先登录账号', 'warning');
+        }
         loadRecentBackups(layer);
       } catch (error) {
         window.showToast('同步失败：' + (error.message || '网络错误'), 'error');
@@ -236,7 +240,7 @@
     restoreBtn.addEventListener('click', async () => {
       const confirmRestore = await window.showAppleDialog({
         title: '恢复本地',
-        message: '将用云端数据覆盖当前本地账户数据（同步账户不受影响）。是否继续？',
+        message: '将用最近云端备份覆盖当前本地账户数据（同步账户不受影响）。是否继续？',
         okText: '恢复',
         cancelText: '取消',
         danger: true
@@ -245,9 +249,16 @@
       restoreBtn.disabled = true;
       restoreBtn.textContent = '恢复中…';
       try {
-        const ok = await window.restoreFromCloud();
-        if (ok) window.showToast('已从云端恢复');
-        else window.showToast('云端暂无数据，或请先登录账号', 'warning');
+        const r = await fetch('/api/account/backups', { headers: window.auth.authHeaders() });
+        const data = await r.json();
+        const backups = data && data.backups;
+        if (!Array.isArray(backups) || backups.length === 0) {
+          window.showToast('云端暂无备份', 'warning');
+          return;
+        }
+        const result = await window.restoreCloudBackup(backups[0].id);
+        window.showToast(result ? '已恢复备份' : '恢复失败', result ? 'success' : 'error');
+        if (result) loadRecentBackups(layer);
       } catch (error) {
         window.showToast('恢复失败：' + (error.message || '网络错误'), 'error');
       } finally {
@@ -306,13 +317,17 @@
       danger: true
     });
     if (!ok) return;
+    const btn = layer.querySelector('[data-backup-restore="' + id + '"]');
+    if (btn) { btn.disabled = true; btn.textContent = '恢复中...'; }
     try {
       const result = await window.restoreCloudBackup(id);
       window.showToast(result ? '已恢复备份' : '恢复失败', result ? 'success' : 'error');
     } catch (error) {
       window.showToast('恢复失败：' + (error.message || '网络错误'), 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '恢复'; }
+      loadRecentBackups(layer);
     }
-    loadRecentBackups(layer);
   }
 
   async function confirmDeleteCloudBackup(id, layer) {

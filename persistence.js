@@ -789,6 +789,13 @@
     });
     return { accounts:persisted, active:state.getActive(), syncMeta, fundStore: window.fundStore };
   }
+  // 云端快照/PUT 用精简 state：剔除 fundStore 行情缓存（本地可重新拉取），
+  // 避免 3MB 级 payload 拖垮上传（删除账户后无法及时 PUT → 刷新复现）。
+  function buildCloudState(){
+    const p=buildPersisted();
+    delete p.fundStore;
+    return p;
+  }
 
   function normalizeAccount(account){
     if(!account||typeof account!=='object')return;
@@ -820,8 +827,9 @@
     }
   }
   function cloudReady(){
-    return Boolean(window.auth&&window.auth.state&&window.auth.state.token) &&
-      window.accountRestoreStatus==='ready' && window.cloudSyncReady===true;
+    if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
+    if(window.accountRestoreStatus==='blocked')return true; // 恢复失败：云端不可信，本地修改（含删除/编辑）优先写回云端
+    return window.accountRestoreStatus==='ready' && window.cloudSyncReady===true;
   }
   // 标记需要同步并安排防抖上传；闸门未就绪时仅标记 dirty，待恢复完成后由 save() 触发
   function scheduleCloudSave(){
@@ -842,7 +850,7 @@
     cloudSaveInFlight=true;
     const controller=(typeof AbortController==='function')?new AbortController():null;
     const timer=controller?setTimeout(function(){controller.abort();},20000):null;
-    const body=JSON.stringify({state:buildPersisted()});
+    const body=JSON.stringify({state:buildCloudState()});
     logPersistSize('doCloudSave',body.length);
     fetch('/api/account/state',{
       method:'PUT',
@@ -888,7 +896,7 @@
     if(cloudSaveInFlight||!cloudDirty)return;
     if(!cloudReady())return;
     const myGen=syncGeneration;
-    const body=JSON.stringify({state:buildPersisted()});
+    const body=JSON.stringify({state:buildCloudState()});
     try{
       fetch('/api/account/state',{
         method:'PUT',
@@ -908,14 +916,6 @@
   }
 
   function save(opts){
-    if (window.accountRestoreStatus === 'restoring') {
-      console.log('[SYNC] SAVE_BLOCKED reason=restoring (cloud restore in progress)');
-      return;
-    }
-    if (window.accountRestoreStatus === 'blocked') {
-      console.log('[SYNC] SAVE_BLOCKED reason=restore-failed (cloud writes disabled)');
-      return;
-    }
     try{
       const payload=buildPersisted();
       localStorage.setItem(storageKey,JSON.stringify(payload));
@@ -937,8 +937,13 @@
         } else if (window.cloudSyncReady === true) {
           console.log('[SYNC] SAVE_ALLOWED');
           scheduleCloudSave();
+        } else if (window.accountRestoreStatus === 'blocked') {
+          // 恢复已失败、云端不可信：本地修改（含删除/编辑）优先写回云端，避免刷新后账户复现
+          console.log('[SYNC] SAVE_ALLOWED reason=restore-blocked local-wins');
+          cloudDirty = true;
+          flushCloudSaveNow();
         } else {
-          console.log('[SYNC] SAVE_BLOCKED reason=cloud-not-ready (local saved only)');
+          console.log('[SYNC] SAVE_LOCAL_ONLY reason=restoring (cloud PUT deferred, local saved)');
         }
       }
     }catch(error){
@@ -1231,8 +1236,7 @@
           if (!applied || hydratedCount === 0) {
             // 云端有数据但 hydration 后本地仍为空 → 视为恢复失败，禁止写回
             console.error('[SYNC] RESTORE_FAILED reason=hydration-empty applied=' + applied + ' hydrated=' + hydratedCount);
-            window.accountRestoreStatus = 'blocked';
-            window.cloudSyncReady = false;
+            if(window.accountRestoreStatus!=='ready'){window.accountRestoreStatus='blocked';window.cloudSyncReady=false;}
             rerender();
             return;
           }
@@ -1251,8 +1255,7 @@
         if (rawAccounts && Array.isArray(rawAccounts)) {
           // 非法格式（数组等）：不能识别为有效账户，禁止上传
           console.error('[SYNC] RESTORE_FAILED reason=accounts-invalid-shape');
-          window.accountRestoreStatus = 'blocked';
-          window.cloudSyncReady = false;
+          if(window.accountRestoreStatus!=='ready'){window.accountRestoreStatus='blocked';window.cloudSyncReady=false;}
           rerender();
           return;
         }
@@ -1272,8 +1275,7 @@
       .catch(err => {
         // 拉取云端失败：绝不当作「云端为空」上传本地，禁止云端写入
         console.error('[SYNC] RESTORE_FAILED', err && err.message ? err.message : err);
-        window.accountRestoreStatus = 'blocked';
-        window.cloudSyncReady = false;
+        if(window.accountRestoreStatus!=='ready'){window.accountRestoreStatus='blocked';window.cloudSyncReady=false;}
         console.log('[SYNC] SYNC_BLOCKED reason=restore-failed (cloud writes disabled)');
         rerender();
       });
@@ -1299,9 +1301,11 @@
     if(tab)tab.click();
   }
 
+  // 捕获恢复 Promise，供手动「立即同步」等待恢复完成，消除刷新瞬间 restoring 窗口竞态
+  let restorePromise = Promise.resolve();
   window.addEventListener('auth-changed',()=>{
     if(window.auth&&window.auth.state&&window.auth.state.token){
-      restoreCloud();
+      restorePromise = restoreCloud();
     }else{
       window.accountRestoreStatus = 'ready';
       window.cloudSyncReady = false;
@@ -1309,7 +1313,7 @@
       rerender();
     }
   });
-  restoreCloud();
+  restorePromise = restoreCloud();
 
   state.setActive=function(name){
     originalSetActive(name);
@@ -1317,6 +1321,7 @@
   };
   state.persist=function(opts){ save(opts); };
   window.savePortfolioState=function(opts){ save(opts); };
+  window.flushCloudSaveNow=flushCloudSaveNow; // 供删除账户等即时云端同步调用（绕过 400ms 防抖）
   // 供 app-refactor 在刷新同步账户时合并其本地策略元数据
   window.getSyncAccountMeta=function(name){return syncMetaStore[name]||null;};
   // 手动操作：备份云端 / 恢复本地
@@ -1332,7 +1337,7 @@
     const controller=(typeof AbortController==='function')?new AbortController():null;
     const timer=controller?setTimeout(function(){controller.abort();},20000):null;
     try{
-      const body=JSON.stringify({state:buildPersisted()});
+      const body=JSON.stringify({state:buildCloudState()});
       logPersistSize('backupToCloud',body.length);
       const response=await fetch('/api/account/state',{
         method:'PUT',
@@ -1370,8 +1375,14 @@
   // 创建服务器备份快照（account_backups，后端最多保留 5 个，超出自动删最旧）
   window.createCloudBackup=async function(reason){
     if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
-    if(window.accountRestoreStatus!=='ready'||window.cloudSyncReady!==true){
-      console.log('[SYNC] BACKUP_BLOCKED reason=not-ready status='+window.accountRestoreStatus);
+    // 恢复仍在进行：等待恢复 Promise 完成再判就绪（手动同步撞 restoring 窗口属竞态，应等待而非直接失败）
+    if(window.accountRestoreStatus==='restoring'){
+      try{ await restorePromise; }catch(_){ /* 恢复失败 → 进入下方 blocked 判定 */ }
+    }
+    // 与 cloudReady() 对齐：'ready'（恢复成功）或 'blocked'（恢复失败/本地优先）均允许推送；
+    // 仅真正的中间态才禁止。'blocked' 下本地数据优先写回云端（local-wins）。
+    if(window.accountRestoreStatus!=='ready' && window.accountRestoreStatus!=='blocked'){
+      console.log('[SYNC] BACKUP_BLOCKED reason='+window.accountRestoreStatus);
       return false;
     }
     const response=await fetch('/api/account/backups',{

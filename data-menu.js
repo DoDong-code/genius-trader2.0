@@ -50,7 +50,10 @@
   function dialog(title, copy, actions) {
     var overlay = document.createElement('div');
     overlay.className = 'confirm-overlay data-dialog-overlay';
-    overlay.innerHTML = '<section class="confirm-dialog data-dialog" role="dialog" aria-modal="true"><h2>' + title + '</h2><p>' + copy + '</p><div class="confirm-actions">' + actions + '</div></section>';
+    // 单按钮弹窗（如「知道了」）居中且给按钮加最小宽度，避免 flex 收缩到内容宽；双按钮保持原排布
+    var singleAction = (String(actions).match(/<button/g) || []).length === 1;
+    var actionHtml = singleAction ? actions.replace(/<button/g, '<button style="min-width:159px;"') : actions;
+    overlay.innerHTML = '<section class="confirm-dialog data-dialog" role="dialog" aria-modal="true"><h2>' + title + '</h2><p>' + copy + '</p><div class="confirm-actions"' + (singleAction ? ' style="display:flex;justify-content:center;"' : '') + '>' + actionHtml + '</div></section>';
     document.body.appendChild(overlay); requestAnimationFrame(function () { overlay.classList.add('visible'); });
     return overlay;
   }

@@ -1167,9 +1167,9 @@
         <div class="confirm-dialog apple-dialog" role="alertdialog" aria-modal="true">
           <h2>${esc(title)}</h2>
           ${message ? `<p class="apple-dialog-message">${esc(message)}</p>` : ''}
-          <div class="confirm-actions apple-dialog-actions">
+          <div class="confirm-actions apple-dialog-actions" style="${cancelText ? '' : 'display: flex; justify-content: center;'}">
             ${cancelText ? `<button type="button" class="apple-dialog-cancel" data-role="cancel">${esc(cancelText)}</button>` : ''}
-            <button type="button" class="${danger ? 'apple-dialog-danger' : 'primary'}" data-role="ok">${esc(okText)}</button>
+            <button type="button" class="${danger ? 'apple-dialog-danger' : 'primary'}" data-role="ok"${cancelText ? '' : ' style="min-width:159px;"'}>${esc(okText)}</button>
           </div>
         </div>`;
       document.body.appendChild(overlay);
@@ -3206,7 +3206,8 @@
     if (testAiBtn) {
       const provider = document.querySelector('#ai-provider-select')?.value || 'OpenAI';
       const baseURL = document.querySelector('#ai-base-url-input')?.value.trim() || '';
-      const apiKey = document.querySelector('#ai-api-key-input')?.value.trim() || window.AI_API_KEY || '';
+      const rawKey = document.querySelector('#ai-api-key-input')?.value.trim() || '';
+      const apiKey = rawKey === '••••••••' ? (window.AI_API_KEY || '') : rawKey;
       const modelName = document.querySelector('#ai-model-name-input')?.value.trim() || 'gpt-5-mini';
       const question = document.querySelector('#test-ai-question')?.value.trim() || '现在几点了';
       

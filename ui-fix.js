@@ -63,10 +63,11 @@
     const active=window.portfolioState.getActive();
     if(!window.portfolioState.accounts[active])window.portfolioState.setActive(Object.keys(window.portfolioState.accounts)[0]||'');
     window.savePortfolioState?.();
+    if (typeof window.flushCloudSaveNow === 'function') window.flushCloudSaveNow(); // 删除后立即同步云端，消除刷新竞态导致的账户复现
   }
   function showInfoDialog(title,msg){
     const overlay=document.createElement('div');overlay.className='confirm-overlay';
-    overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true"><div class="confirm-icon">!</div><h2 id="confirm-title">'+title+'</h2><p>'+msg+'</p><div class="confirm-actions"><button type="button" data-info="ok">知道了</button></div></div>';
+    overlay.innerHTML='<div class="confirm-dialog" role="alertdialog" aria-modal="true"><div class="confirm-icon">!</div><h2 id="confirm-title">'+title+'</h2><p>'+msg+'</p><div class="confirm-actions" style="display:flex;justify-content:center;"><button type="button" data-info="ok" style="min-width:159px;">知道了</button></div></div>';
     document.body.appendChild(overlay);requestAnimationFrame(function(){overlay.classList.add('visible')});
     const close=function(){overlay.classList.remove('visible');setTimeout(function(){overlay.remove()},180)};
     overlay.addEventListener('click',function(e){if(e.target===overlay||e.target.closest('[data-info="ok"]'))close()});

@@ -324,8 +324,8 @@
         <div class="column-list">
           <!-- Dynamically populated -->
         </div>
-        <div class="confirm-actions" style="margin-top: 20px;">
-          <button type="button" class="primary column-done-btn" style="width: 100%; border-radius: 8px;">完成</button>
+        <div class="confirm-actions" style="margin-top: 20px; display: flex; justify-content: center;">
+          <button type="button" class="primary column-done-btn" style="min-width: 120px; width: auto; border-radius: 8px;">完成</button>
         </div>
       </form>`;
 
