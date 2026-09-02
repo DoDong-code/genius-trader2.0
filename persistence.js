@@ -1388,7 +1388,7 @@
     const response=await fetch('/api/account/backups',{
       method:'POST',
       headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
-      body:JSON.stringify({state:buildPersisted(),reason:reason||'manual'})
+      body:JSON.stringify({state:buildCloudState(),reason:reason||'manual'})
     });
     if(!response.ok)throw new Error('HTTP '+response.status);
     return true;
