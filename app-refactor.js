@@ -2035,7 +2035,7 @@
               </div>
             </div>
             <div class="panel-body-external" style="display: ${window.settingsCollapsedState.external ? 'none' : 'block'}; padding: 24px;">
-              <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">把API或者JSON发送给第三方AI 即可分析当日操作建议，内容包含当日估值+15个交易日历史净值</p>
+              <p style="font-size: 13px; color: #6e6e73; line-height: 1.6; margin: 0 0 14px 0;">把API或者JSON发送给第三方AI 即可分析当日操作建议，内容包含当日估值+15个交易日历史净值+前十大持仓</p>
               <div style="font-size: 13px; color: #1d1d1f; margin-bottom: 12px;">状态：<b id="external-status-text">检查中…</b></div>
               
               <!-- API 地址 Area -->
@@ -2826,22 +2826,49 @@
         const totalValue = funds.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
         const uniqueCodes = [...new Set(funds.map(f => String(f.code || '')).filter(c => /^\d{6}$/.test(c)))];
 
-        showToast('正在获取近 15 个交易日净值…');
+        showToast('正在获取近 15 个交易日净值与前十大持仓…');
         const navHistoryMap = new Map();
+        const topHoldingsMap = new Map();
         await Promise.all(uniqueCodes.map(async code => {
           const controller = typeof AbortController === 'function' ? new AbortController() : null;
           const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
           try {
-            const res = await fetch(`/api/fund/${code}/history?limit=${NAV_HISTORY_DAYS}`,
-              controller ? { signal: controller.signal } : undefined);
-            if (!res.ok) return;
-            const data = await res.json();
-            const rows = Array.isArray(data && data.history) ? data.history : [];
-            const list = rows
-              .map(r => ({ date: String(r.date || ''), nav: Number(r.nav) }))
-              .filter(r => r.date && Number.isFinite(r.nav))
-              .slice(-NAV_HISTORY_DAYS);
-            if (list.length) navHistoryMap.set(code, list);
+            // 历史净值与前十大持仓并行拉取，共用同一个 8s 超时控制
+            const [res, holdingsRes] = await Promise.all([
+              fetch(`/api/fund/${code}/history?limit=${NAV_HISTORY_DAYS}`,
+                controller ? { signal: controller.signal } : undefined),
+              fetch(`/api/fund/${code}/holdings`,
+                controller ? { signal: controller.signal } : undefined)
+            ]);
+            if (res.ok) {
+              const data = await res.json();
+              const rows = Array.isArray(data && data.history) ? data.history : [];
+              const list = rows
+                .map(r => ({ date: String(r.date || ''), nav: Number(r.nav) }))
+                .filter(r => r.date && Number.isFinite(r.nav))
+                .slice(-NAV_HISTORY_DAYS);
+              // 精简：历史净值直接写成「起止日: nav1, nav2, ...」字符串，AI 易读
+              if (list.length) {
+                const navs = list.map(r => r.nav).join(', ');
+                navHistoryMap.set(code, `${list[0].date} 至 ${list[list.length - 1].date}: ${navs}`);
+              }
+            }
+            if (holdingsRes.ok) {
+              const holdingsData = await holdingsRes.json();
+              const rows = Array.isArray(holdingsData && holdingsData.holdings) ? holdingsData.holdings : [];
+              // 精简：前十大持仓写成「股票名(占比%)」逗号串，AI 易读；weight<=1 视为小数自动×100
+              const list = rows
+                .map(r => {
+                  const w = Number(r.weight);
+                  const pct = Number.isFinite(w) ? (w < 1 ? w * 100 : w) : null;
+                  return { name: String(r.name || ''), pct };
+                })
+                .filter(r => r.name && r.pct !== null)
+                .slice(0, 10);
+              if (list.length) {
+                topHoldingsMap.set(code, list.map(r => `${r.name}(${r.pct.toFixed(2)}%)`).join(', '));
+              }
+            }
           } catch (err) {
             // 单只基金拉取失败不影响整体复制
           } finally {
@@ -2880,7 +2907,8 @@
               todayChange: Number(todayChange.toFixed(4)),
               todayProfit: Number(todayProfit.toFixed(2)),
               navUpdatedAt: f.navUpdatedAt || (f.latest_nav && f.latest_nav.date) || null,
-              navHistory: navHistoryMap.get(String(f.code || '')) || []
+              navHistory: navHistoryMap.get(String(f.code || '')) || '',
+              topHoldings: topHoldingsMap.get(String(f.code || '')) || ''
             };
           })
         };

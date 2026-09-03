@@ -584,6 +584,23 @@ async function handleFundApi(request, response, url) {
     return true;
   }
 
+  // 前十大持仓（轻量端点）：仅返回重仓股，避免为取持仓而下载全量历史净值
+  match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/holdings$/);
+  if (match) {
+    const rows = await getFundHoldings(match[0]); // 自带 LIMIT 10（最新报告期、按权重降序）
+    sendJson(response, 200, {
+      success: true,
+      fund_code: match[0],
+      holdings: (rows || []).map(r => ({
+        code: r.stock_code,
+        name: r.stock_name,
+        weight: r.weight,
+        reportDate: r.report_date
+      }))
+    });
+    return true;
+  }
+
   match = routeMatch(url.pathname, /^\/api\/fund\/(\d{6})\/estimate$/);
   if (match) {
     const amount = url.searchParams.has('amount')
