@@ -1601,27 +1601,21 @@
       profit: Number(f.holdingProfit ?? f.profit) || 0,
       today_change: Number((f.today || 0) * (Number(f.amount) || 0)) || 0
     }));
-    const portfolio = { account: a.name || '默认账户', strategies: a.strategy || [], holdings };
     const isReview = /复盘/.test(question);
     const isBrief = /简短|简答|精简|简略|一句话|不要太长|尽量短|少说|brief|concise/i.test(question || '');
 
     (async () => {
       try {
-        let prompt;
+        // AI 上下文由服务端按需组装（含最近 15 日历史 / 十大持仓）。
+        // 前端只发送当前账户最小快照，不再逐只请求 /api/fund/:code（避免一次提问产生 N 个 HTTP 请求）。
+        let reviewNote = '复盘分析';
         if (isReview) {
-          let closedNote = '复盘分析';
           try {
             const market = await providerApi('/api/market/status');
-            closedNote = market && market.trading_day && (market.time || '') >= '15:00'
+            reviewNote = market && market.trading_day && (market.time || '') >= '15:00'
               ? '今日已收盘'
               : '今日尚未收盘（当前为盘中数据，以下为盘中复盘）';
           } catch (e) { /* 默认提示 */ }
-          prompt = `${closedNote}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n`;
-        } else {
-          const answerStyle = isBrief
-            ? '回答请高度简洁，控制在200字以内，直接给结论和关键操作建议，不要展开分析、不要长篇分点。'
-            : '回答简洁明了、直击要点，避免冗余，不要过度展开。';
-          prompt = `请基于以下基金组合数据回答用户问题。${answerStyle}\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n用户问题：${question}`;
         }
         const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
         const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
@@ -1631,7 +1625,11 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            message: prompt,
+            message: question,
+            account: { name: a.name || '默认账户', strategies: a.strategy || [], holdings },
+            brief: isBrief,
+            review: isReview,
+            reviewNote,
             config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey, maxTokens: isBrief ? 600 : 1500 }
           })
         });

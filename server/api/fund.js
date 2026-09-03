@@ -44,6 +44,57 @@ function loadAiBundle() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// AI 聊天上下文：按需注入（最小实现，非意图识别系统）
+// 规则：基础上下文只含账户必要信息；仅在问题明显涉及历史/持仓结构时，才从现有
+// 缓存/数据库补充。严禁新增外部行情请求；历史只取最近 15 条；十大持仓由
+// getFundHoldings 自带 LIMIT 10。绝不发送 fundStore / localStorage 原始缓存 / 全库。
+// ---------------------------------------------------------------------------
+const AI_HISTORY_KEYWORDS = /历史|走势|净值|最近|近\s*\d+\s*(?:日|天|个?交易日)|回撤|涨跌|趋势|波动|阶段|区间|表现/i;
+const AI_HOLDINGS_KEYWORDS = /十大持仓|重仓|底层|持仓结构|行业|股票|成分|个股|集中度/i;
+const AI_DEEP_KEYWORDS = /全面分析|深度分析|详细分析|完整分析|综合分析/i;
+const AI_HISTORY_LIMIT = 15;
+
+async function buildAiChatContext(account, question) {
+  const rawHoldings = (account && Array.isArray(account.holdings)) ? account.holdings : [];
+  const context = {
+    account: (account && account.name) || '未命名账户',
+    strategies: (account && Array.isArray(account.strategies)) ? account.strategies : [],
+    holdings: rawHoldings.map(h => ({
+      name: (h && h.name) || '',
+      code: (h && h.code) || '',
+      amount: Number(h && h.amount) || 0,
+      profit: Number(h && h.profit) || 0,
+      today_change: Number(h && h.today_change) || 0
+    }))
+  };
+  const text = String(question || '');
+  const deep = AI_DEEP_KEYWORDS.test(text);
+  const needHistory = deep || AI_HISTORY_KEYWORDS.test(text);
+  const needHoldings = deep || AI_HOLDINGS_KEYWORDS.test(text);
+  if (!needHistory && !needHoldings) return context;
+
+  for (const fund of context.holdings) {
+    const code = String(fund.code || '').trim();
+    if (!/^\d{6}$/.test(code)) continue; // 非标准基金代码：跳过，避免无效查询
+    if (needHistory) {
+      try {
+        const rows = await getHistory(code, { limit: AI_HISTORY_LIMIT });
+        fund.recent15 = (rows || []).map(r => ({ date: r.date, nav: r.nav }));
+      } catch (e) { fund.recent15 = null; }
+    }
+    if (needHoldings) {
+      try {
+        const rows = await getFundHoldings(code);
+        fund.topHoldings = (rows || []).map(r => ({
+          name: r.stock_name, code: r.stock_code, weight: r.weight, report_date: r.report_date
+        }));
+      } catch (e) { fund.topHoldings = null; }
+    }
+  }
+  return context;
+}
+
 function routeMatch(pathname, expression) {
   const match = pathname.match(expression);
   return match ? match.slice(1).map(decodeURIComponent) : null;
@@ -341,7 +392,21 @@ async function handleFundApi(request, response, url) {
           return true;
         }
         try {
-          const reply = await ai.chat(message, config);
+          // 服务端按需组装 AI 上下文：仅当调用方附带 account 时注入；
+          // 未附带 account 的旧调用方式保持原样（纯 chat，不注入任何数据）。
+          let aiMessage = message;
+          if (body.account && typeof body.account === 'object') {
+            const context = await buildAiChatContext(body.account, message);
+            if (body.review) {
+              aiMessage = `${body.reviewNote || '复盘分析'}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。\n组合数据：\n${JSON.stringify(context, null, 2)}\n`;
+            } else {
+              const style = body.brief
+                ? '回答请高度简洁，控制在200字以内，直接给结论和关键操作建议，不要展开分析、不要长篇分点。'
+                : '回答简洁明了、直击要点，避免冗余，不要过度展开。';
+              aiMessage = `请基于以下基金组合数据回答用户问题。${style}\n组合数据：\n${JSON.stringify(context, null, 2)}\n用户问题：${message}`;
+            }
+          }
+          const reply = await ai.chat(aiMessage, config);
           sendJson(response, 200, { success: true, reply });
         } catch (err) {
           sendJson(response, 500, { success: false, error: err.message });
