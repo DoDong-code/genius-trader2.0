@@ -36,10 +36,49 @@ const STATEMENT_TIMEOUT_MS = Number(process.env.PG_STATEMENT_TIMEOUT_MS || 15000
 // 绝不无限排队，避免请求链路永久 pending。超时后若连接稍后到达会自动 release，杜绝连接泄漏。
 const ACQUIRE_TIMEOUT_MS = Number(process.env.PG_ACQUIRE_TIMEOUT_MS || 5000);
 
+/**
+ * 清理 Neon 连接串中的 sslmode 参数。
+ * Neon 默认连接串带 ?sslmode=require，pg 新版本会打印
+ * 「sslmode 'prefer','require','verify-ca' are treated as aliases for 'verify-full'」警告。
+ * 我们已通过 Pool 的 ssl:{rejectUnauthorized:false} 显式接管 TLS，故仅去掉 sslmode 以消除警告，
+ * 实际 SSL 行为不变（TLS 仍开启），也不改动 Neon 配置。
+ */
+function cleanConnectionStringUrl(raw) {
+  if (!raw || !raw.includes('sslmode=')) return raw;
+  return raw
+    .replace(/\?sslmode=[^&]+&/i, '?')   // sslmode 是首个参数且后面还有其他参数：保留 '?'
+    .replace(/[?&]sslmode=[^&]+/i, '');   // sslmode 是唯一/末尾参数：整段删除
+}
+
+/**
+ * 为「从连接池 checkout 的 Client」补 error 监听（P0 进程崩溃根因修复）。
+ * pg 在 pool.connect() 借出 Client 时会移除 idle 监听；若借出期间 Neon 中断
+ * （Connection terminated unexpectedly），Client 会发出未处理的 'error' 事件导致 Node 进程退出。
+ * 这里只记录、不吞掉查询异常：await client.query() 仍按原路径 reject → API 返回 500；
+ * pg 在 release() 时会自动丢弃已损坏连接，下次数据库操作重新建连，不会复用死连接。
+ * 用 __guarded 标记避免同一 Client 对象被重复 attach 监听（pg 会复用 Client 实例）。
+ */
+function attachClientErrorGuard(client) {
+  if (!client || typeof client.on !== 'function' || client.__guarded) return;
+  client.__guarded = true;
+  client.on('error', (err) => {
+    console.error('[dbAsync] checked-out Client 连接意外中断（non-fatal, 不终止进程）:', err && err.message);
+  });
+}
+
+/**
+ * 安全释放 checkout 的 Client：已断开的连接 release() 可能抛错，必须吞掉，
+ * 避免 finally 抛错掩盖原始查询错误，也避免冒泡成未处理异常。
+ */
+function safeRelease(client) {
+  if (!client) return;
+  try { client.release(); } catch (e) { /* 已断开的 Client release 抛错属非致命 */ }
+}
+
 async function getPool() {
   if (!pool) {
     pool = new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: cleanConnectionStringUrl(process.env.DATABASE_URL),
       ssl: { rejectUnauthorized: false },
       max: Number(process.env.PG_POOL_MAX || 15),
       // 建连超时：从 30s 降到 10s（合理值），避免单条建连长时间挂起占用事件循环
@@ -77,9 +116,13 @@ async function acquireClient() {
   let timedOut = false;
   let timer = null;
   // 若已超时放弃，连接稍后到达时自动归还池中，避免连接泄漏。
-  // 注意：成功拿到连接后本闭包不会进入 release 分支（timedOut=false）。
+  // 无论成功或超时，只要拿到物理连接就立即补 error 监听（pg 在 checkout 时会移除 idle 监听，
+  // 借出期间若 Neon 中断会发出未处理 'error' → 进程崩溃；这里补监听只记录不吞错）。
   connectPromise.then(
-    (c) => { if (timedOut) { try { c.release(); } catch (e) {} } },
+    (c) => {
+      attachClientErrorGuard(c);
+      if (timedOut) { safeRelease(c); }
+    },
     () => {}
   );
   const timeoutPromise = new Promise((_, reject) => {
@@ -110,7 +153,9 @@ async function connectWithRetry(poolInstance) {
   let attempts = Number(process.env.PG_CONNECT_RETRIES || 2);
   while (attempts > 0) {
     try {
-      return await poolInstance.connect();
+      const client = await poolInstance.connect();
+      attachClientErrorGuard(client);
+      return client;
     } catch (err) {
       attempts--;
       const isConnectTimeout = err && err.message && (
@@ -135,7 +180,7 @@ async function queryCloud(sql, params = []) {
   try {
     return await client.query(convertPlaceholders(sql), params);
   } finally {
-    client.release();
+    safeRelease(client);
   }
 }
 
@@ -228,7 +273,7 @@ async function transaction(work) {
       throw error;
     } finally {
       if (watchdog) clearTimeout(watchdog); // 成功或超时都清除定时器，杜绝泄漏
-      client.release();
+      safeRelease(client);
     }
   }
 
@@ -446,7 +491,7 @@ async function ensureCloudSchema() {
     }
     console.log('[dbAsync] PostgreSQL schema ready');
   } finally {
-    if (client) client.release(); // 禁止遗漏 release
+    if (client) safeRelease(client); // 禁止遗漏 release；已断开的 Client release 抛错非致命
   }
 }
 
