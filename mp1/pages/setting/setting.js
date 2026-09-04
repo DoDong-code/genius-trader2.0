@@ -47,6 +47,15 @@ Page({
     xbyjPhone: '',
     xbyjCode: '',
 
+    // 按钮级「进行中」状态（防重复点击，与 Web runProviderImport 的 busy 语义一致）
+    yjbSyncing: false,      // 养基宝 同步持仓 / 覆盖重导
+    xbyjSyncing: false,     // 小倍养基 同步全部 / 覆盖重导
+    yjbLoggingOut: false,   // 养基宝 退出登录
+    xbyjLoggingOut: false,  // 小倍养基 退出登录
+    xbyjLogging: false,     // 小倍养基 登录
+    xbyjSmsSending: false,  // 小倍养基 发送验证码（请求中）
+    xbyjSmsCountdown: 0,    // 小倍养基 验证码重发倒计时（秒；>0 时按钮禁用）
+
     // 养基宝扫码登录（内联二维码 + 轮询）
     yjbQrShow: false,
     yjbQrUrl: '',
@@ -468,11 +477,20 @@ Page({
       .catch(() => {});
   },
 
+  // 第三方同步：按钮级 busy + 全局遮罩（Web runProviderImport 的 setBusy 语义对齐）
+  // busyKey: 'yjbSyncing' | 'xbyjSyncing'
   syncProvider(source, overwrite) {
-    wx.showLoading({ title: '正在同步持仓...' });
+    const busyKey = source === 'yangjibao' ? 'yjbSyncing' : 'xbyjSyncing';
+    if (this.data[busyKey]) return; // 防重复点击：同一数据源的同步进行中则忽略
+    this.setData({ [busyKey]: true });
+    wx.showLoading({ title: '正在同步持仓...', mask: true });
+    const done = () => {
+      wx.hideLoading();
+      this.setData({ [busyKey]: false });
+    };
     http.post(`/api/provider/${source}/import`, { overwrite: !!overwrite }, { silent: true })
       .then(res => {
-        wx.hideLoading();
+        done();
         const accounts = (res && res.accounts) || [];
         const accountCount = accounts.length;
         const fundCount = accounts.reduce((sum, a) => sum + (a.funds || []).length, 0);
@@ -485,7 +503,7 @@ Page({
         this.loadProviderStatus();
       })
       .catch(() => {
-        wx.hideLoading();
+        done();
         wx.showToast({ title: '同步失败', icon: 'none' });
       });
   },
@@ -671,7 +689,10 @@ Page({
     this.setData({ yjbQrShow: false, yjbQrUrl: '', yjbQrStatus: '', yjbQrId: '' });
   },
 
-  onUnload() { this._stopQrPoll(); },
+  onUnload() {
+    this._stopQrPoll();
+    this._stopSmsCountdown();
+  },
   // P3.19-F：onHide 必须停止轮询（微信后台 setInterval 被节流/挂起，不能假设前台节奏）
   // 不清除 qr_id：用户只是暂时进入公众号/H5；onShow 恢复时按状态机处理（waiting→快查/expired→换新码）
   onHide() {
@@ -683,13 +704,20 @@ Page({
   onYjbOverwrite() { this.syncProvider('yangjibao', true); },
 
   onYjbLogout() {
+    if (this.data.yjbLoggingOut) return;
+    this.setData({ yjbLoggingOut: true });
+    const done = () => this.setData({ yjbLoggingOut: false });
     http.post('/api/provider/yangjibao/logout', {}, { silent: true })
       .then(() => {
+        done();
         wx.showToast({ title: '已退出养基宝', icon: 'none' });
         app.updateProviderStatus({ yjbConnected: false, yjbLastSync: '—' });
         this.loadProviderStatus();
       })
-      .catch(() => wx.showToast({ title: '退出失败', icon: 'none' }));
+      .catch(() => {
+        done();
+        wx.showToast({ title: '退出失败', icon: 'none' });
+      });
   },
 
   onInputXbyjPhone(e) { this.setData({ xbyjPhone: e.detail.value }); },
@@ -701,12 +729,42 @@ Page({
       wx.showToast({ title: '请输入正确的手机号', icon: 'none' });
       return;
     }
+    if (this.data.xbyjSmsSending || this.data.xbyjSmsCountdown > 0) return;
+    this.setData({ xbyjSmsSending: true });
+    const done = () => this.setData({ xbyjSmsSending: false });
     http.post('/api/provider/xiaobeiyangji/sendSMS', { phone }, { silent: true })
-      .then(() => wx.showToast({ title: '验证码已发送，请注意查收', icon: 'none' }))
+      .then(() => {
+        done();
+        wx.showToast({ title: '验证码已发送，请注意查收', icon: 'none' });
+        this._startSmsCountdown(60); // 与 Web 一致：发送成功后 60s 内禁止重发
+      })
       .catch(err => {
+        done();
         const msg = (err && err.message) || '验证码发送失败';
         wx.showToast({ title: msg, icon: 'none', duration: 3000 });
       });
+  },
+
+  // 验证码重发倒计时（与 Web xbyjSmsBtn 的 60s 倒计时对齐）
+  _startSmsCountdown(seconds) {
+    this._stopSmsCountdown();
+    this.setData({ xbyjSmsCountdown: seconds });
+    this._smsTimer = setInterval(() => {
+      const next = this.data.xbyjSmsCountdown - 1;
+      if (next <= 0) {
+        this._stopSmsCountdown();
+        this.setData({ xbyjSmsCountdown: 0 });
+        return;
+      }
+      this.setData({ xbyjSmsCountdown: next });
+    }, 1000);
+  },
+
+  _stopSmsCountdown() {
+    if (this._smsTimer) {
+      clearInterval(this._smsTimer);
+      this._smsTimer = null;
+    }
   },
 
   onXbyjLogin() {
@@ -720,15 +778,21 @@ Page({
       wx.showToast({ title: '请输入验证码', icon: 'none' });
       return;
     }
-    wx.showLoading({ title: '登录中...' });
+    if (this.data.xbyjLogging) return;
+    this.setData({ xbyjLogging: true });
+    wx.showLoading({ title: '登录中...', mask: true });
+    const done = () => {
+      wx.hideLoading();
+      this.setData({ xbyjLogging: false });
+    };
     http.post('/api/provider/xiaobeiyangji/login', { phone, code }, { silent: true })
       .then(() => {
-        wx.hideLoading();
+        done();
         wx.showToast({ title: '登录成功', icon: 'success' });
         this.loadProviderStatus();
       })
       .catch(() => {
-        wx.hideLoading();
+        done();
         wx.showToast({ title: '登录失败', icon: 'none' });
       });
   },
@@ -737,13 +801,20 @@ Page({
   onXbyjOverwrite() { this.syncProvider('xiaobeiyangji', true); },
 
   onXbyjLogout() {
+    if (this.data.xbyjLoggingOut) return;
+    this.setData({ xbyjLoggingOut: true });
+    const done = () => this.setData({ xbyjLoggingOut: false });
     http.post('/api/provider/xiaobeiyangji/logout', {}, { silent: true })
       .then(() => {
+        done();
         wx.showToast({ title: '已退出小倍养基', icon: 'none' });
         app.updateProviderStatus({ xbyjConnected: false, xbyjLastSync: '—' });
         this.loadProviderStatus();
       })
-      .catch(() => wx.showToast({ title: '退出失败', icon: 'none' }));
+      .catch(() => {
+        done();
+        wx.showToast({ title: '退出失败', icon: 'none' });
+      });
   },
 
   onCloudDbChange(e) {

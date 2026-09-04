@@ -66,6 +66,8 @@ const COLUMN_FOR_STATE = {
 Page({
   data: {
     activeAccountName: '',
+    // 刷新按钮「进行中」状态（图标旋转 + 禁止重复点击）
+    refreshing: false,
     totalAssetsStr: '¥0',
     todayProfit: 0,
     todayProfitStr: '¥0.00',
@@ -261,12 +263,15 @@ Page({
   },
 
   onRefreshClick() {
-    wx.showLoading({ title: '正在同步估值...' });
+    if (this.data.refreshing) return; // 防重复点击
+    this.setData({ refreshing: true });
+    wx.showLoading({ title: '正在同步估值...', mask: true });
     setTimeout(() => {
       this.refreshData();
       this.syncTodayNav(); // P3.18-NET：显式刷新时同步当天净值（后端缓存优先，命中不请求 provider）
       wx.hideLoading();
       wx.showToast({ title: '估值已同步', icon: 'success' });
+      this.setData({ refreshing: false });
     }, 600);
   },
 

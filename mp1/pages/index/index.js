@@ -8,6 +8,8 @@ Page({
   data: {
     accountList: [],
     activeAccountName: '',
+    // 刷新按钮「进行中」状态（图标旋转 + 禁止重复点击）
+    refreshing: false,
 
     // Account segmented tabs (matches Web: 全部 + root accounts)
     accountTabs: ['全部'],
@@ -200,12 +202,15 @@ Page({
   },
 
   onRefreshClick() {
-    wx.showLoading({ title: '正在联网更新估值...' });
+    if (this.data.refreshing) return; // 防重复点击
+    this.setData({ refreshing: true });
+    wx.showLoading({ title: '正在联网更新估值...', mask: true });
     this.fetchMarketIndices();
     setTimeout(() => {
       this.refreshData();
       wx.hideLoading();
       wx.showToast({ title: '更新成功', icon: 'success' });
+      this.setData({ refreshing: false });
     }, 600);
   },
 

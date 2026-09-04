@@ -1572,7 +1572,7 @@
     else if (st.status === 'error') box.textContent = st.reply || '回答生成失败';
   }
   // AI 问答回答窗口：根据上方提问生成答案（输入“复盘”触发复盘分析）
-  function askAiQuestion(question) {
+  function askAiQuestion(question, submitBtn) {
     const a = acct();
     const answerBox = document.querySelector('#ai-answer-window');
     const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -1588,6 +1588,12 @@
       return;
     }
     // 不论 DOM 是否存在都发起请求；状态存全局/localStorage，切换视图回来可恢复
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.style.opacity = '0.6';
+      submitBtn.style.pointerEvents = 'none';
+      submitBtn.textContent = '思考中…';
+    }
     saveAiChatState({ status: 'loading', reply: 'AI 正在思考，请稍候…', question: question || '', time: nowStr });
     if (answerBox) {
       answerBox.style.display = 'block';
@@ -1640,6 +1646,7 @@
           freshBox.style.display = 'block';
           freshBox.textContent = data.reply || 'AI 未返回有效回答';
         }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; submitBtn.style.pointerEvents = ''; submitBtn.textContent = '提问'; }
       } catch (err) {
         saveAiChatState({ status: 'error', reply: `回答生成失败：${err.message || '网络错误'}`, question: question || '', time: nowStr });
         const freshBox = document.querySelector('#ai-answer-window');
@@ -1647,6 +1654,7 @@
           freshBox.style.display = 'block';
           freshBox.textContent = `回答生成失败：${err.message || '网络错误'}`;
         }
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; submitBtn.style.pointerEvents = ''; submitBtn.textContent = '提问'; }
       }
     })();
   }
@@ -2632,6 +2640,7 @@
 
     const aiAskSubmitBtn = e.target.closest('#ai-ask-submit-btn');
     if (aiAskSubmitBtn) {
+      if (aiAskSubmitBtn.disabled) return;
       const input = document.querySelector('#ai-question-input');
       const val = input ? input.value.trim() : '';
       if (!val) {
@@ -2639,7 +2648,7 @@
         return;
       }
       window.lastAIUserQuestion = val;
-      askAiQuestion(val);
+      askAiQuestion(val, aiAskSubmitBtn);
       return;
     }
 
@@ -2769,6 +2778,11 @@
     // --- AI 分析授权（只读 Token）---
     const externalGenBtn = e.target.closest('#external-gen-btn');
     if (externalGenBtn) {
+      if (externalGenBtn.disabled) return;
+      externalGenBtn.disabled = true;
+      externalGenBtn.style.opacity = '0.6';
+      externalGenBtn.style.pointerEvents = 'none';
+      externalGenBtn.textContent = '生成中…';
       providerApi('/api/external/token', { method: 'POST' })
         .then(data => {
           if (data && data.token) {
@@ -2778,7 +2792,13 @@
             showToast('只读 Token 已生成并应用到 API 地址');
           }
         })
-        .catch(() => showToast('生成失败，请先登录账号', 'error'));
+        .catch(() => showToast('生成失败，请先登录账号', 'error'))
+        .finally(() => {
+          externalGenBtn.disabled = false;
+          externalGenBtn.style.opacity = '';
+          externalGenBtn.style.pointerEvents = '';
+          externalGenBtn.textContent = '生成';
+        });
       return;
     }
 
@@ -2810,6 +2830,12 @@
 
     const externalCopyJsonBtn = e.target.closest('#external-copy-json-btn');
     if (externalCopyJsonBtn) {
+      if (externalCopyJsonBtn.disabled) return;
+      const _copyJsonBtn = externalCopyJsonBtn;
+      _copyJsonBtn.disabled = true;
+      _copyJsonBtn.style.opacity = '0.6';
+      _copyJsonBtn.style.pointerEvents = 'none';
+      _copyJsonBtn.textContent = '复制中…';
       // 估值：取前端持仓页已刷新的 f.today / f.todayEstimate（服务端接口读云端快照，不含前端实时估值）。
       // 历史净值：从服务端 /api/fund/:code/history 读取近 NAV_HISTORY_DAYS 个交易日。
       (async () => {
@@ -2933,7 +2959,12 @@
           }
           document.body.removeChild(tempInput);
         }
-      })();
+      })().finally(() => {
+        _copyJsonBtn.disabled = false;
+        _copyJsonBtn.style.opacity = '';
+        _copyJsonBtn.style.pointerEvents = '';
+        _copyJsonBtn.textContent = '复制JSON';
+      });
       return;
     }
 
@@ -3090,6 +3121,11 @@
 
     const externalRevokeBtn = e.target.closest('#external-revoke-btn');
     if (externalRevokeBtn) {
+      if (externalRevokeBtn.disabled) return;
+      externalRevokeBtn.disabled = true;
+      externalRevokeBtn.style.opacity = '0.6';
+      externalRevokeBtn.style.pointerEvents = 'none';
+      externalRevokeBtn.textContent = '撤销中…';
       providerApi('/api/external/token/revoke', { method: 'POST' })
         .then(() => {
           localStorage.removeItem('genius_external_token');
@@ -3097,7 +3133,13 @@
           applyExternalStatus();
           showToast('已撤销');
         })
-        .catch(() => showToast('撤销失败', 'error'));
+        .catch(() => showToast('撤销失败', 'error'))
+        .finally(() => {
+          externalRevokeBtn.disabled = false;
+          externalRevokeBtn.style.opacity = '';
+          externalRevokeBtn.style.pointerEvents = '';
+          externalRevokeBtn.textContent = '撤销';
+        });
       return;
     }
 
@@ -3387,11 +3429,22 @@
 
     const yjbLogoutBtn = e.target.closest('#yjb-logout-btn');
     if (yjbLogoutBtn) {
+      if (yjbLogoutBtn.disabled) return;
+      yjbLogoutBtn.disabled = true;
+      yjbLogoutBtn.style.opacity = '0.6';
+      yjbLogoutBtn.style.pointerEvents = 'none';
+      yjbLogoutBtn.textContent = '退出中…';
       providerApi('/api/provider/yangjibao/logout', { method: 'POST' })
         .then(() => refreshProviderStatus())
         .then(() => refreshSyncedAccounts())
         .then(() => { if (view === 'setting' || view === 'overview' || view === 'portfolio') render(view); applyProviderStatus(); showToast('已退出养基宝'); })
-        .catch(() => showToast('退出登录失败', 'error'));
+        .catch(() => showToast('退出登录失败', 'error'))
+        .finally(() => {
+          yjbLogoutBtn.disabled = false;
+          yjbLogoutBtn.style.opacity = '';
+          yjbLogoutBtn.style.pointerEvents = '';
+          yjbLogoutBtn.textContent = '退出登录';
+        });
       return;
     }
 
@@ -3400,7 +3453,12 @@
       if (xbyjSmsBtn.disabled) return;
       const phone = ((document.querySelector('#xbyj-phone') || {}).value || '').trim();
       if (!/^1\d{10}$/.test(phone)) { showToast('请输入正确的手机号', 'warning'); return; }
-      
+
+      xbyjSmsBtn.disabled = true;
+      xbyjSmsBtn.style.pointerEvents = 'none';
+      xbyjSmsBtn.style.opacity = '0.6';
+      xbyjSmsBtn.textContent = '发送中…';
+
       providerApi('/api/provider/xiaobeiyangji/sendSMS', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3412,13 +3470,14 @@
         xbyjSmsBtn.style.cursor = 'not-allowed';
         xbyjSmsBtn.style.opacity = '0.6';
         xbyjSmsBtn.textContent = `${count}s`;
-        
+
         const interval = setInterval(() => {
           count--;
           if (count <= 0) {
             clearInterval(interval);
             xbyjSmsBtn.disabled = false;
             xbyjSmsBtn.style.cursor = '';
+            xbyjSmsBtn.style.pointerEvents = '';
             xbyjSmsBtn.style.opacity = '';
             xbyjSmsBtn.textContent = '验证码';
           } else {
@@ -3426,6 +3485,10 @@
           }
         }, 1000);
       }).catch(err => {
+        xbyjSmsBtn.disabled = false;
+        xbyjSmsBtn.style.pointerEvents = '';
+        xbyjSmsBtn.style.opacity = '';
+        xbyjSmsBtn.textContent = '验证码';
         showToast(`验证码发送失败：${err.message || '网络错误'}`, 'error');
       });
       return;
@@ -3433,17 +3496,28 @@
 
     const xbyjLoginBtn = e.target.closest('#xbyj-login-btn');
     if (xbyjLoginBtn) {
+      if (xbyjLoginBtn.disabled) return;
       const phone = ((document.querySelector('#xbyj-phone') || {}).value || '').trim();
       const code = ((document.querySelector('#xbyj-code') || {}).value || '').trim();
       if (!/^1\d{10}$/.test(phone)) { showToast('请输入正确的手机号', 'warning'); return; }
       if (!code) { showToast('请输入验证码', 'warning'); return; }
+      xbyjLoginBtn.disabled = true;
+      xbyjLoginBtn.style.opacity = '0.6';
+      xbyjLoginBtn.style.pointerEvents = 'none';
+      xbyjLoginBtn.textContent = '登录中…';
       providerApi('/api/provider/xiaobeiyangji/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone, code })
       }).then(() => refreshProviderStatus())
         .then(() => { if (view === 'setting') applyProviderStatus(); showToast('小倍养基登录成功'); })
-        .catch(err => showToast(`登录失败：${err.message || '网络错误'}`, 'error'));
+        .catch(err => showToast(`登录失败：${err.message || '网络错误'}`, 'error'))
+        .finally(() => {
+          xbyjLoginBtn.disabled = false;
+          xbyjLoginBtn.style.opacity = '';
+          xbyjLoginBtn.style.pointerEvents = '';
+          xbyjLoginBtn.textContent = '登录';
+        });
       return;
     }
 
@@ -3463,11 +3537,22 @@
 
     const xbyjLogoutBtn = e.target.closest('#xbyj-logout-btn');
     if (xbyjLogoutBtn) {
+      if (xbyjLogoutBtn.disabled) return;
+      xbyjLogoutBtn.disabled = true;
+      xbyjLogoutBtn.style.opacity = '0.6';
+      xbyjLogoutBtn.style.pointerEvents = 'none';
+      xbyjLogoutBtn.textContent = '退出中…';
       providerApi('/api/provider/xiaobeiyangji/logout', { method: 'POST' })
         .then(() => refreshProviderStatus())
         .then(() => refreshSyncedAccounts())
         .then(() => { if (view === 'setting' || view === 'overview' || view === 'portfolio') render(view); applyProviderStatus(); showToast('已退出小倍养基'); })
-        .catch(() => showToast('退出登录失败', 'error'));
+        .catch(() => showToast('退出登录失败', 'error'))
+        .finally(() => {
+          xbyjLogoutBtn.disabled = false;
+          xbyjLogoutBtn.style.opacity = '';
+          xbyjLogoutBtn.style.pointerEvents = '';
+          xbyjLogoutBtn.textContent = '退出登录';
+        });
       return;
     }
 

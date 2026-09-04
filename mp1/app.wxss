@@ -134,6 +134,16 @@ button::after {
   border: none;
 }
 
+/* 按钮「进行中」禁用态：全局统一，供所有 disabled="{{busy}}" 的按钮复用
+   （与 login/register 的 .submit-btn[disabled] 同一语义：置灰、不响应按下态） */
+.btn[disabled] {
+  opacity: 0.5;
+}
+.btn[disabled]:active {
+  opacity: 0.5;
+  transform: none;
+}
+
 /* Indicators and Positive/Negative Rates */
 .positive {
   color: var(--brand-red) !important; /* Chinese stock market standard: RED for UP */

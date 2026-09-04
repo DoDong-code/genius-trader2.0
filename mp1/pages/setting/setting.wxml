@@ -174,9 +174,9 @@
         <view wx:else>
           <text class="wx-provider-sync">最后同步：{{yjbLastSync}}</text>
           <view class="wx-actions">
-            <button class="btn btn-primary" bindtap="onYjbImport">同步持仓</button>
-            <button class="btn btn-secondary" bindtap="onYjbOverwrite">覆盖重导</button>
-            <button class="btn btn-danger" bindtap="onYjbLogout">退出登录</button>
+            <button class="btn btn-primary" bindtap="onYjbImport" disabled="{{yjbSyncing}}">{{yjbSyncing ? '同步中…' : '同步持仓'}}</button>
+            <button class="btn btn-secondary" bindtap="onYjbOverwrite" disabled="{{yjbSyncing}}">{{yjbSyncing ? '同步中…' : '覆盖重导'}}</button>
+            <button class="btn btn-danger" bindtap="onYjbLogout" disabled="{{yjbLoggingOut || yjbSyncing}}">{{yjbLoggingOut ? '退出中…' : '退出登录'}}</button>
           </view>
         </view>
       </view>
@@ -190,20 +190,20 @@
         <view wx:if="{{!xbyjConnected}}">
           <view class="wx-input-row">
             <input class="wx-input" type="number" placeholder="手机号" value="{{xbyjPhone}}" bindinput="onInputXbyjPhone" />
-            <button class="btn btn-secondary wx-code-btn" bindtap="onXbyjSms">验证码</button>
+            <button class="btn btn-secondary wx-code-btn" bindtap="onXbyjSms" disabled="{{xbyjSmsSending || xbyjSmsCountdown > 0 || xbyjLogging}}">{{xbyjSmsSending ? '发送中…' : (xbyjSmsCountdown > 0 ? xbyjSmsCountdown + 's' : '验证码')}}</button>
           </view>
           <view class="wx-input-row">
             <input class="wx-input" placeholder="短信验证码" value="{{xbyjCode}}" bindinput="onInputXbyjCode" />
-            <button class="btn btn-primary wx-login-btn" bindtap="onXbyjLogin">登录</button>
+            <button class="btn btn-primary wx-login-btn" bindtap="onXbyjLogin" disabled="{{xbyjLogging}}">{{xbyjLogging ? '登录中…' : '登录'}}</button>
           </view>
           <text class="wx-hint-inline">收不到验证码？请确认手机号已在「小倍养基」App 注册，并避免频繁点击发送。</text>
         </view>
         <view wx:else>
           <text class="wx-provider-sync">最后同步：{{xbyjLastSync}}</text>
           <view class="wx-actions">
-            <button class="btn btn-primary" bindtap="onXbyjImport">同步全部</button>
-            <button class="btn btn-secondary" bindtap="onXbyjOverwrite">覆盖重导</button>
-            <button class="btn btn-danger" bindtap="onXbyjLogout">退出登录</button>
+            <button class="btn btn-primary" bindtap="onXbyjImport" disabled="{{xbyjSyncing}}">{{xbyjSyncing ? '同步中…' : '同步全部'}}</button>
+            <button class="btn btn-secondary" bindtap="onXbyjOverwrite" disabled="{{xbyjSyncing}}">{{xbyjSyncing ? '同步中…' : '覆盖重导'}}</button>
+            <button class="btn btn-danger" bindtap="onXbyjLogout" disabled="{{xbyjLoggingOut || xbyjSyncing}}">{{xbyjLoggingOut ? '退出中…' : '退出登录'}}</button>
           </view>
         </view>
       </view>

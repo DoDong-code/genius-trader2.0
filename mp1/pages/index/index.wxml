@@ -26,8 +26,8 @@
         </view>
       </view>
       <!-- 刷新按钮：单独右侧，与组水平居中 -->
-      <view class="refresh-circle-btn" bindtap="onRefreshClick" style="display: inline-flex; align-items: center; justify-content: center; margin-left: 6rpx;">
-        <text class="refresh-arrow" style="font-size: 22rpx; color: #0071e3;">↻</text>
+      <view class="refresh-circle-btn {{refreshing ? 'is-refreshing' : ''}}" bindtap="onRefreshClick" style="display: inline-flex; align-items: center; justify-content: center; margin-left: 6rpx;">
+        <text class="refresh-arrow {{refreshing ? 'is-spinning' : ''}}" style="font-size: 22rpx; color: #0071e3;">↻</text>
       </view>
     </view>
   </view>

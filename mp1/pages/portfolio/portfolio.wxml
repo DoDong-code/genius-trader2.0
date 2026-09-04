@@ -34,8 +34,8 @@
             <text class="status-update">数据：{{dateStr}}</text>
           </view>
         </view>
-        <view class="refresh-circle-btn" bindtap="onRefreshClick">
-          <text class="refresh-arrow">↻</text>
+        <view class="refresh-circle-btn {{refreshing ? 'is-refreshing' : ''}}" bindtap="onRefreshClick">
+          <text class="refresh-arrow {{refreshing ? 'is-spinning' : ''}}">↻</text>
         </view>
       </view>
     </view>
