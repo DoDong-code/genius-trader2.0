@@ -61,8 +61,8 @@ Page({
         this.setData({ restoringBackupId: id });
         wx.showLoading({ title: '恢复中...', mask: true });
         http.post(`/api/account/backups/${id}/restore`, {}, { silent: true })
-          .then(r => {
-            const ok = this._applyRestoredState(r && r.state);
+          .then(async r => {
+            const ok = await this._applyRestoredState(r && r.state);
             wx.showToast({ title: ok ? '已恢复备份' : '恢复失败', icon: ok ? 'success' : 'none' });
           })
           .catch(err => {
@@ -223,8 +223,8 @@ Page({
               return;
             }
             return http.post(`/api/account/backups/${backups[0].id}/restore`, {}, { silent: true })
-              .then(r2 => {
-                const ok = this._applyRestoredState(r2 && r2.state);
+              .then(async r2 => {
+                const ok = await this._applyRestoredState(r2 && r2.state);
                 wx.showToast({ title: ok ? '已恢复本地数据' : '恢复失败', icon: ok ? 'success' : 'none' });
               });
           })
@@ -239,29 +239,60 @@ Page({
     });
   },
 
-  _applyRestoredState(state) {
-    if (state && state.accounts && typeof state.accounts === 'object') {
-      app.globalData.accounts = state.accounts;
-      app.globalData.activeAccountName = state.active || Object.keys(state.accounts)[0] || '主账户';
-      if (state.providerStatus && typeof state.providerStatus === 'object') {
-        app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
+  // 恢复备份 / 恢复本地的统一落地逻辑（两条入口共用）。
+  // 策略语义对齐网页版（app-refactor.js applyAccounts / refreshSyncedAccounts）：
+  // 「投资策略方针」是本地元数据，服务端 portfolio 表并不存 strategy
+  // （listSyncedAccounts 固定返回 strategy:[]，refreshSyncedAccounts 会把同步账户冲成空）。
+  // 且备份快照只在「立即同步 / 退出登录」时生成，可能早于用户设置策略。
+  // 因此恢复时以「本机现有策略」为准，本机没有时才用备份快照兜底，
+  // 否则会出现「点了恢复，投资策略方针不见了」。
+  async _applyRestoredState(state) {
+    if (!state || !state.accounts || typeof state.accounts !== 'object') return false;
+
+    // 1) 覆盖前先留存本机现有策略（本地优先）
+    const localStrategies = {};
+    Object.keys(app.globalData.accounts || {}).forEach(name => {
+      const acc = app.globalData.accounts[name];
+      if (acc && Array.isArray(acc.strategy) && acc.strategy.length) {
+        localStrategies[name] = acc.strategy.slice();
       }
-      // P3.19：恢复本地后补齐同步账户（策略合并）+ 第三方连接态 + 持仓估值刷新，
-      // 否则「投资策略未同步 / 持仓一直不出现」需重启小程序才能恢复
-      if (typeof app.refreshSyncedAccounts === 'function') {
-        try { app.refreshSyncedAccounts(); } catch (e) {}
-      }
-      if (typeof app.refreshProviderStatus === 'function') {
-        try { app.refreshProviderStatus(); } catch (e) {}
-      }
-      app.saveState();
-      app.notifyAccountsChanged();
-      if (typeof this.refreshData === 'function') {
-        try { this.refreshData(); } catch (e) {}
-      }
-      return true;
+    });
+
+    app.globalData.accounts = state.accounts;
+    app.globalData.activeAccountName = state.active || Object.keys(state.accounts)[0] || '主账户';
+    if (state.providerStatus && typeof state.providerStatus === 'object') {
+      app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
     }
-    return false;
+
+    // 2) 补齐同步账户 + 第三方连接态。必须 await：其内部会覆盖 globalData.accounts，
+    //    若不等待，第 3 步的策略回填会被它的异步结果再次冲掉。
+    if (typeof app.refreshSyncedAccounts === 'function') {
+      try { await app.refreshSyncedAccounts(); } catch (e) {}
+    }
+    if (typeof app.refreshProviderStatus === 'function') {
+      try { await app.refreshProviderStatus(); } catch (e) {}
+    }
+
+    // 3) 策略回填：本机优先，备份快照兜底
+    Object.keys(app.globalData.accounts).forEach(name => {
+      const acc = app.globalData.accounts[name];
+      if (!acc) return;
+      if (Array.isArray(localStrategies[name]) && localStrategies[name].length) {
+        acc.strategy = localStrategies[name].slice();
+        return;
+      }
+      const snapAcc = state.accounts[name];
+      if (snapAcc && Array.isArray(snapAcc.strategy) && snapAcc.strategy.length) {
+        acc.strategy = snapAcc.strategy.slice();
+      }
+    });
+
+    app.saveState();
+    app.notifyAccountsChanged();
+    if (typeof this.refreshData === 'function') {
+      try { this.refreshData(); } catch (e) {}
+    }
+    return true;
   },
 
   // 退出登录：强制同步 → 退第三方 → auth logout → 清本地 → logged_out
