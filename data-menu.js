@@ -296,6 +296,7 @@
       if (type === 'restore') restoreDefaults();
       if (type === 'logout') {
         if (window.auth && window.auth.logout) window.auth.logout();
+        closeMenu(); // 退出后立即关闭数据菜单，避免残留遮罩拦截设置页点击
       }
       return;
     }

@@ -246,8 +246,19 @@ Page({
       if (state.providerStatus && typeof state.providerStatus === 'object') {
         app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
       }
+      // P3.19：恢复本地后补齐同步账户（策略合并）+ 第三方连接态 + 持仓估值刷新，
+      // 否则「投资策略未同步 / 持仓一直不出现」需重启小程序才能恢复
+      if (typeof app.refreshSyncedAccounts === 'function') {
+        try { app.refreshSyncedAccounts(); } catch (e) {}
+      }
+      if (typeof app.refreshProviderStatus === 'function') {
+        try { app.refreshProviderStatus(); } catch (e) {}
+      }
       app.saveState();
       app.notifyAccountsChanged();
+      if (typeof this.refreshData === 'function') {
+        try { this.refreshData(); } catch (e) {}
+      }
       return true;
     }
     return false;

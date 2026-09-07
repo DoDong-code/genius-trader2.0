@@ -1250,6 +1250,10 @@
           } else {
             rerender();
           }
+          // P3.19：登录恢复后立即强制刷新持仓估值，消除原本需等待约 1 分钟的扫描延迟
+          if (typeof window.refreshFundEstimates === 'function') {
+            try { window.refreshFundEstimates(); } catch (e) {}
+          }
           return;
         }
         if (rawAccounts && Array.isArray(rawAccounts)) {
@@ -1292,6 +1296,14 @@
     window.accountRestoreStatus = 'ready';
     window.cloudSyncReady = false;
     if(typeof state.setActive==='function')state.setActive('');
+    // P3.19：退出登录同步清空 AI 问答残留（LAST_AI_CHAT / 内存态 / 回答窗口），
+    // 避免退出后「AI 提问的回答还在」，并消除其覆盖层导致设置页不可点击
+    try { localStorage.removeItem('LAST_AI_CHAT'); } catch (e) {}
+    window.__aiChatState = null;
+    try {
+      var aiBox = document.querySelector('#ai-answer-window');
+      if (aiBox) { aiBox.style.display = 'none'; aiBox.textContent = ''; }
+    } catch (e) {}
     save();
   }
   window.clearLocalData=clearLocalData;
@@ -1367,6 +1379,7 @@
       window.cloudSyncReady=true;
       save();
       rerender();
+      if (typeof window.refreshFundEstimates === 'function') { try { window.refreshFundEstimates(); } catch (e) {} }
     }
     return applied;
   }
@@ -1406,6 +1419,7 @@
     if(applied){
       save();
       rerender();
+      if (typeof window.refreshFundEstimates === 'function') { try { window.refreshFundEstimates(); } catch (e) {} }
     }
     return applied;
   };

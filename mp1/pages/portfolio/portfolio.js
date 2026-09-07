@@ -512,6 +512,7 @@ Page({
     const CONCURRENCY = 6; // 并发上限，避免多基金同时请求卡顿（对齐网页端 MAX_CONCURRENT）
     let pending = queue.length;
     let updated = 0;
+    let providerHits = 0;
     let active = 0;
     let finished = false;
 
@@ -523,7 +524,9 @@ Page({
       app.saveState();
       this.refreshData();
       wx.showToast({
-        title: updated > 0 ? `已同步 ${updated} 条` : '无新数据',
+        title: updated > 0
+          ? `已同步 ${updated} 条·${source}${providerHits > 0 ? '·provider' : '·本地'}`
+          : `源=${source} 无新数据`,
         icon: updated > 0 ? 'success' : 'none'
       });
     };
@@ -573,6 +576,9 @@ Page({
               });
 
               updated += 1;
+              // 诊断：标记是否真正拿到 provider 数据（data_source_actual==='local' 表示后端回退到本地引擎）
+              const _actual = est.data_source_actual || null;
+              if (_actual !== 'local') providerHits += 1;
             }
           })
           .catch(() => { /* 单只失败不影响其他 */ })

@@ -1332,7 +1332,10 @@
         delete acc.__source;
         // 同步账户的持仓以服务端为准，但投资策略等本地元数据从备份中恢复
         const meta = (typeof window.getSyncAccountMeta === 'function') ? window.getSyncAccountMeta(acc.name) : null;
+        const existing = s.accounts[acc.name];
         if (meta && Array.isArray(meta.strategy)) acc.strategy = meta.strategy.slice();
+        // P3.19：meta 缺失时回退到内存中已由 applyAccounts 合并的策略，避免登录恢复路径把策略清空
+        else if (existing && Array.isArray(existing.strategy) && existing.strategy.length) acc.strategy = existing.strategy.slice();
         else if (!Array.isArray(acc.strategy)) acc.strategy = [];
         
         // Preserve children array if it exists in memory
