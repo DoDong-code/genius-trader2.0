@@ -40,12 +40,21 @@ button::after {
   background: #ffffff;
   padding: 36rpx 32rpx;
 }
-.wx-profile-avatar {
+/* 账号图标：替代原头像，沿用设置页图标风格（圆角底色块 + SVG 线性图标） */
+.wx-profile-icon {
   width: 120rpx;
   height: 120rpx;
   border-radius: 16rpx;
-  background: #e8e8ed;
+  background: rgba(25, 137, 250, 0.12);
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wx-profile-icon-img {
+  width: 64rpx;
+  height: 64rpx;
+  display: block;
 }
 .wx-profile-info {
   flex: 1;
@@ -74,6 +83,27 @@ button::after {
 }
 .wx-login-mini {
   margin: 0 !important;
+}
+
+/* 冷启动登录中：与登录按钮同位的轻量旋转指示器 */
+.wx-login-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56rpx;
+  height: 56rpx;
+}
+.wx-spinner {
+  width: 36rpx;
+  height: 36rpx;
+  border-radius: 50%;
+  border: 4rpx solid #d2d2d7;
+  border-top-color: #1989fa;
+  animation: wx-spin 0.8s linear infinite;
+}
+@keyframes wx-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 /* 顶部提示（WeUI cells__tips 风格） */

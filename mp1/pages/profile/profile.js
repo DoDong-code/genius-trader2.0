@@ -7,12 +7,13 @@ Page({
   data: {
     statusBarHeight: 20,
     navBarHeight: 44,
-    userInfo: {},
     cloudOpenId: '',
     maskedId: '',
     useCloudDb: false,
     isLoggedIn: false,
     authUser: null, // 正式用户 { id, email }；null = 游客模式
+    // 冷启动恢复登录态中（已有 token，等待后端 /api/auth/me 就绪）
+    authRestoring: false,
     cloudReady: false,
     lastSyncTime: '',
     backups: [],
@@ -108,20 +109,19 @@ Page({
   refreshData() {
     const auth = app.globalData.auth || {};
     const authUser = auth.user || null;
-    // P3.19：头像昵称按【当前业务账号】读取；未登录/退出 → 强制默认头像与「未登录」
+    // 已登录 = 正式用户（邮箱登录）；游客 = user_id=0
     const isLoggedIn = Boolean(authUser);
-    const userInfo = isLoggedIn
-      ? (app.getProfile() || {})
-      : { nickName: '未登录', avatarUrl: '/images/default_avatar.png' };
+    // 冷启动后端未就绪时，authUser 暂时为 null，但不应渲染成「游客模式（未登录）」
+    const authRestoring = app.globalData.authRestoring === true;
     const openId = app.globalData.cloudOpenId || wx.getStorageSync('user_openid') || '';
     const lastSync = wx.getStorageSync('cloud_last_sync') || 0;
     this.setData({
-      userInfo,
       cloudOpenId: openId,
       maskedId: openId ? (openId.length > 8 ? openId.slice(-8) : openId) : '',
       useCloudDb: wx.getStorageSync('use_cloud_db') || false,
       isLoggedIn,
       authUser,
+      authRestoring,
       cloudReady: Boolean(app.globalData.cloudReady),
       lastSyncTime: lastSync ? this._formatTime(Number(lastSync)) : ''
     });
@@ -134,23 +134,6 @@ Page({
 
   goBack() {
     wx.navigateBack();
-  },
-
-  // 修改头像（微信官方 chooseAvatar）——P3.19：按当前业务账号保存
-  onChooseAvatar(e) {
-    const avatarUrl = e.detail.avatarUrl;
-    if (!avatarUrl) return;
-    const userInfo = app.setProfile({ avatarUrl });
-    this.setData({ userInfo });
-    wx.showToast({ title: '头像已更新', icon: 'success' });
-  },
-
-  // 修改昵称（微信官方 nickname 输入）——P3.19：按当前业务账号保存
-  onInputNickname(e) {
-    const nickName = e.detail.value;
-    if (!nickName) return;
-    const userInfo = app.setProfile({ nickName });
-    this.setData({ userInfo });
   },
 
   // 立即同步：手动把本地数据推送到后端，显示成功/失败 + 记录时间
@@ -180,6 +163,8 @@ Page({
               accounts: app.globalData.accounts,
               active: app.globalData.activeAccountName,
               providerStatus: app.globalData.providerStatus || {},
+              // P3.19-STRATEGY：备份快照同样要带 syncMeta，否则恢复时拿不回策略方针
+              syncMeta: (typeof app.buildSyncMeta === 'function') ? app.buildSyncMeta() : {},
               updatedAt: now
             },
             reason: 'manual'
@@ -259,6 +244,13 @@ Page({
     });
 
     app.globalData.accounts = state.accounts;
+    // P3.19-STRATEGY：备份快照的 state.accounts 不含同步账户（网页 buildPersisted 跳过），
+    // 同步账户的 strategy 存放在 state.syncMeta（与网页 syncMetaStore 语义一致）。
+    // 恢复即「回滚到快照时刻」，所以先把快照的 syncMeta 写入 globalData，
+    // 让下面 await 的 refreshSyncedAccounts 用快照的 syncMeta 兜底，
+    // 第 3 步再做一次最终保险（处理 await 失败等边界）。
+    // 合并而非整体替换：快照优先，但保留已有条目，避免因快照缺 syncMeta 而误删云端策略
+    app.globalData.syncMeta = { ...(app.globalData.syncMeta || {}), ...((state.syncMeta && typeof state.syncMeta === 'object') ? state.syncMeta : {}) };
     app.globalData.activeAccountName = state.active || Object.keys(state.accounts)[0] || '主账户';
     if (state.providerStatus && typeof state.providerStatus === 'object') {
       app.globalData.providerStatus = { ...app.globalData.providerStatus, ...state.providerStatus };
@@ -273,7 +265,7 @@ Page({
       try { await app.refreshProviderStatus(); } catch (e) {}
     }
 
-    // 3) 策略回填：本机优先，备份快照兜底
+    // 3) 策略回填：本机优先 → 备份快照 accounts 兜底 → 备份快照 syncMeta 兜底（同步账户）
     Object.keys(app.globalData.accounts).forEach(name => {
       const acc = app.globalData.accounts[name];
       if (!acc) return;
@@ -284,6 +276,11 @@ Page({
       const snapAcc = state.accounts[name];
       if (snapAcc && Array.isArray(snapAcc.strategy) && snapAcc.strategy.length) {
         acc.strategy = snapAcc.strategy.slice();
+        return;
+      }
+      const snapMeta = state.syncMeta && state.syncMeta[name];
+      if (snapMeta && Array.isArray(snapMeta.strategy) && snapMeta.strategy.length) {
+        acc.strategy = snapMeta.strategy.slice();
       }
     });
 

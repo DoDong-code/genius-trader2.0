@@ -7,10 +7,11 @@ Page({
   data: {
     activeAccountName: '',
     isLoggedIn: false,
+    // 冷启动恢复登录态中（已有 token，等待后端 /api/auth/me 就绪）：显示「冷启登录中...」
+    authRestoring: false,
     openid: '',
     cloudOpenId: '',
     maskedId: '',
-    userInfo: {},
     apiBaseUrl: '',
     useCloudDb: false,
     cloudReady: false,
@@ -157,14 +158,12 @@ Page({
     const aiModelName = wx.getStorageSync('ai_model_name') || 'gpt-5-mini';
     const aiEngine = wx.getStorageSync('ai_engine') || '';
 
-    // Retrieve user profiles（P3.19：头像昵称按【当前业务账号】读取；未登录强制默认）
     const openid = wx.getStorageSync('user_openid') || 'mock_openid_guest';
     // 已登录 = 正式用户（邮箱登录）；游客 = user_id=0
     const authUser = (app.globalData.auth && app.globalData.auth.user) || null;
     const isLoggedIn = Boolean(authUser);
-    const userInfo = isLoggedIn
-      ? (app.getProfile() || {})
-      : { nickName: '未登录', avatarUrl: '/images/default_avatar.png' };
+    // 冷启动后端未就绪时，authUser 暂时为 null，但不应渲染成「未登录」
+    const authRestoring = app.globalData.authRestoring === true;
     // 真实微信身份（云端自动写入的 _openid）优先用于展示
     const cloudOpenId = app.globalData.cloudOpenId || '';
     const displayOpenId = cloudOpenId || (openid !== 'mock_openid_guest' ? openid : '');
@@ -186,13 +185,13 @@ Page({
       openid,
       cloudOpenId,
       maskedId,
-      userInfo,
       isLoggedIn,
-      authUser
+      authUser,
+      authRestoring
     });
   },
 
-  // 进入账号二级页面（改头像/昵称/同步云端/恢复本地/退出）
+  // 进入账号二级页面（同步云端/恢复本地/退出）
   goProfile() {
     wx.navigateTo({ url: '/pages/profile/profile' });
   },
@@ -202,46 +201,7 @@ Page({
     wx.navigateTo({ url: '/pages/login/login' });
   },
 
-  // 微信授权登录：优先真实微信云身份；云端不可用时回退本机 mock 身份（自适配，不依赖启动快照）
-  onWechatLogin() {
-    wx.showLoading({ title: '授权登录中...', mask: true });
-
-    // 在用户点击的同步回调中获取微信头像昵称
-    const finish = () => this._doCloudLogin();
-    const fallbackUser = { nickName: '微信用户', avatarUrl: '/images/default_avatar.png' };
-    if (typeof wx.getUserProfile === 'function') {
-      wx.getUserProfile({
-        desc: '用于完善用户资料',
-        success: (res) => {
-          const userInfo = (res && res.userInfo) || fallbackUser;
-          app.setProfile(userInfo);
-          this.setData({ userInfo });
-          finish();
-        },
-        fail: () => {
-          app.setProfile(fallbackUser);
-          finish();
-        }
-      });
-    } else if (typeof wx.getUserInfo === 'function') {
-      wx.getUserInfo({
-        success: (res) => {
-          const userInfo = (res && res.userInfo) || fallbackUser;
-          app.setProfile(userInfo);
-          this.setData({ userInfo });
-          finish();
-        },
-        fail: () => {
-          app.setProfile(fallbackUser);
-          finish();
-        }
-      });
-    } else {
-      app.setProfile(fallbackUser);
-      finish();
-    }
-  },
-
+  // 云端同步登录（原微信授权登录已移除：不再获取头像/昵称）
   _doCloudLogin() {
     app.enableCloudSync()
       .then(() => {
@@ -264,12 +224,7 @@ Page({
     setTimeout(() => {
       wx.hideLoading();
       const mockOpenId = 'openid_mp_' + Math.random().toString(36).substring(2, 10);
-      const mockUser = app.getProfile() || {
-        nickName: '微信用户',
-        avatarUrl: '/images/default_avatar.png'
-      };
       wx.setStorageSync('user_openid', mockOpenId);
-      app.setProfile(mockUser);
       if (cloudUnavailable) {
         wx.showModal({
           title: '云端未启用',

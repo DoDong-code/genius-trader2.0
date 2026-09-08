@@ -23,6 +23,10 @@ App({
     cloudOpenId: '', // 微信云数据库自动写入的真实 _openid，用于「账户」展示
     auth: { token: '', user: null }, // 正式多用户登录态：{ token, user:{id, email} }；空 token = 游客模式 user_id=0
     authState: 'logged_out', // 认证状态机：authenticated | logging_out | logged_out（用于竞态防护）
+    // 冷启动恢复登录态中：已有 token、正在等待 /api/auth/me 返回。
+    // Render 冷启动可能耗时数十秒，期间本地持仓数据仍在，页面若直接渲染「未登录」会造成误判，
+    // 故单独用该标志让 UI 显示「冷启登录中...」，恢复完成后由 notifyAccountsChanged 触发刷新。
+    authRestoring: false,
     providerStatus: {
       yjbConnected: false,
       yjbLastSync: '—',
@@ -33,7 +37,11 @@ App({
     // storage 为持久化真值；globalData.experimentalMode 为当前运行时唯一状态。
     experimentalMode: Boolean(wx.getStorageSync('experimentalMode')),
     // custom-tab-bar 实例注册表：attached 时登记、detached 时注销，长按切换时统一广播。
-    tabBarInstances: []
+    tabBarInstances: [],
+    // P3.19-STRATEGY：同步账户元数据的云端镜像（与网页端 syncMetaStore / state.syncMeta 同源）。
+    // 服务端 portfolio 表不存 strategy，同步账户的策略方针只随这个结构跨端同步；
+    // 云端 PUT 必须带上它，否则会被 mp1 的整体覆盖写抹掉（登录后就拿不到策略）。
+    syncMeta: {}
   },
 
   onLaunch() {
@@ -97,8 +105,12 @@ App({
     if (!token) {
       this.globalData.auth = { token: '', user: null };
       this.globalData.authState = 'logged_out';
+      this.globalData.authRestoring = false;
       return;
     }
+    // 冷启动：已有 token，先进入「登录中」，避免后端未就绪时页面先闪一帧「未登录」
+    this.globalData.authRestoring = true;
+    this.notifyAccountsChanged();
     try {
       const res = await http.get('/api/auth/me', null, { silent: true });
       if (res && res.user) {
@@ -115,8 +127,11 @@ App({
             this.notifyAccountsChanged();
             // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
             this.refreshProviderStatus().catch(() => {});
-            // 恢复登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送
-            this.scheduleCloudSave();
+            // 恢复登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送。
+            // 用 saveState()（本地落盘 + 防抖推云）而非仅 scheduleCloudSave()：
+            // 上面 refreshSyncedAccounts 已把策略回填进 accounts，必须落盘，
+            // 否则本地存储里仍是「无策略」的账户，下次登录的本地兜底会失效。
+            this.saveState();
           })
           .catch(() => {});
       } else {
@@ -128,6 +143,10 @@ App({
       clearAuthToken();
       this.globalData.auth = { token: '', user: null };
       this.globalData.authState = 'logged_out';
+    } finally {
+      // 无论成功/失败都退出「登录中」，并让页面（设置页大卡 / 账号信息页）刷新为最终状态
+      this.globalData.authRestoring = false;
+      this.notifyAccountsChanged();
     }
   },
 
@@ -160,8 +179,11 @@ App({
       // 恢复第三方真实连接状态（account/state 里的 providerStatus 可能是陈旧快照）
       await this.refreshProviderStatus();
       console.log('[Auth] provider state restored');
-      // 登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送
-      this.scheduleCloudSave();
+      // 登录后补推：若有本地先于鉴权的脏数据（如游客期修改），此刻统一推送。
+      // 用 saveState()（本地落盘 + 防抖推云）而非仅 scheduleCloudSave()：
+      // refreshSyncedAccounts 已把策略回填进 accounts，且 buildSyncMeta() 会随 PUT 写回
+      // 云端 syncMeta —— 这两步必须落盘/上云，否则下次登录策略又消失。
+      this.saveState();
     } catch (e) { /* 云端无数据/拉取失败不影响登录 */ }
     return { user: res.user, cloudSynced };
   },
@@ -224,6 +246,8 @@ App({
             accounts: this.globalData.accounts,
             active: this.globalData.activeAccountName,
             providerStatus: this.globalData.providerStatus || {},
+            // P3.19-STRATEGY：备份快照同样要带 syncMeta，否则恢复时拿不回策略方针
+            syncMeta: this.buildSyncMeta(),
             updatedAt: Date.now()
           },
           reason: 'logout'
@@ -259,32 +283,9 @@ App({
     return { syncOk: true, done: true, backupOk };
   },
 
-  // P3.19：头像昵称按【业务账号】级读写（user_info_<email|id>），退出读 guest 默认；
-  // 兼容旧全局 user_info 作为兜底。微信身份（user_openid）仍仅展示用，不参与业务身份。
-  profileKey() {
-    const auth = this.globalData.auth || {};
-    const u = auth.user || null;
-    return u ? 'user_info_' + String(u.email || u.id || 'guest') : 'user_info_guest';
-  },
-  getProfile() {
-    try {
-      const perAccount = wx.getStorageSync(this.profileKey());
-      if (perAccount && typeof perAccount === 'object' && Object.keys(perAccount).length) return perAccount;
-      const legacy = wx.getStorageSync('user_info');
-      return legacy && typeof legacy === 'object' ? legacy : {};
-    } catch (e) {
-      return {};
-    }
-  },
-  setProfile(patch) {
-    const cur = this.getProfile();
-    const next = Object.assign({}, cur, patch || {});
-    try {
-      wx.setStorageSync(this.profileKey(), next);
-      wx.setStorageSync('user_info', next); // 兼容旧读取
-    } catch (e) { /* ignore */ }
-    return next;
-  },
+  // 头像/昵称功能已移除：原实现按【业务账号】级写本地 storage（user_info_<email|id>），
+  // 从不上传云端，换设备/重装即丢失，与「跟随账号」语义不符。
+  // 微信身份（user_openid）仍仅展示用，不参与业务身份。
 
   // 清理当前用户相关本地数据，恢复「未登录默认状态」。
   // 保留公共配置：api_base_url / ai 配置 / experimentalMode / estimate_source / columnOrder / user_info 等（与用户无关的数据不删）。
@@ -417,6 +418,33 @@ App({
   // ---------- Cloud Account Sync (mirrors accounts to Render backend) ----------
   // 统一走后端 /api/account/state（POST/GET），userId 由后端 session 或匿名(0)决定。
   // 已彻底移除 wx.cloud.database 依赖。
+
+  // P3.19-STRATEGY：构造写回云端的 syncMeta（对齐网页端 buildPersisted 的 syncMeta 语义）。
+  // 服务端 portfolio 表不存 strategy，同步账户的「投资策略方针」只能靠这一层跨端同步。
+  // 规则：以已加载的云端 syncMeta 为底（保留其它端写入的元数据），再用当前内存中同步账户的
+  // strategy 覆盖；PUT 为整体覆盖写，不带 syncMeta 会把云端该字段抹掉。
+  buildSyncMeta() {
+    const meta = {};
+    const base = this.globalData.syncMeta;
+    if (base && typeof base === 'object') {
+      Object.keys(base).forEach(name => {
+        const m = base[name];
+        if (m && typeof m === 'object') meta[name] = { ...m };
+      });
+    }
+    const accounts = this.globalData.accounts || {};
+    Object.keys(accounts).forEach(name => {
+      const acc = accounts[name];
+      if (!acc) return;
+      const isSync = acc.accountType === 'sync' || (!acc.accountType && acc.__source);
+      if (!isSync) return;
+      if (Array.isArray(acc.strategy) && acc.strategy.length) {
+        meta[name] = { ...(meta[name] || {}), strategy: acc.strategy.slice() };
+      }
+    });
+    return meta;
+  },
+
   async saveStateToCloud(force = false) {
     // 竞态防护：logged_out 状态禁止发起账户请求（退出后旧请求不能再写回）
     if (this.globalData.authState === 'logged_out') {
@@ -435,6 +463,9 @@ App({
         accounts: this.globalData.accounts,
         active: this.globalData.activeAccountName,
         providerStatus: this.globalData.providerStatus || {},
+        // P3.19-STRATEGY：必须随 state 一起写回，否则整体覆盖写会抹掉云端 syncMeta，
+        // 导致下次登录时同步账户拿不到「投资策略方针」（网页端 buildPersisted 同语义）。
+        syncMeta: this.buildSyncMeta(),
         updatedAt: Date.now()
       };
       try {
@@ -490,6 +521,30 @@ App({
           return false;
         }
         this.globalData.accounts = doc.accounts;
+        // P3.19-STRATEGY：服务端 user_data 用 syncMeta 存同步账户的 strategy
+        // （与网页版 syncMetaStore 语义一致；buildPersisted 故意跳过同步账户的持仓，
+        // 改由服务端 portfolio 表权威存储，strategy 则随 syncMeta 走云端）。
+        // refreshSyncedAccounts 拉回的同步账户 strategy 恒为空，必须以此兜底才能跨端同步策略方针。
+        this.globalData.syncMeta = (doc.syncMeta && typeof doc.syncMeta === 'object') ? doc.syncMeta : {};
+        // P3.19-STRATEGY 兜底：策略属「本地元数据」（与网页 syncMetaStore 同语义）。
+        // 若云端 syncMeta 被不含该字段的整体覆盖写抹掉（= 本次登录拿不到策略），
+        // 用本机存储中上一次生效的策略补回，避免「一登录策略就没了」。
+        // 云端优先：仅当云端该账户没有非空 strategy 时才用本地兜底。
+        try {
+          const savedLocal = wx.getStorageSync(STORAGE_KEY);
+          const savedAccounts = (savedLocal && savedLocal.accounts) || {};
+          Object.keys(savedAccounts).forEach(name => {
+            const acc = savedAccounts[name];
+            if (!acc || !Array.isArray(acc.strategy) || !acc.strategy.length) return;
+            const meta = this.globalData.syncMeta[name];
+            if (meta && Array.isArray(meta.strategy) && meta.strategy.length) return; // 云端已有，保持云端权威
+            this.globalData.syncMeta[name] = { ...(meta || {}), strategy: acc.strategy.slice() };
+          });
+        } catch (e) { /* ignore */ }
+        // P3.19-STRATEGY 诊断：确认云端 syncMeta 是否带回策略（空 = 曾被不含 syncMeta 的整体覆盖写抹掉）
+        console.log('[Sync] syncMeta keys =', Object.keys(this.globalData.syncMeta).join(',') || '(empty)',
+          '| strategy 数 =', Object.values(this.globalData.syncMeta)
+            .filter(m => m && Array.isArray(m.strategy) && m.strategy.length).length);
         this.globalData.activeAccountName = doc.active || Object.keys(doc.accounts)[0] || '主账户';
         // 基金实体一致性校验（仅上报，不删除用户数据）
         let cloudOrphans = 0;
@@ -564,10 +619,16 @@ App({
         
         // Preserve local strategy or details if they exist in local memory
         const oldAccount = this.globalData.accounts[acc.name];
-        if (oldAccount) {
-          if (Array.isArray(oldAccount.strategy)) acc.strategy = oldAccount.strategy.slice();
-          if (Array.isArray(oldAccount.children)) acc.children = oldAccount.children.slice();
+        // P3.19-STRATEGY：同步账户的 strategy 不在服务端 portfolio 表里，而是存放在
+        // 云端 state.syncMeta（与网页版 syncMetaStore 语义一致，跨端共享）。
+        // 登录/恢复后必须以 syncMeta 为权威回填，否则 mp1 永远拿不到「投资策略方针」。
+        const cloudMeta = (this.globalData.syncMeta && this.globalData.syncMeta[acc.name]) || null;
+        if (cloudMeta && Array.isArray(cloudMeta.strategy) && cloudMeta.strategy.length) {
+          acc.strategy = cloudMeta.strategy.slice();
+        } else if (oldAccount && Array.isArray(oldAccount.strategy) && oldAccount.strategy.length) {
+          acc.strategy = oldAccount.strategy.slice();
         }
+        if (oldAccount && Array.isArray(oldAccount.children)) acc.children = oldAccount.children.slice();
         if (!Array.isArray(acc.strategy)) acc.strategy = [];
         
         this.globalData.accounts[acc.name] = acc;

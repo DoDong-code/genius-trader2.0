@@ -227,13 +227,30 @@ Page({
     wx.navigateTo({ url: '/pages/profile/profile' });
   },
 
+  // 下拉刷新：同步今日净值 → 按当前数据源强制刷新估值（force=1）→ 更新本地数据 → 结束 loading
+  // 全流程串行且带并发保护：连续快速下拉不会发起重复并发刷新；任何异常都会关闭 loading 与停止下拉
   onPullDownRefresh() {
-    this.refreshData();
-    this.syncTodayNav(); // P3.18-NET：下拉刷新同步当天净值（后端缓存优先）
-    setTimeout(() => {
+    if (this._pullRefreshing) {
       wx.stopPullDownRefresh();
-      wx.showToast({ title: '列表已更新', icon: 'success' });
-    }, 800);
+      return;
+    }
+    this._pullRefreshing = true;
+    wx.showLoading({ title: '正在刷新估值...', mask: true });
+    const source = this.data.estimateSource || 'local';
+    const done = () => {
+      wx.hideLoading();
+      wx.stopPullDownRefresh();
+      this._pullRefreshing = false;
+    };
+    Promise.resolve(this.syncTodayNav())
+      .catch(() => null)
+      .then(() => this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
+      .then(res => {
+        this.refreshData();
+        this._showEstimateResult(res);
+      })
+      .catch(() => { wx.showToast({ title: '刷新失败，请重试', icon: 'none' }); })
+      .finally(done);
   },
 
   initClock() {
@@ -262,27 +279,49 @@ Page({
     });
   },
 
+  // 手动刷新：与下拉刷新同链路（同步今日净值 → 当前数据源 force=1 刷新估值 → 更新本地数据）
+  // loading 与 refreshing 在 finally 统一复位；提示按真实结果显示，不再出现「估值已同步」假成功
   onRefreshClick() {
-    if (this.data.refreshing) return; // 防重复点击
+    if (this.data.refreshing || this._pullRefreshing) return; // 防重复点击
     this.setData({ refreshing: true });
-    wx.showLoading({ title: '正在同步估值...', mask: true });
-    setTimeout(() => {
-      this.refreshData();
-      this.syncTodayNav(); // P3.18-NET：显式刷新时同步当天净值（后端缓存优先，命中不请求 provider）
+    wx.showLoading({ title: '正在刷新估值...', mask: true });
+    const source = this.data.estimateSource || 'local';
+    const done = () => {
       wx.hideLoading();
-      wx.showToast({ title: '估值已同步', icon: 'success' });
       this.setData({ refreshing: false });
-    }, 600);
+    };
+    Promise.resolve(this.syncTodayNav())
+      .catch(() => null)
+      .then(() => this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
+      .then(res => {
+        this.refreshData();
+        this._showEstimateResult(res);
+      })
+      .catch(() => { wx.showToast({ title: '刷新失败，请重试', icon: 'none' }); })
+      .finally(done);
+  },
+
+  // 按真实刷新结果提示：全部成功 / 部分失败 / 失败；res 为 null（已有刷新占用）时不提示
+  _showEstimateResult(res) {
+    if (!res) return;
+    if (res.updated > 0 && res.failed > 0) {
+      wx.showToast({ title: `已更新 ${res.updated} 条，${res.failed} 条失败`, icon: 'none' });
+    } else if (res.updated > 0) {
+      wx.showToast({ title: `估值已更新 ${res.updated} 条`, icon: 'success' });
+    } else {
+      wx.showToast({ title: '估值刷新失败', icon: 'none' });
+    }
   },
 
   // P3.18-NET：批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
   // 只在显式刷新（下拉刷新/刷新按钮）调用；切 Tab/切数据源/onShow 不调用（读本地缓存，不发起净值请求）。
+  // 返回 Promise：供下拉刷新/手动刷新串行等待净值同步完成后再刷估值（不改变原有幂等语义）
   syncTodayNav() {
     const account = app.getActiveAccount();
     const funds = (account && account.funds) || [];
-    if (!funds.length) return;
+    if (!funds.length) return Promise.resolve();
     const codes = [...new Set(funds.map(f => f && f.code).filter(Boolean))].slice(0, 20); // 并发上限
-    codes.forEach(code => {
+    const tasks = codes.map(code =>
       http.get(`/api/fund/${encodeURIComponent(code)}/today-nav`, null, { silent: true })
         .then(res => {
           if (!res || !res.success || !res.cached || !res.nav) return;
@@ -298,8 +337,9 @@ Page({
           };
           this.setData({ navDateMap: map });
         })
-        .catch(() => { /* 静默：单只失败不影响其他 */ });
-    });
+        .catch(() => { /* 静默：单只失败不影响其他 */ })
+    );
+    return Promise.all(tasks).then(() => undefined);
   },
 
   navigateToOverview() {
@@ -420,6 +460,8 @@ Page({
 
     this.updateSortUI();
     this.filterAndSortFunds();
+    // 首屏 / 切账户自动补估值：仅对「今日无有效估值」的基金按当前数据源静默刷新（不 force、不重复请求）
+    this._autoRefreshEstimatesIfNeeded();
   },
 
   // 构建持仓页账户分段 tab：根账户（有持仓才显示，避免空主账户占 tab）+ 子账户（始终显示，新建后可立即进入添加基金）
@@ -488,50 +530,117 @@ Page({
         if (!picked || picked.key === this.data.estimateSource) return;
         this.setData({ estimateSource: picked.key, estimateSourceLabel: picked.label });
         try { wx.setStorageSync(`genius-mp-estimate-source-${app.globalData.activeAccountName}`, picked.key); } catch (e) {}
+        // 切源后必须立刻按新源刷新，且带 force=1：服务端 fund_code 单 key 缓存会返回旧 source 的估值
+        // local 也走服务端本地估值引擎重算（mode=local，不请求第三方）
+        // _pendingSource：若此刻已有刷新在跑（并发保护会丢弃本次），由那次刷新的 finish 补拉新源
+        this._pendingSource = picked.key;
+        this.refreshEstimatesBySource(picked.key, { force: true, showLoading: true, toast: true });
         this.refreshData();
-        if (picked.key !== 'local') this.refreshEstimatesBySource(picked.key);
       },
       fail: () => { /* 用户点击系统底部「取消」 */ }
     });
   },
 
-  // 按数据源批量拉真实估值（仅 yjb / xbyj；local 走本地规则）
-  refreshEstimatesBySource(source) {
+  // 判断某只基金是否已有「今日有效估值」：必须有数值，且 estimateUpdatedAt 落在上海时区今天
+  // （仅有数值无法区分「今日平盘 0」与「无数据 0」，故以时间戳为准）
+  _hasValidTodayEstimate(f) {
+    if (!f) return false;
+    const hasVal = Number.isFinite(Number(f.today)) || Number.isFinite(Number(f.todayEstimate));
+    if (!hasVal) return false;
+    if (!f.estimateUpdatedAt) return false;
+    const ts = new Date(f.estimateUpdatedAt);
+    if (isNaN(ts.getTime())) return false;
+    return shanghaiDate(ts) === shanghaiDate();
+  },
+
+  // 首屏 / 切账户自动补估值：只请求「今日无有效估值」的基金，且不带 force=1（打开页面不强制打第三方）
+  // 同一「账户 + 数据源 + 日期」只自动检查一次；切账户 / 切数据源因 key 变化会重新检查（不串账户状态）
+  _autoRefreshEstimatesIfNeeded() {
+    if (this._estimatesRefreshing) return;
     const account = app.getActiveAccount();
     const funds = (account && account.funds) || [];
-    if (!funds.length || !source || source === 'local') return;
+    if (!funds.length) return;
+    const source = this.data.estimateSource || 'local';
+    const key = `${app.globalData.activeAccountName || ''}|${source}|${shanghaiDate()}`;
+    if (this._autoEstimateKey === key) return; // 已检查过 → 不重复请求
+    this._autoEstimateKey = key;
+    const codes = funds.filter(f => f && f.code && !this._hasValidTodayEstimate(f)).map(f => f.code);
+    if (!codes.length) return; // 今日估值都有效 → 静默返回
+    this.refreshEstimatesBySource(source, { force: false, showLoading: false, toast: false, codes })
+      .catch(() => { /* 首屏自动补估值失败不打扰用户 */ });
+  },
 
-    const queue = funds.filter(f => f && f.code);
-    if (!queue.length) {
-      // 没有需要同步的基金：直接刷新本地列表，避免 showLoading 永不关闭
+  // 按数据源批量拉估值：yjb / xbyj 走第三方（mode=provider）；local 走服务端本地估值引擎（mode=local，不请求第三方）
+  // options:
+  //   force       → 请求追加 force=1，绕过服务端 fund_code 单 key 估值缓存（手动刷新 / 切源必传）
+  //   showLoading → 是否由本函数托管 loading（下拉刷新/手动刷新由调用方托管时传 false）
+  //   toast       → 是否由本函数弹提示（调用方按真实结果提示时传 false）
+  //   codes       → 只刷新指定基金（首屏自动补估值用）；不传则刷新当前账户全部持仓
+  // 返回 Promise<{ source, total, updated, failed, providerHits } | null>；null = 已有刷新在进行中（并发保护）
+  refreshEstimatesBySource(source, options) {
+    const opts = options || {};
+    const force = opts.force === true;
+    const showLoading = opts.showLoading !== false;
+    const showToast = opts.toast !== false;
+    const onlyCodes = Array.isArray(opts.codes) ? new Set(opts.codes.filter(Boolean)) : null;
+    if (!source) source = 'local';
+    if (this._estimatesRefreshing) return Promise.resolve(null); // 防并发：连续下拉 / 下拉与按钮同时触发
+
+    const account = app.getActiveAccount();
+    const funds = (account && account.funds) || [];
+    const queue = funds.filter(f => f && f.code && (!onlyCodes || onlyCodes.has(f.code)));
+    const total = queue.length;
+    if (!total) {
+      // 没有需要刷新的基金：直接刷新本地列表，避免 loading 永不关闭
       this.refreshData();
-      return;
+      return Promise.resolve({ source, total: 0, updated: 0, failed: 0, providerHits: 0 });
     }
 
-    wx.showLoading({ title: '同步真实估值...', mask: true });
+    this._estimatesRefreshing = true;
+    if (showLoading) {
+      wx.showLoading({ title: source === 'local' ? '正在计算本地估值...' : '同步真实估值...', mask: true });
+    }
     const CONCURRENCY = 6; // 并发上限，避免多基金同时请求卡顿（对齐网页端 MAX_CONCURRENT）
-    let pending = queue.length;
+    let pending = total;
     let updated = 0;
+    let failed = 0;
     let providerHits = 0;
     let active = 0;
     let finished = false;
+    let watchdog = null;
+    let resolveFn = null;
+    const resultPromise = new Promise(resolve => { resolveFn = resolve; });
 
-    // 无论成功/失败/超时，最终一定关闭 loading，禁止无限转圈
+    // 无论成功/失败/超时，最终一定关闭 loading、复位并发标记、落盘并刷新列表
     const finish = () => {
       if (finished) return;
       finished = true;
-      wx.hideLoading();
-      app.saveState();
+      if (watchdog) clearTimeout(watchdog);
+      if (showLoading) wx.hideLoading();
+      this._estimatesRefreshing = false;
+      // 本次已覆盖「当前账户 + 该数据源 + 今日」，抑制紧随其后的首屏自动补估值，避免同一批基金被重复请求
+      this._autoEstimateKey = `${app.globalData.activeAccountName || ''}|${source}|${shanghaiDate()}`;
+      app.saveState(); // 保存的是本次最新估值（today / todayEstimate / estimateSource / estimateUpdatedAt）
       this.refreshData();
-      wx.showToast({
-        title: updated > 0
-          ? `已同步 ${updated} 条·${source}${providerHits > 0 ? '·provider' : '·本地'}`
-          : `源=${source} 无新数据`,
-        icon: updated > 0 ? 'success' : 'none'
-      });
+      if (showToast) {
+        wx.showToast({
+          title: updated > 0
+            ? `已同步 ${updated} 条·${source}${providerHits > 0 ? '·provider' : '·本地'}`
+            : `源=${source} 无新数据`,
+          icon: updated > 0 ? 'success' : 'none'
+        });
+      }
+      resolveFn({ source, total, updated, failed, providerHits });
+      // 用户在本次刷新「进行中」切换了数据源（并发保护会丢弃那次切换）→ 立即按新源补拉一次，
+      // 否则会出现「切了源但数字不变化」
+      const pendingSource = this._pendingSource;
+      this._pendingSource = null;
+      if (pendingSource && pendingSource !== source) {
+        this.refreshEstimatesBySource(pendingSource, { force: true, showLoading: true, toast: true });
+      }
     };
     // 兜底看门狗：极端情况下（接口挂起）20s 后强制结束，避免永久转圈
-    const watchdog = setTimeout(() => {
+    watchdog = setTimeout(() => {
       if (!finished) {
         console.warn('[A-Debug] refreshEstimatesBySource watchdog 触发（接口可能挂起）| source =', source);
         finish();
@@ -540,17 +649,17 @@ Page({
 
     const done = () => {
       pending -= 1;
-      if (pending <= 0) {
-        clearTimeout(watchdog);
-        finish();
-      }
+      if (pending <= 0) finish();
     };
     const runNext = () => {
       while (active < CONCURRENCY && queue.length) {
         const f = queue.shift();
         active += 1;
         const amount = Number(f.amount) || 0;
-        const url = `/api/fund/${encodeURIComponent(f.code)}/estimate?amount=${amount}&mode=provider&source=${encodeURIComponent(source)}`;
+        // force=1：手动刷新 / 切源时绕过服务端 fund_code 单 key 缓存，避免返回旧 source 的估值
+        const url = `/api/fund/${encodeURIComponent(f.code)}/estimate?amount=${amount}`
+          + (source === 'local' ? '&mode=local' : `&mode=provider&source=${encodeURIComponent(source)}`)
+          + (force ? '&force=1' : '');
         http.get(url, null, { silent: true })
           .then(res => {
             const est = (res && (res.estimate || res)) || {};
@@ -578,10 +687,12 @@ Page({
               updated += 1;
               // 诊断：标记是否真正拿到 provider 数据（data_source_actual==='local' 表示后端回退到本地引擎）
               const _actual = est.data_source_actual || null;
-              if (_actual !== 'local') providerHits += 1;
+              if (source !== 'local' && _actual !== 'local') providerHits += 1;
+            } else {
+              failed += 1;
             }
           })
-          .catch(() => { /* 单只失败不影响其他 */ })
+          .catch(() => { failed += 1; /* 单只失败不影响其他 */ })
           .finally(() => {
             active -= 1;
             done();
@@ -590,6 +701,7 @@ Page({
       }
     };
     runNext();
+    return resultPromise;
   },
 
   // ---------- Column header rendering ----------

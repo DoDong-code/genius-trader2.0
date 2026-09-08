@@ -8,16 +8,22 @@
 
   <!-- 个人信息大卡（微信「我」页风格） -->
   <view class="wx-profile" bindtap="{{isLoggedIn ? 'goProfile' : ''}}">
-    <image class="wx-profile-avatar" src="{{userInfo.avatarUrl}}" mode="aspectFill" />
+    <view class="wx-profile-icon">
+      <image class="wx-profile-icon-img" src="/images/icons/account.svg" mode="aspectFit" />
+    </view>
     <view class="wx-profile-info">
-      <text class="wx-profile-name">{{authUser ? authUser.email : userInfo.nickName}}</text>
+      <text class="wx-profile-name">{{authUser ? authUser.email : (authRestoring ? '冷启登录中...' : '未登录')}}</text>
       <text class="wx-profile-sub">
         <block wx:if="{{authUser}}">已登录 · 账号 #{{authUser.id}}</block>
+        <block wx:elif="{{authRestoring}}">正在连接服务器，本地数据可正常使用</block>
         <block wx:else>未登录，数据仅保存在本机</block>
       </text>
     </view>
     <view class="wx-profile-right">
-      <button wx:if="{{!isLoggedIn}}" class="btn btn-primary wx-login-mini" bindtap="goLogin">登录 / 注册</button>
+      <view wx:if="{{authRestoring}}" class="wx-login-loading">
+        <view class="wx-spinner"></view>
+      </view>
+      <button wx:elif="{{!isLoggedIn}}" class="btn btn-primary wx-login-mini" bindtap="goLogin">登录 / 注册</button>
       <text wx:else class="wx-chevron">›</text>
     </view>
   </view>

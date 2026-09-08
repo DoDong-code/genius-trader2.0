@@ -9,24 +9,21 @@
     </view>
   </view>
 
-  <!-- 头像 -->
+  <!-- 账号标识（头像/昵称功能已移除，统一使用与设置页一致的 SVG 图标） -->
   <view class="avatar-section">
-    <button class="avatar-btn" open-type="chooseAvatar" bindchooseavatar="onChooseAvatar">
-      <image class="avatar-img" src="{{userInfo.avatarUrl || '/images/default_avatar.png'}}" mode="aspectFill" />
-      <view class="avatar-edit-hint">点击修改头像</view>
-    </button>
-  </view>
-
-  <!-- 昵称 -->
-  <view class="field">
-    <text class="field-label">昵称</text>
-    <input class="field-input" type="nickname" value="{{userInfo.nickName}}" bindinput="onInputNickname" bindblur="onInputNickname" placeholder="输入昵称" />
+    <view class="wx-icon ic-blue">
+      <image class="wx-icon-img" src="/images/icons/account.svg" mode="aspectFit" />
+    </view>
   </view>
 
   <!-- 账号状态 -->
   <view class="status-row" wx:if="{{authUser}}">
     <text class="status-label">登录账号</text>
     <text class="status-value">{{authUser.email}}</text>
+  </view>
+  <view class="status-row" wx:elif="{{authRestoring}}">
+    <text class="status-label">账号状态</text>
+    <text class="status-value">冷启登录中...（正在连接服务器）</text>
   </view>
   <view class="status-row" wx:else>
     <text class="status-label">账号状态</text>
@@ -44,7 +41,7 @@
     <button class="btn btn-primary" bindtap="onSyncNow">立即同步</button>
   </view>
   <view class="actions" style="padding-top: 12rpx;">
-    <button wx:if="{{!authUser}}" class="btn btn-secondary" bindtap="goLogin">登录 / 注册</button>
+    <button wx:if="{{!authUser && !authRestoring}}" class="btn btn-secondary" bindtap="goLogin">登录 / 注册</button>
     <button wx:if="{{authUser}}" class="btn btn-secondary" bindtap="onRestoreLocal" disabled="{{restoringLocal || restoringBackupId}}">{{restoringLocal ? '恢复中...' : '恢复本地'}}</button>
     <button wx:if="{{authUser}}" class="btn btn-danger" bindtap="onLogout">退出登录</button>
   </view>

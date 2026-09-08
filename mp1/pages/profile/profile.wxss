@@ -31,35 +31,30 @@
 
 .avatar-section {
   display: flex;
-  flex-direction: column;
   align-items: center;
+  justify-content: center;
   padding: 40rpx 0 32rpx;
 }
 
-.avatar-btn {
-  background: transparent;
-  border: none;
-  padding: 0;
+/* 账号图标：复用设置页图标风格（圆角底色块 + SVG 线性图标），按原头像位尺寸放大 */
+.wx-icon {
+  width: 96rpx;
+  height: 96rpx;
+  border-radius: 24rpx;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 12rpx;
-  line-height: 1.4;
-}
-.avatar-btn::after {
-  border: none;
+  justify-content: center;
+  flex: none;
 }
 
-.avatar-img {
-  width: 160rpx;
-  height: 160rpx;
-  border-radius: 50%;
-  background-color: #e8e8ed;
+.ic-blue {
+  background: rgba(25, 137, 250, 0.12);
 }
 
-.avatar-edit-hint {
-  font-size: 22rpx;
-  color: #86868b;
+.wx-icon-img {
+  width: 56rpx;
+  height: 56rpx;
+  display: block;
 }
 
 .field {
