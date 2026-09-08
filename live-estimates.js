@@ -331,7 +331,10 @@
       .catch(function () { /* 单只失败不影响其他基金 */ });
   }
 
-  function refreshTodayNav() {
+  // opts.navOnly = true：只拉今日官方净值，不回落去强拉估值（刷新按钮专用）。
+  // 估值刷新改由「切换数据源」触发，避免点一次刷新就对全部持仓并发打第三方。
+  function refreshTodayNav(opts) {
+    var navOnly = !!(opts && opts.navOnly);
     var funds = currentAccountFunds();
     var stale = [];
     funds.forEach(function (f) {
@@ -357,10 +360,12 @@
               applyTodayNav(c, res.date, navValue);
               return { code: c, nav: true };
             }
-            // 今日正式 NAV 尚未发布：保留旧 NAV，刷新今日估值
+            // 今日正式 NAV 尚未发布：保留旧 NAV；navOnly 模式下不拉估值
+            if (navOnly) return { code: c, nav: false };
             return refreshEstimateOnly(c).then(function () { return { code: c, nav: false }; });
           })
           .catch(function () {
+            if (navOnly) return { code: code, nav: false, error: true };
             return refreshEstimateOnly(code).then(function () { return { code: code, nav: false }; })
               .catch(function () { return { code: code, nav: false, error: true }; });
           });

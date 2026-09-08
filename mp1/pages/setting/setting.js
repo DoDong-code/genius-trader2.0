@@ -257,12 +257,26 @@ Page({
     this.setData({ aiModelName: e.detail.value.trim() });
   },
 
+  // 与 Web (app-refactor.js) ai-provider-select change handler 对齐：
+  // 切换服务商时同步覆盖 Base URL + Model 默认值（Key 保持不动）。
+  // 来源：app-refactor.js:3793-3800；服务端 /api/ai/models 返回相同的模型清单。
   onAiProviderChange(e) {
     const idx = Number(e.detail.value);
     const selected = this.data.aiProviders[idx];
+    const defaults = {
+      'OpenAI': { url: 'https://api.openai.com/v1', model: 'gpt-5-mini' },
+      'DeepSeek': { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+      'Google Gemini': { url: 'https://generativelanguage.googleapis.com', model: 'gemini-2.5-pro' },
+      'Moonshot Kimi': { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+      'Claude': { url: 'https://api.anthropic.com', model: 'claude-3-5-sonnet-latest' },
+      '自定义 OpenAI Compatible': { url: '', model: '' }
+    };
+    const def = defaults[selected] || { url: '', model: '' };
     this.setData({
       aiProviderIndex: idx,
-      aiProvider: selected
+      aiProvider: selected,
+      aiBaseUrl: def.url,
+      aiModelName: def.model
     });
   },
 

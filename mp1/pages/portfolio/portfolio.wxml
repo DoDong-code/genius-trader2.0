@@ -9,7 +9,12 @@
   </view>
 
   <!-- 接管页面滚动（隐藏 iOS 原生页面右侧滚动条） -->
-  <scroll-view scroll-y show-scrollbar="{{false}}" enhanced class="page-scroll">
+  <!-- 页面级 enablePullDownRefresh 会被 scroll-view 吞掉手势，故改用 scroll-view 自带 refresher -->
+  <scroll-view scroll-y show-scrollbar="{{false}}" enhanced class="page-scroll"
+    refresher-enabled="{{true}}"
+    refresher-triggered="{{pullRefreshing}}"
+    refresher-background="#f5f5f7"
+    bindrefresherrefresh="onPullDownRefresh">
 
   <!-- 头部：账户 tab + 时间/刷新组（tab、时间组、刷新按钮同一行，水平对齐） -->
   <view class="index-header">

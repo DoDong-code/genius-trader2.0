@@ -1,6 +1,6 @@
 {
   "navigationBarTitleText": "天才交易员 - 持仓",
-  "enablePullDownRefresh": true,
+  "enablePullDownRefresh": false,
   "usingComponents": {
     "fund-detail": "/components/fundDetail/fundDetail"
   }

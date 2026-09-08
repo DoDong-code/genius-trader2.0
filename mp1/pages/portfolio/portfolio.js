@@ -68,6 +68,8 @@ Page({
     activeAccountName: '',
     // 刷新按钮「进行中」状态（图标旋转 + 禁止重复点击）
     refreshing: false,
+    // scroll-view 自定义下拉刷新「进行中」状态（true=显示转圈，false=收起）
+    pullRefreshing: false,
     totalAssetsStr: '¥0',
     todayProfit: 0,
     todayProfitStr: '¥0.00',
@@ -227,24 +229,21 @@ Page({
     wx.navigateTo({ url: '/pages/profile/profile' });
   },
 
-  // 下拉刷新：同步今日净值 → 按当前数据源强制刷新估值（force=1）→ 更新本地数据 → 结束 loading
-  // 全流程串行且带并发保护：连续快速下拉不会发起重复并发刷新；任何异常都会关闭 loading 与停止下拉
+  // 下拉刷新 = 只刷新估值（force=1 绕过服务端 5 分钟缓存）；净值刷新归「刷新净值」按钮负责。
+  // 手势来源：scroll-view 自带 refresher（页面级 enablePullDownRefresh 的手势会被 scroll-view 吞掉，
+  // 导致旧代码里 onPullDownRefresh 根本不触发、看不到 loading）。pullRefreshing 控制转圈收起。
   onPullDownRefresh() {
-    if (this._pullRefreshing) {
-      wx.stopPullDownRefresh();
-      return;
-    }
+    if (this._pullRefreshing) return;
     this._pullRefreshing = true;
+    this.setData({ pullRefreshing: true });
     wx.showLoading({ title: '正在刷新估值...', mask: true });
     const source = this.data.estimateSource || 'local';
     const done = () => {
       wx.hideLoading();
-      wx.stopPullDownRefresh();
+      this.setData({ pullRefreshing: false });
       this._pullRefreshing = false;
     };
-    Promise.resolve(this.syncTodayNav())
-      .catch(() => null)
-      .then(() => this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
+    Promise.resolve(this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
       .then(res => {
         this.refreshData();
         this._showEstimateResult(res);
@@ -279,23 +278,20 @@ Page({
     });
   },
 
-  // 手动刷新：与下拉刷新同链路（同步今日净值 → 当前数据源 force=1 刷新估值 → 更新本地数据）
-  // loading 与 refreshing 在 finally 统一复位；提示按真实结果显示，不再出现「估值已同步」假成功
+  // 刷新按钮 = 只拉今日官方净值（对齐网页端「刷新净值」按钮）。
+  // 不再强拉估值：估值由「切换数据源」和「下拉刷新」触发，避免一次点击对全持仓并发打第三方。
   onRefreshClick() {
     if (this.data.refreshing || this._pullRefreshing) return; // 防重复点击
     this.setData({ refreshing: true });
-    wx.showLoading({ title: '正在刷新估值...', mask: true });
-    const source = this.data.estimateSource || 'local';
+    wx.showLoading({ title: '正在刷新净值...', mask: true });
     const done = () => {
       wx.hideLoading();
       this.setData({ refreshing: false });
     };
     Promise.resolve(this.syncTodayNav())
-      .catch(() => null)
-      .then(() => this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
-      .then(res => {
+      .then(() => {
         this.refreshData();
-        this._showEstimateResult(res);
+        wx.showToast({ title: '净值已更新', icon: 'none' });
       })
       .catch(() => { wx.showToast({ title: '刷新失败，请重试', icon: 'none' }); })
       .finally(done);

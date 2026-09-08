@@ -22,7 +22,7 @@
   function markup(withRefresh) {
     return withRefresh
       ? '<span class="estimate-source-picker"><span class="status-copy estimate-source-toggle" role="button" tabindex="0" aria-label="选择估值数据源"><strong class="status-time"></strong><span class="status-update-row"><i aria-hidden="true"></i><small class="status-update"></small></span></span><span class="estimate-source-menu" role="menu"></span></span>' +
-        '<button class="data-refresh-button" type="button" data-action="refresh-fund-data" aria-label="手动刷新数据">↻ <span>刷新数据</span></button>'
+        '<button class="data-refresh-button" type="button" data-action="refresh-fund-data" aria-label="手动刷新净值">↻ <span>刷新净值</span></button>'
       : '<span class="status-copy"><strong class="status-time"></strong><span class="status-update-row"><i aria-hidden="true"></i><small class="status-update"></small></span></span>';
   }
 
@@ -202,10 +202,10 @@
     if (typeof window.refreshMarketIndices === 'function') {
       refreshTasks.push(Promise.resolve(window.refreshMarketIndices()));
     }
-    // 冻结刷新语义：刷新 = 增量检查当前账户全部持仓基金（已有今日 NAV 跳过，
-    // 未发布则保留旧 NAV 并刷新今日估值），不调用全量 snapshot 刷新。
+    // 冻结刷新语义：刷新按钮 = 只增量检查今日官方净值（已有今日 NAV 跳过，未发布则保留旧 NAV）。
+    // navOnly=true：不再回落去强拉估值（估值由切换数据源 / 小程序下拉刷新触发），避免全持仓并发拉估值。
     if (typeof window.refreshTodayNav === 'function') {
-      refreshTasks.push(Promise.resolve(window.refreshTodayNav()));
+      refreshTasks.push(Promise.resolve(window.refreshTodayNav({ navOnly: true })));
     }
     Promise.all(refreshTasks)
       .finally(function () {
@@ -213,7 +213,7 @@
         window.setTimeout(function () {
           button.disabled = false;
           button.classList.remove('is-refreshing');
-          button.querySelector('span').textContent = '刷新数据';
+          button.querySelector('span').textContent = '刷新净值';
         }, 600);
       });
   }, true);
