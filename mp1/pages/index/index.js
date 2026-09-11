@@ -158,7 +158,9 @@ Page({
       { name: '标普500', value: '5,432.10', change: '-0.23%', profit: 0 }
     ];
 
-    http.get('/api/market/indices', null, { silent: true })
+    // 返回 Promise<boolean>：接口成功 true；失败（已降级展示兜底数据）false。
+    // 供 onRefreshClick 按真实结果提示，避免「600ms 后无条件弹更新成功」的假成功。
+    return http.get('/api/market/indices', null, { silent: true })
       .then(res => {
         let list = [];
         if (res && Array.isArray(res)) {
@@ -192,26 +194,35 @@ Page({
         // 行情刷新成功，记录数据新鲜度
         app.setDataUpdatedAt();
         this.setData({ dataUpdatedText: app.getDataUpdatedText() || '' });
+        return true;
       })
       .catch(err => {
         console.warn('Indices request failed, using high-quality fallback:', err);
         this.setData({ marketIndices: FALLBACK_INDICES }, () => {
           if (this.data.marketCollapsed) this.recomputeCollapsedItems();
         });
+        return false;
       });
   },
 
-  onRefreshClick() {
+  // 刷新 = 拉大盘指数行情。loading 与提示均按真实请求结果：
+  // 之前是「发起请求后 600ms 无条件 hideLoading + 弹『更新成功』」，请求失败也会显示成功。
+  async onRefreshClick() {
     if (this.data.refreshing) return; // 防重复点击
     this.setData({ refreshing: true });
-    wx.showLoading({ title: '正在联网更新估值...', mask: true });
-    this.fetchMarketIndices();
-    setTimeout(() => {
+    wx.showLoading({ title: '正在更新行情...', mask: true });
+    // 最短展示 400ms，避免请求过快时 loading 一闪而过（不掩盖真实结果）
+    const minDelay = new Promise(r => setTimeout(r, 400));
+    try {
+      const [ok] = await Promise.all([this.fetchMarketIndices(), minDelay]);
       this.refreshData();
+      wx.showToast({ title: ok ? '行情已更新' : '行情更新失败，展示缓存数据', icon: 'none' });
+    } catch (e) {
+      wx.showToast({ title: '更新失败，请重试', icon: 'none' });
+    } finally {
       wx.hideLoading();
-      wx.showToast({ title: '更新成功', icon: 'success' });
       this.setData({ refreshing: false });
-    }, 600);
+    }
   },
 
   refreshData() {

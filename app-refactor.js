@@ -1511,16 +1511,27 @@
 
   function runProviderImport(sourceName, overwrite) {
     const names = { yangjibao: '养基宝', xiaobeiyangji: '小倍养基' };
-    const importBtn = document.querySelector('#' + sourceName + '-import-btn');
-    const overwriteBtn = document.querySelector('#' + sourceName + '-overwrite-btn');
+    // 按钮 DOM id 用缩写前缀（yjb / xbyj），与服务端 sourceName（yangjibao / xiaobeiyangji）不同。
+    // 之前直接用 sourceName 拼选择器 → querySelector 返回 null → setBusy 全程空转（按钮不变灰、
+    // 不变「同步中…」、还能连点）。这里统一做一次映射。
+    const prefixes = { yangjibao: 'yjb', xiaobeiyangji: 'xbyj' };
+    const prefix = prefixes[sourceName] || sourceName;
+    const importBtn = document.querySelector('#' + prefix + '-import-btn');
+    const overwriteBtn = document.querySelector('#' + prefix + '-overwrite-btn');
     const setBusy = busy => {
       [importBtn, overwriteBtn].forEach(btn => {
         if (!btn) return;
+        // 首次置忙时记住原文案（小倍的主按钮是「同步全部」，不能统一还原成「同步持仓」）
+        if (busy && btn.dataset.idleText === undefined) btn.dataset.idleText = btn.textContent;
+        const idle = btn.dataset.idleText || (btn === importBtn ? '同步持仓' : '覆盖重导');
         btn.disabled = busy;
         btn.style.opacity = busy ? '0.6' : '';
-        btn.textContent = busy ? '同步中…' : (btn === importBtn ? '同步持仓' : '覆盖重导');
+        btn.style.cursor = busy ? 'not-allowed' : '';
+        btn.textContent = busy ? '同步中…' : idle;
       });
     };
+    // 防重复点击：任一同步进行中直接忽略
+    if (importBtn && importBtn.disabled) return Promise.resolve();
     setBusy(true);
     return providerApi(`/api/provider/${sourceName}/import`, {
       method: 'POST',
@@ -2424,6 +2435,11 @@
     let btnText = null;
     if (runAnalysisBtn) {
       btnText = runAnalysisBtn.querySelector('.btn-text');
+      // 记住按钮原文案（「诊断」），复位时还原；之前置忙后从未复位，一旦 render('analysis')
+      // 未重建 DOM（如 analysis() 早退），按钮就会永久禁用且文案卡在「正在调取…」
+      if (runAnalysisBtn.dataset.idleText === undefined && btnText) {
+        runAnalysisBtn.dataset.idleText = btnText.textContent;
+      }
       runAnalysisBtn.disabled = true;
       runAnalysisBtn.style.opacity = '0.7';
       if (btnText) btnText.textContent = userQuery ? '正在调取 AI 问答及调仓建议...' : '正在调取今日最新估值与诊断...';
@@ -2459,6 +2475,12 @@
     })
     .finally(() => {
       window.lastAnalysisTime = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // 复位诊断按钮：置忙后必须还原，否则按钮永久禁用
+      if (runAnalysisBtn) {
+        runAnalysisBtn.disabled = false;
+        runAnalysisBtn.style.opacity = '';
+        if (btnText) btnText.textContent = runAnalysisBtn.dataset.idleText || '诊断';
+      }
       render('analysis');
     });
   }
@@ -2539,7 +2561,8 @@
       try { await window.backupToCloud(); } catch (e) { /* 云端同步失败不阻塞诊断 */ }
     }
     if (typeof window.markEstimatesRefreshed === 'function') window.markEstimatesRefreshed();
-    runAiDiagnostics(userQuery);
+    // return 而非裸调用：让调用方能 await 整条链；按钮复位交由 runAiDiagnostics 的 finally 完成
+    return runAiDiagnostics(userQuery);
   }
 
   // Handle Enter key on AI Q&A Input

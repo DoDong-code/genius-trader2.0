@@ -694,9 +694,15 @@ Page({
 
   async runAiDiagnostics(userQuery) {
     const a = app.getActiveAccount();
-    if (!a) return;
+    // 提前 return 前必须复位 isLoading：onRunAiAnalysis 已在入口置 true，
+    // 否则按钮永久 disabled、加载框永久显示
+    if (!a) {
+      this.setData({ isLoading: false });
+      return;
+    }
     // P3.18：本地引擎兜底（双保险）—— 不调用外部 AI，直接用本地报告
     if (wx.getStorageSync('ai_engine') === 'local') {
+      this.setData({ isLoading: false });
       this.refreshData();
       return;
     }

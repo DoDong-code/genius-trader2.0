@@ -289,9 +289,13 @@ Page({
       this.setData({ refreshing: false });
     };
     Promise.resolve(this.syncTodayNav())
-      .then(() => {
+      .then(nav => {
         this.refreshData();
-        wx.showToast({ title: '净值已更新', icon: 'none' });
+        const total = (nav && nav.total) || 0;
+        const updated = (nav && nav.updated) || 0;
+        if (!total) wx.showToast({ title: '当前账户无持仓', icon: 'none' });
+        else if (updated > 0) wx.showToast({ title: `净值已更新 ${updated}/${total} 条`, icon: 'none' });
+        else wx.showToast({ title: '今日净值暂未发布', icon: 'none' });
       })
       .catch(() => { wx.showToast({ title: '刷新失败，请重试', icon: 'none' }); })
       .finally(done);
@@ -312,15 +316,17 @@ Page({
   // P3.18-NET：批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
   // 只在显式刷新（下拉刷新/刷新按钮）调用；切 Tab/切数据源/onShow 不调用（读本地缓存，不发起净值请求）。
   // 返回 Promise：供下拉刷新/手动刷新串行等待净值同步完成后再刷估值（不改变原有幂等语义）
+  // 返回 Promise<{total, updated}>：updated = 真正取到今日官方净值的基金数。
+  // 供刷新按钮按真实结果提示（单只失败被静默 catch，旧代码因此永远弹「净值已更新」）。
   syncTodayNav() {
     const account = app.getActiveAccount();
     const funds = (account && account.funds) || [];
-    if (!funds.length) return Promise.resolve();
+    if (!funds.length) return Promise.resolve({ total: 0, updated: 0 });
     const codes = [...new Set(funds.map(f => f && f.code).filter(Boolean))].slice(0, 20); // 并发上限
     const tasks = codes.map(code =>
       http.get(`/api/fund/${encodeURIComponent(code)}/today-nav`, null, { silent: true })
         .then(res => {
-          if (!res || !res.success || !res.cached || !res.nav) return;
+          if (!res || !res.success || !res.cached || !res.nav) return 0;
           // 缓存已就绪：更新 navDateMap，让当前页面徽章立即变蓝（不等下次快照）
           const map = { ...(this.data.navDateMap || {}) };
           const today = app.globalData.shanghaiToday || '';
@@ -332,10 +338,14 @@ Page({
             kind: 'updated'
           };
           this.setData({ navDateMap: map });
+          return 1;
         })
-        .catch(() => { /* 静默：单只失败不影响其他 */ })
+        .catch(() => 0) // 静默：单只失败不影响其他
     );
-    return Promise.all(tasks).then(() => undefined);
+    return Promise.all(tasks).then(arr => ({
+      total: codes.length,
+      updated: arr.reduce((sum, n) => sum + (n || 0), 0)
+    }));
   },
 
   navigateToOverview() {
