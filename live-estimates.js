@@ -260,8 +260,12 @@
   function hasTodayConfirmedNav(code) {
     var cached = window.fundStore ? window.fundStore.get(code) : null;
     if (!cached || !cached.nav) return false;
+    // 与徽章唯一判定入口 getNavDisplayState 保持一致：按「该基金应披露的净值日期」比较，
+    // 而不是死板地等于今天。QDII/美股/全球基金的 NAV 披露日比中国本地日期晚一个交易日，
+    // 用 shanghaiDate() 硬比会导致它们永远判定为「未确认」，从而每次刷新都重复请求。
+    var expected = expectedNavDateFor(currentFund(code) || cached);
     return cached.nav.confirmed === true &&
-      cached.nav.date === shanghaiDate() &&
+      String(cached.nav.date) === expected &&
       Number.isFinite(Number(cached.nav.value)) && Number(cached.nav.value) > 0;
   }
 

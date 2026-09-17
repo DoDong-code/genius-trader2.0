@@ -542,8 +542,41 @@
     todayAdviceTimer = setInterval(runCheck, 60000);
   }
 
+  // 今日官方净值自动补拉。
+  // 背景：refreshTodayNav 原先只有两个入口 —— 14:40 一次性自动更新（用 localStorage flagKey
+  // 每天只跑一次），以及「刷新净值」按钮。14:40 时官方净值尚未发布，flagKey 又被置上，
+  // 于是晚上（20:00 后净值陆续发布）打开账户永远拿不到真实净值，只有点开详情抽屉
+  // （fetchFundPayload(refresh=1) → mergeFundData → navUpdatedAt=今天）才会显示。
+  // 这里在净值发布时段（18:00 之后到次日 06:00 前）增量检查；refreshTodayNav 自带幂等：
+  // 今日已确认净值的基金会被 hasTodayConfirmedNav 跳过，全部确认后零请求、自动收敛。
+  let todayNavTimer = null;
+  let todayNavLastCheckAt = 0;
+  async function checkTodayNavOnce(minIntervalMs) {
+    try {
+      if (!window.auth || !window.auth.state || !window.auth.state.token) return;
+      if (typeof window.refreshTodayNav !== 'function') return;
+      const res = await fetch('/api/market/status');
+      const data = await res.json();
+      if (!data || !data.success || !data.trading_day) return;
+      const timeStr = data.time || '';
+      if (timeStr >= '06:00' && timeStr < '18:00') return; // 净值发布前不打扰
+      const now = Date.now();
+      if (now - todayNavLastCheckAt < minIntervalMs) return;
+      todayNavLastCheckAt = now;
+      await window.refreshTodayNav({ navOnly: true }); // 只拉净值，不回落去强拉估值
+      if (view === 'overview' || view === 'portfolio') render(view);
+    } catch (e) { /* 忽略瞬时网络错误 */ }
+  }
+  function scheduleTodayNavAutoCheck() {
+    if (todayNavTimer) clearInterval(todayNavTimer);
+    checkTodayNavOnce(0); // 启动即查一次：解决「晚上打开账户没有真实净值」
+    todayNavTimer = setInterval(() => checkTodayNavOnce(20 * 60 * 1000), 60000);
+  }
+
   window.onAccountTabChange = function (sel) {
     window.__accountTabSelected = sel || 'all';
+    // 切账户后按新账户持仓补拉一次（5 分钟节流，避免频繁切换打满请求）
+    checkTodayNavOnce(5 * 60 * 1000);
     if (view === 'overview') render('overview');
   };
 
@@ -3834,7 +3867,11 @@
   // 先同步渲染当前视图（避免刷新瞬间闪现旧演示页），再异步合并同步账户
   render(view);
   refreshProviderStatus().catch(() => {});
-  refreshSyncedAccounts().then(() => render(view)).catch(() => {});
+  // 官方净值自动补拉放在同步账户合并完成之后，避免账户数据未就绪时按空持仓检查
+  refreshSyncedAccounts()
+    .then(() => render(view))
+    .catch(() => {})
+    .then(() => scheduleTodayNavAutoCheck());
   // 统一把新版渲染器挂到全局 state.render，供账户切换等模块调用，
   // 避免旧版 app.js 渲染器覆盖持仓页（导致今日操作建议模块丢失）。
   s.render = render;

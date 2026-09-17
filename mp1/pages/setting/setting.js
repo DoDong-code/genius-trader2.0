@@ -71,13 +71,24 @@ Page({
     // 实验功能开关（关闭时隐藏「实验接口配置」分组并隐藏分析 tab）
     experimentalEnabled: false,
 
+    // 天才分析授权（只读 Token）—— 对齐 Web「AI 分析授权」区块
+    externalStatusText: '检查中…',
+    externalApiUrl: '',
+    externalHasToken: false,
+    externalGenerating: false,   // 生成中
+    externalRevoking: false,     // 撤销中
+    externalTesting: false,      // 测试 API 中
+    externalCopyingJson: false,  // 复制 JSON 中
+    externalTestResult: '',
+
     // Collapsible sections state (matches Web settingsCollapsedState)
     collapsed: {
       datasource: true,
       experimental: true,
       strategy: true,
       providers: true,
-      backup: true
+      backup: true,
+      external: true
     }
   },
 
@@ -115,6 +126,8 @@ Page({
 
     this.refreshData();
     this.loadProviderStatus();
+    // 只读 Token 状态仅在实验功能开启时查询（关闭时整组隐藏，不浪费请求）
+    if (this.data.experimentalEnabled) this.loadExternalStatus();
     // 返回小程序时：重启轮询 + 立即查一次扫码状态（微信后台会节流 setInterval，切回前台必须重启否则检测不到）
     this._resumeQrPoll();
   },
@@ -126,6 +139,225 @@ Page({
     const collapsed = { ...this.data.collapsed };
     collapsed[panel] = !collapsed[panel];
     this.setData({ collapsed });
+  },
+
+  // ══════════ 天才分析授权（只读 Token）══════════
+  // 对齐 Web app-refactor.js 的「AI 分析授权」区块（applyExternalStatus / external-gen-btn /
+  // external-revoke-btn / copy-api / copy-json / test-api）。
+  // Token 仅存本机（2 小时有效），API 地址 = <base>/api/external/analysis/ai?token=xxx
+  _getExternalToken() {
+    const token = wx.getStorageSync('genius_external_token');
+    const createdAt = Number(wx.getStorageSync('genius_external_token_created_at'));
+    if (!token || !createdAt) return '';
+    // 超过 2 小时视为过期：清掉本地副本，UI 回到「未生成」
+    if (Date.now() - createdAt >= 2 * 3600 * 1000) {
+      wx.removeStorageSync('genius_external_token');
+      wx.removeStorageSync('genius_external_token_created_at');
+      return '';
+    }
+    return token;
+  },
+
+  loadExternalStatus() {
+    const token = this._getExternalToken();
+    return http.get('/api/external/token/status', null, { silent: true })
+      .then(res => {
+        const hasToken = Boolean(res && res.hasToken) && Boolean(token);
+        if (!hasToken) {
+          this.setData({ externalHasToken: false, externalApiUrl: '', externalStatusText: '未生成' });
+          return;
+        }
+        const expiry = Number(wx.getStorageSync('genius_external_token_created_at')) + 2 * 3600 * 1000;
+        const minutesLeft = Math.max(0, Math.round((expiry - Date.now()) / 60000));
+        this.setData({
+          externalHasToken: true,
+          externalApiUrl: `${getApiBase()}/api/external/analysis/ai?token=${token}`,
+          externalStatusText: `已生成（有效期余 ${minutesLeft} 分钟）`
+        });
+      })
+      .catch(() => {
+        this.setData({ externalHasToken: false, externalApiUrl: '', externalStatusText: '未登录或获取失败' });
+      });
+  },
+
+  onGenExternalToken() {
+    if (this.data.externalGenerating) return;
+    this.setData({ externalGenerating: true });
+    return http.post('/api/external/token', {}, { silent: true })
+      .then(res => {
+        const token = res && res.token;
+        if (!token) {
+          wx.showToast({ title: '生成失败，请先登录账号', icon: 'none' });
+          return;
+        }
+        wx.setStorageSync('genius_external_token', token);
+        wx.setStorageSync('genius_external_token_created_at', String(Date.now()));
+        this.setData({ externalTestResult: '' });
+        wx.showToast({ title: '只读 Token 已生成', icon: 'success' });
+        this.loadExternalStatus();
+      })
+      .catch(() => wx.showToast({ title: '生成失败，请先登录账号', icon: 'none' }))
+      .finally(() => this.setData({ externalGenerating: false }));
+  },
+
+  // 返回 Promise：wx.showModal 是回调式，这里包一层让调用方能 await 撤销全过程
+  onRevokeExternalToken() {
+    if (this.data.externalRevoking) return Promise.resolve();
+    return new Promise(resolve => {
+      wx.showModal({
+        title: '撤销授权',
+        content: '撤销后已分享的 API 地址立即失效，确认撤销？',
+        confirmColor: '#ff3b30',
+        success: (r) => {
+          if (!r.confirm) return resolve();
+          this.setData({ externalRevoking: true });
+          http.post('/api/external/token/revoke', {}, { silent: true })
+            .then(() => {
+              wx.removeStorageSync('genius_external_token');
+              wx.removeStorageSync('genius_external_token_created_at');
+              this.setData({ externalTestResult: '' });
+              wx.showToast({ title: '已撤销', icon: 'success' });
+              return this.loadExternalStatus();
+            })
+            .catch(() => wx.showToast({ title: '撤销失败', icon: 'none' }))
+            .finally(() => {
+              this.setData({ externalRevoking: false });
+              resolve();
+            });
+        }
+      });
+    });
+  },
+
+  onCopyExternalApi() {
+    const token = this._getExternalToken();
+    if (!token) {
+      wx.showToast({ title: '请先点击「生成」', icon: 'none' });
+      return;
+    }
+    const url = `${getApiBase()}/api/external/analysis/ai?token=${token}`;
+    wx.setClipboardData({
+      data: url,
+      success: () => wx.showToast({ title: '已复制 API 地址', icon: 'none' })
+    });
+  },
+
+  onTestExternalApi() {
+    const token = this._getExternalToken();
+    if (!token || this.data.externalTesting) return;
+    this.setData({ externalTesting: true, externalTestResult: '' });
+    return http.get('/api/external/analysis', { token }, { silent: true })
+      .then(data => {
+        if (!data || !data.success) throw new Error((data && data.error) || 'API 响应异常');
+        const first = data.accounts && data.accounts[0] ? data.accounts[0].name : '无';
+        const codes = new Set();
+        (data.accounts || []).forEach(a => (a.holdings || []).forEach(h => codes.add(h.code)));
+        const assets = Number(data.totalAssets || 0).toFixed(2);
+        this.setData({
+          externalTestResult: `✓ API 正常\n账户：${first}\n总资产：¥${assets}\n持仓：${codes.size} 只`
+        });
+      })
+      .catch(err => {
+        this.setData({ externalTestResult: `✗ API 测试失败：${(err && err.message) || '网络错误'}` });
+      })
+      .finally(() => this.setData({ externalTesting: false }));
+  },
+
+  // 复制当前账户的分析 JSON：对齐 Web payload（当日估值 + 近 15 个交易日净值 + 前十大持仓）
+  async onCopyExternalJson() {
+    if (this.data.externalCopyingJson) return;
+    this.setData({ externalCopyingJson: true });
+    try {
+      const account = app.getActiveAccount();
+      if (!account) {
+        wx.showToast({ title: '复制失败：未找到当前账户', icon: 'none' });
+        return;
+      }
+      const NAV_HISTORY_DAYS = 15;
+      const funds = (account.funds || []).filter(f => f && f.code);
+      const totalValue = funds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+      const codes = [...new Set(funds.map(f => String(f.code)).filter(c => /^\d{6}$/.test(c)))];
+
+      wx.showLoading({ title: '正在获取净值...', mask: true });
+      const navMap = new Map();
+      const holdingsMap = new Map();
+      await Promise.all(codes.map(async code => {
+        try {
+          const [histRes, holdRes] = await Promise.all([
+            http.get(`/api/fund/${code}/history`, { limit: NAV_HISTORY_DAYS }, { silent: true }).catch(() => null),
+            http.get(`/api/fund/${code}/holdings`, null, { silent: true }).catch(() => null)
+          ]);
+          const rows = (histRes && Array.isArray(histRes.history)) ? histRes.history : [];
+          const list = rows
+            .map(r => ({ date: String(r.date || ''), nav: Number(r.nav) }))
+            .filter(r => r.date && Number.isFinite(r.nav))
+            .slice(-NAV_HISTORY_DAYS);
+          if (list.length) {
+            navMap.set(code, `${list[0].date} 至 ${list[list.length - 1].date}: ${list.map(r => r.nav).join(', ')}`);
+          }
+          const hRows = (holdRes && Array.isArray(holdRes.holdings)) ? holdRes.holdings : [];
+          const hList = hRows
+            .map(r => {
+              const w = Number(r.weight);
+              const pct = Number.isFinite(w) ? (w < 1 ? w * 100 : w) : null;
+              return { name: String(r.name || ''), pct };
+            })
+            .filter(r => r.name && r.pct !== null)
+            .slice(0, 10);
+          if (hList.length) {
+            holdingsMap.set(code, hList.map(r => `${r.name}(${r.pct.toFixed(2)}%)`).join(', '));
+          }
+        } catch (e) { /* 单只基金失败不影响整体 */ }
+      }));
+      wx.hideLoading();
+
+      const payload = {
+        generatedAt: new Date().toISOString(),
+        account: {
+          name: account.name || '',
+          type: account.accountType || 'manual',
+          fundCount: funds.length,
+          totalValue: Number(totalValue.toFixed(2))
+        },
+        strategies: Array.isArray(account.strategy) ? account.strategy.slice() : [],
+        holdings: funds.map(f => {
+          const amount = Number(f.amount) || 0;
+          const profit = Number(f.holdingProfit ?? f.profit ?? 0) || 0;
+          const cost = (Number.isFinite(Number(f.cost)) && Number(f.cost) > 0)
+            ? Number(f.cost)
+            : Number((amount - profit).toFixed(2));
+          const todayChange = Number(f.today) || 0;
+          const todayProfit = Number.isFinite(Number(f.todayEstimate))
+            ? Number(f.todayEstimate)
+            : Number((amount * todayChange).toFixed(2));
+          return {
+            code: String(f.code || ''),
+            name: String(f.name || f.code || ''),
+            category: String(f.category || ''),
+            subAccount: f.subAccount || undefined,
+            amount: Number(amount.toFixed(2)),
+            cost: Number(cost.toFixed(2)),
+            profit: Number(profit.toFixed(2)),
+            profitRate: amount > 0 ? Number((profit / amount).toFixed(4)) : 0,
+            todayChange: Number(todayChange.toFixed(4)),
+            todayProfit: Number(todayProfit.toFixed(2)),
+            navUpdatedAt: f.navUpdatedAt || (f.latest_nav && f.latest_nav.date) || null,
+            navHistory: navMap.get(String(f.code || '')) || '',
+            topHoldings: holdingsMap.get(String(f.code || '')) || ''
+          };
+        })
+      };
+
+      wx.setClipboardData({
+        data: JSON.stringify(payload, null, 2),
+        success: () => wx.showToast({ title: `已复制「${account.name || '当前账户'}」的分析 JSON`, icon: 'none' })
+      });
+    } catch (e) {
+      wx.hideLoading();
+      wx.showToast({ title: '复制失败', icon: 'none' });
+    } finally {
+      this.setData({ externalCopyingJson: false });
+    }
   },
 
   refreshData() {

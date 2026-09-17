@@ -117,6 +117,43 @@
     </view>
   </view>
 
+  <!-- 分组：天才分析授权（只读 Token；与实验接口配置同步显隐，跟随分析页一起隐藏/出现） -->
+  <view class="wx-group" wx:if="{{experimentalEnabled}}">
+    <view class="wx-row-head" bindtap="toggleSection" data-panel="external">
+      <view class="wx-icon ic-blue"><image class="wx-icon-img" src="/images/icons/authorize.svg" mode="aspectFit" /></view>
+      <text class="wx-row-title">天才分析授权</text>
+      <text class="wx-chevron {{collapsed.external ? 'wx-rot' : ''}}">›</text>
+    </view>
+    <view wx:if="{{!collapsed.external}}" class="wx-body">
+      <text class="wx-hint">把 API 或 JSON 发送给第三方天才即可分析当日操作建议，内容包含当日估值 + 15 个交易日历史净值 + 前十大持仓。</text>
+
+      <view class="wx-field">
+        <text class="wx-label">状态</text>
+        <view class="wx-picker">{{externalStatusText}}</view>
+      </view>
+
+      <view class="wx-subcard">
+        <text class="wx-subcard-title">天才专属精简 API（首选）</text>
+        <text wx:if="{{externalHasToken}}" class="wx-code wx-code-green-text" user-select>{{externalApiUrl}}</text>
+        <text wx:else class="wx-hint">尚未生成只读 Token，请点击下方「生成」按钮（数据仅保留 2 小时）。</text>
+        <view class="wx-actions" style="margin-top: 16rpx;">
+          <button class="btn btn-secondary" bindtap="onCopyExternalApi" disabled="{{!externalHasToken}}">复制API</button>
+          <button class="btn btn-secondary" bindtap="onTestExternalApi" disabled="{{!externalHasToken || externalTesting}}">{{externalTesting ? '测试中...' : '测试API'}}</button>
+          <button class="btn btn-secondary" bindtap="onCopyExternalJson" disabled="{{externalCopyingJson}}">{{externalCopyingJson ? '复制中...' : '复制JSON'}}</button>
+        </view>
+      </view>
+
+      <scroll-view scroll-y show-scrollbar="{{false}}" wx:if="{{externalTestResult}}" class="wx-test-result">
+        <text class="wx-test-result-text">{{externalTestResult}}</text>
+      </scroll-view>
+
+      <view class="wx-actions" style="margin-top: 16rpx;">
+        <button class="btn btn-primary" bindtap="onGenExternalToken" disabled="{{externalGenerating}}">{{externalGenerating ? '生成中...' : '生成'}}</button>
+        <button wx:if="{{externalHasToken}}" class="btn btn-danger" bindtap="onRevokeExternalToken" disabled="{{externalRevoking}}">{{externalRevoking ? '撤销中...' : '撤销'}}</button>
+      </view>
+    </view>
+  </view>
+
   <!-- 分组：投资策略方针 -->
   <view class="wx-group">
     <view class="wx-row-head" bindtap="toggleSection" data-panel="strategy">
