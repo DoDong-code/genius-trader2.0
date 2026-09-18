@@ -269,20 +269,25 @@
       Number.isFinite(Number(cached.nav.value)) && Number(cached.nav.value) > 0;
   }
 
-  function applyTodayNav(code, date, navValue) {
+  // explicitPercent：快照接口 latest_nav.changePercent（小数）。有值时优先用它，
+  // 避免本地历史缺失导致涨跌幅算不出来（进而今日收益显示为空）。
+  function applyTodayNav(code, date, navValue, explicitPercent) {
     var cached = window.fundStore ? window.fundStore.get(code) : null;
     if (!cached) return;
-    var changePercent = null;
-    var history = cached._history && Array.isArray(cached._history.data) ? cached._history.data : [];
-    var records = history
-      .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
-      .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
-    var prevRecord = null;
-    for (var i = records.length - 1; i >= 0; i -= 1) {
-      if (String(records[i].date).localeCompare(String(date)) < 0) { prevRecord = records[i]; break; }
-    }
-    if (prevRecord && Number(prevRecord.nav) > 0) {
-      changePercent = navValue / Number(prevRecord.nav) - 1;
+    var changePercent = (explicitPercent !== undefined && explicitPercent !== null && Number.isFinite(Number(explicitPercent)))
+      ? Number(explicitPercent) : null;
+    if (changePercent === null) {
+      var history = cached._history && Array.isArray(cached._history.data) ? cached._history.data : [];
+      var records = history
+        .filter(function (item) { return item && item.date && Number.isFinite(Number(item.nav)); })
+        .sort(function (left, right) { return String(left.date).localeCompare(String(right.date)); });
+      var prevRecord = null;
+      for (var i = records.length - 1; i >= 0; i -= 1) {
+        if (String(records[i].date).localeCompare(String(date)) < 0) { prevRecord = records[i]; break; }
+      }
+      if (prevRecord && Number(prevRecord.nav) > 0) {
+        changePercent = navValue / Number(prevRecord.nav) - 1;
+      }
     }
     window.fundStore.update(code, {
       nav: {
@@ -353,6 +358,10 @@
     var currentSource = preferredEstimateSource();
     var queue = stale.slice();
     var batchSize = MAX_CONCURRENT;
+    // today-nav 对部分基金永远返回 provider-unavailable（数据源取不到当天净值），
+    // 但详情抽屉走「导入 + 全量快照」能拿到 latest_nav。这里复用同一条链路做兜底，
+    // 让「刷新净值」一次到位，不必逐个点开抽屉。
+    var missing = [];
 
     function runBatch(codes) {
       return Promise.all(codes.map(function (code) {
@@ -364,12 +373,18 @@
               applyTodayNav(c, res.date, navValue);
               return { code: c, nav: true };
             }
-            // 今日正式 NAV 尚未发布：保留旧 NAV；navOnly 模式下不拉估值
-            if (navOnly) return { code: c, nav: false };
+            // 今日正式 NAV 尚未发布：保留旧 NAV；navOnly 模式下记录待兜底，不拉估值
+            if (navOnly) {
+              if (missing.indexOf(c) === -1) missing.push(c);
+              return { code: c, nav: false };
+            }
             return refreshEstimateOnly(c).then(function () { return { code: c, nav: false }; });
           })
           .catch(function () {
-            if (navOnly) return { code: code, nav: false, error: true };
+            if (navOnly) {
+              if (missing.indexOf(String(code)) === -1) missing.push(String(code));
+              return { code: code, nav: false, error: true };
+            }
             return refreshEstimateOnly(code).then(function () { return { code: code, nav: false }; })
               .catch(function () { return { code: code, nav: false, error: true }; });
           });
@@ -381,11 +396,58 @@
       return runBatch(queue.splice(0, batchSize)).then(drain);
     }
 
-    return drain().catch(function () { /* 整体兜底：不影响后续扫描 */ }).then(function () {
-      if (typeof scan === 'function') scan(false, true);
-      markEstimatesRefreshed();
+    return drain()
+      .catch(function () { /* 整体兜底：不影响后续渲染 */ })
+      .then(function () { return deepFallback(missing, !!(opts && opts.deep)); })
+      .then(function () {
+        // 关键：净值写入 fundStore 后必须立即重绘列表行。
+        // 旧代码这里走 scan(false, true)（estimateOnly=true），hydrateRow 会因为
+        // estimateState 已是 'ready' 直接 return，一行都不重绘 —— 数据到位但界面不刷新，
+        // 必须切 tab 或点开抽屉才显示。这里改为纯本地按 store 重绘，不发任何请求。
+        renderRowsFromStore();
+        markEstimatesRefreshed();
+      });
+  }
+
+  // 每只基金每个页面会话只兜底一次：避免 20 分钟轮询反复触发重量级同步（爆内存风险）
+  var navDeepDone = {};
+
+  // 兜底链路：与详情抽屉同源 —— refreshFund(code, true) 走 ?refresh=1&fast=1 全量快照，
+  // 自带 404 → /api/fund/import/:code → 重试，因此未导入的基金也能拿到 latest_nav。
+  function applySnapshotNav(code) {
+    if (navDeepDone[code]) return Promise.resolve(false);
+    navDeepDone[code] = true;
+    if (typeof window.refreshFund !== 'function') return Promise.resolve(false);
+    return window.refreshFund(code, true).then(function (res) {
+      if (!res || res.success === false) return false;
+      var latest = res.latest_nav || (res.fund && res.fund.latest_nav) || null;
+      var value = latest ? Number(latest.nav) : NaN;
+      if (!latest || !latest.date || !Number.isFinite(value) || value <= 0) return false;
+      applyTodayNav(String(code), String(latest.date), value, latest.changePercent);
+      return true;
+    }).catch(function () { return false; });
+  }
+
+  function deepFallback(codes, enabled) {
+    if (!enabled || !codes.length) return Promise.resolve();
+    var queue = codes.filter(function (code) { return !navDeepDone[code]; });
+    function drainDeep() {
+      if (!queue.length) return Promise.resolve();
+      return Promise.all(queue.splice(0, MAX_CONCURRENT).map(applySnapshotNav)).then(drainDeep);
+    }
+    return drainDeep();
+  }
+
+  // 把 fundStore 中已有的最新数据立即刷到持仓列表行上（纯本地，不发请求）
+  function renderRowsFromStore() {
+    document.querySelectorAll('#view-root .fund-row[data-code]').forEach(function (row) {
+      var code = row.dataset.code;
+      var fund = currentFund(code);
+      if (!code || !fund) return;
+      renderRowFromStore(row, code, fund);
     });
   }
+  window.renderRowsFromStore = renderRowsFromStore;
   window.refreshTodayNav = refreshTodayNav;
 
   // 记录某账户最近一次成功刷新估值的时间（按账户），供 AI 诊断判断是否需要重新刷新

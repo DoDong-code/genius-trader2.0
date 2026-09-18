@@ -563,7 +563,9 @@
       const now = Date.now();
       if (now - todayNavLastCheckAt < minIntervalMs) return;
       todayNavLastCheckAt = now;
-      await window.refreshTodayNav({ navOnly: true }); // 只拉净值，不回落去强拉估值
+      // deep=true：today-nav 取不到的基金兜底走「导入 + 全量快照」取 latest_nav。
+      // 每只基金每个页面会话只兜底一次（live-estimates 内 navDeepDone 去重），不会反复打服务端。
+      await window.refreshTodayNav({ navOnly: true, deep: true }); // 只拉净值，不回落去强拉估值
       if (view === 'overview' || view === 'portfolio') render(view);
     } catch (e) { /* 忽略瞬时网络错误 */ }
   }

@@ -205,7 +205,9 @@
     // 冻结刷新语义：刷新按钮 = 只增量检查今日官方净值（已有今日 NAV 跳过，未发布则保留旧 NAV）。
     // navOnly=true：不再回落去强拉估值（估值由切换数据源 / 小程序下拉刷新触发），避免全持仓并发拉估值。
     if (typeof window.refreshTodayNav === 'function') {
-      refreshTasks.push(Promise.resolve(window.refreshTodayNav({ navOnly: true })));
+      // deep=true：today-nav 取不到（provider-unavailable）的基金，兜底走「导入 + 全量快照」
+      // 拿 latest_nav —— 与详情抽屉同源，一次到位，不必逐只点开抽屉。
+      refreshTasks.push(Promise.resolve(window.refreshTodayNav({ navOnly: true, deep: true })));
     }
     Promise.all(refreshTasks)
       .finally(function () {
