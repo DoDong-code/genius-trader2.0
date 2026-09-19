@@ -74,11 +74,15 @@
     var state = window.portfolioState;
     if (!state || !state.accounts || typeof state.getActive !== 'function') return null;
     var account = state.accounts[state.getActive()];
-    if (!account) return null;
-    var funds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []);
-    return Array.isArray(funds)
-      ? funds.find(function (fund) { return fund.code === code; })
-      : null;
+    var funds = account
+      ? (typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []))
+      : [];
+    if (Array.isArray(funds)) {
+      var hit = funds.find(function (fund) { return String(fund.code) === String(code); });
+      if (hit) return hit;
+    }
+    // 兜底：子账户 / 组合账户的持仓在 active 账户里查不到，但仍渲染在列表里
+    return findFundAnywhere(code);
   }
 
   function formatMMDD(dateStr) {
@@ -246,15 +250,56 @@
   //     - 今日净值未发布 → 保留已有正式 NAV，仅刷新今日估值；
   //   - 分批并发（每批 MAX_CONCURRENT）覆盖全部持仓，不裁剪前 20 只；
   //   - 不调用 /api/fund/:code?refresh=1 全量快照，不清空缓存。
+  // 当前视图里真实渲染出来的基金 code（以 DOM 行为准）。
+  // 「全部」视图会把子账户 / 组合账户的持仓一起渲染出来，但这些基金不在 active 账户的
+  // funds 里，只按 active 账户取列表会漏掉它们 —— 表现为「点刷新净值没反应，点开详情抽屉才更新」。
+  function visibleFundCodes() {
+    var out = [];
+    try {
+      var rows = document.querySelectorAll('#view-root .fund-row[data-code]');
+      for (var i = 0; i < rows.length; i += 1) {
+        var code = rows[i] && rows[i].dataset ? String(rows[i].dataset.code || '') : '';
+        if (code && out.indexOf(code) === -1) out.push(code);
+      }
+    } catch (err) { /* DOM 不可用时退回账户数据 */ }
+    return out;
+  }
+
+  // 从任意账户查找基金对象（不局限于 active 账户）：子账户 / 组合账户持仓同样渲染在列表里，
+  // 刷新与重绘必须覆盖到，否则它们永远停在旧净值。
+  function findFundAnywhere(code) {
+    var state = window.portfolioState;
+    if (!state || !state.accounts) return null;
+    var names = Object.keys(state.accounts);
+    for (var i = 0; i < names.length; i += 1) {
+      var acc = state.accounts[names[i]];
+      if (!acc) continue;
+      var funds = typeof state.effectiveFunds === 'function' ? state.effectiveFunds(acc) : (acc.funds || []);
+      if (!Array.isArray(funds)) continue;
+      for (var j = 0; j < funds.length; j += 1) {
+        if (funds[j] && String(funds[j].code) === String(code)) return funds[j];
+      }
+    }
+    return null;
+  }
+
   function currentAccountFunds() {
     var state = window.portfolioState || {};
     var active = typeof state.getActive === 'function' ? state.getActive() : '';
     var account = state.accounts && state.accounts[active];
-    if (!account) return [];
-    var funds = typeof state.effectiveFunds === 'function'
-      ? state.effectiveFunds(account)
-      : (account.funds || []);
-    return Array.isArray(funds) ? funds : [];
+    var funds = account
+      ? (typeof state.effectiveFunds === 'function' ? state.effectiveFunds(account) : (account.funds || []))
+      : [];
+    var list = Array.isArray(funds) ? funds.slice() : [];
+    // 补齐：DOM 里渲染出来、但不在 active 账户列表中的基金（子账户 / 组合账户持仓）
+    var seen = {};
+    list.forEach(function (f) { if (f && f.code) seen[String(f.code)] = true; });
+    visibleFundCodes().forEach(function (code) {
+      if (seen[code]) return;
+      var extra = findFundAnywhere(code);
+      if (extra) { list.push(extra); seen[code] = true; }
+    });
+    return list;
   }
 
   function hasTodayConfirmedNav(code) {
