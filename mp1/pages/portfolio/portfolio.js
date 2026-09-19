@@ -319,33 +319,87 @@ Page({
   // 返回 Promise<{total, updated}>：updated = 真正取到今日官方净值的基金数。
   // 供刷新按钮按真实结果提示（单只失败被静默 catch，旧代码因此永远弹「净值已更新」）。
   syncTodayNav() {
+    this._navDeepDone = this._navDeepDone || {};
     const account = app.getActiveAccount();
     const funds = (account && account.funds) || [];
     if (!funds.length) return Promise.resolve({ total: 0, updated: 0 });
     const codes = [...new Set(funds.map(f => f && f.code).filter(Boolean))].slice(0, 20); // 并发上限
+    const missing = [];
     const tasks = codes.map(code =>
       http.get(`/api/fund/${encodeURIComponent(code)}/today-nav`, null, { silent: true })
         .then(res => {
-          if (!res || !res.success || !res.cached || !res.nav) return 0;
+          if (!res || !res.success || !res.cached || !res.nav) {
+            if (missing.indexOf(code) === -1) missing.push(code);
+            return 0;
+          }
           // 缓存已就绪：更新 navDateMap，让当前页面徽章立即变蓝（不等下次快照）
-          const map = { ...(this.data.navDateMap || {}) };
-          const today = app.globalData.shanghaiToday || '';
-          map[code] = {
-            navDate: res.date,
-            source: res.source || 'xiaobeiyangji',
-            officialChange: null,
-            day: today,
-            kind: 'updated'
-          };
-          this.setData({ navDateMap: map });
+          this._applyNavDate(code, res.date, res.source || 'xiaobeiyangji', null, Number(res.nav));
           return 1;
         })
-        .catch(() => 0) // 静默：单只失败不影响其他
+        .catch(() => {
+          // 静默：单只失败不影响其他；记录待兜底
+          if (missing.indexOf(code) === -1) missing.push(code);
+          return 0;
+        })
     );
-    return Promise.all(tasks).then(arr => ({
-      total: codes.length,
-      updated: arr.reduce((sum, n) => sum + (n || 0), 0)
-    }));
+    return Promise.all(tasks).then(arr =>
+      this._deepNavFallback(missing).then(fixed => {
+        if (fixed > 0 && typeof app.saveState === 'function') app.saveState();
+        return { total: codes.length, updated: arr.reduce((sum, n) => sum + (n || 0), 0) + fixed };
+      })
+    );
+  },
+
+  // 写入单只基金的净值日期徽章（navDateMap），并同步回账户基金对象，供 refreshData 预填充
+  _applyNavDate(code, navDate, source, officialChange, navValue) {
+    const map = { ...(this.data.navDateMap || {}) };
+    const today = app.globalData.shanghaiToday || '';
+    map[code] = {
+      navDate,
+      source: source || 'local',
+      officialChange: Number.isFinite(Number(officialChange)) ? Number(officialChange) : null,
+      day: today,
+      kind: 'updated'
+    };
+    this.setData({ navDateMap: map });
+    const acc = app.getActiveAccount();
+    const f = ((acc && acc.funds) || []).find(x => String(x.code) === String(code));
+    if (f) {
+      f.navUpdatedAt = navDate;
+      f.latest_nav = Object.assign({}, f.latest_nav || {}, {
+        date: navDate,
+        nav: Number.isFinite(Number(navValue)) ? Number(navValue) : (f.latest_nav ? f.latest_nav.nav : null),
+        changePercent: Number.isFinite(Number(officialChange)) ? Number(officialChange)
+          : (f.latest_nav ? f.latest_nav.changePercent : null)
+      });
+    }
+  },
+
+  // 兜底：与网页端 refreshTodayNav 的 deepFallback 同源。
+  // today-nav 对「未导入」的基金永远返回 provider-unavailable，但全量快照（?refresh=1&fast=1）
+  // 自带 404 → 导入 → 重试，能拿到 latest_nav —— 网页端点详情抽屉走的就是这条路。
+  // 串行执行 + 每只基金每会话只兜底一次，避免并发打爆后端。
+  _deepNavFallback(codes) {
+    this._navDeepDone = this._navDeepDone || {};
+    const list = (codes || []).filter(c => c && !this._navDeepDone[c]);
+    if (!list.length) return Promise.resolve(0);
+    const runOne = code => {
+      this._navDeepDone[code] = true;
+      return http.get(`/api/fund/${encodeURIComponent(code)}?refresh=1&fast=1`, null, { silent: true })
+        .then(res => {
+          const latest = res && (res.latest_nav || (res.fund && res.fund.latest_nav));
+          const val = latest ? Number(latest.nav) : NaN;
+          if (!latest || !latest.date || !Number.isFinite(val) || val <= 0) return 0;
+          const pct = Number.isFinite(Number(latest.changePercent)) ? Number(latest.changePercent) : null;
+          this._applyNavDate(code, String(latest.date), 'local', pct, val);
+          return 1;
+        })
+        .catch(() => 0);
+    };
+    return list.reduce(
+      (chain, code) => chain.then(sum => runOne(code).then(n => sum + n)),
+      Promise.resolve(0)
+    );
   },
 
   navigateToOverview() {
