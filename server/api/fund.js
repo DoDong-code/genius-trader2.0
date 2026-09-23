@@ -397,13 +397,19 @@ async function handleFundApi(request, response, url) {
           let aiMessage = message;
           if (body.account && typeof body.account === 'object') {
             const context = await buildAiChatContext(body.account, message);
+            // P3.19：连续追问上下文继承（同一账户、同一次分析）——把前端回传的最近 N 条 Q&A 拼进 prompt
+            const historyArr = Array.isArray(body.history) ? body.history.slice(-4) : [];
+            const historyText = historyArr.length
+              ? '\n【历史对话，请继承理解，不要每次重新只盯当天数据】\n' +
+                historyArr.map((h, i) => `Q${i + 1}: ${h && h.q ? h.q : ''}\nA${i + 1}: ${h && h.a ? h.a : ''}`).join('\n') + '\n'
+              : '';
             if (body.review) {
-              aiMessage = `${body.reviewNote || '复盘分析'}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。\n组合数据：\n${JSON.stringify(context, null, 2)}\n`;
+              aiMessage = `${body.reviewNote || '复盘分析'}。请对以下基金组合进行复盘分析，包括：今日行情与持仓表现回顾、主要涨跌原因、明日关注要点、投资纪律执行情况与后续操作建议。${historyText}\n组合数据：\n${JSON.stringify(context, null, 2)}\n`;
             } else {
               const style = body.brief
                 ? '回答请高度简洁，控制在200字以内，直接给结论和关键操作建议，不要展开分析、不要长篇分点。'
                 : '回答简洁明了、直击要点，避免冗余，不要过度展开。';
-              aiMessage = `请基于以下基金组合数据回答用户问题。${style}\n组合数据：\n${JSON.stringify(context, null, 2)}\n用户问题：${message}`;
+              aiMessage = `请基于以下基金组合数据回答用户问题。${style}${historyText}\n组合数据：\n${JSON.stringify(context, null, 2)}\n用户问题：${message}`;
             }
           }
           const reply = await ai.chat(aiMessage, config);

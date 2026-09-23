@@ -325,91 +325,23 @@ Page({
     let activeTargetsSum = 0;
     activeCategories.forEach(cat => { activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10; });
 
-    let healthScore = 60;
-    let healthText = '亟待调整';
-    let healthColor = '#ff453a';
-    let deviationText = '当前账户无持仓数据';
-    if (activeCategories.size >= 4) {
-      healthScore = 95; healthText = '配置极佳'; healthColor = '#30d158';
-    } else if (activeCategories.size === 3) {
-      healthScore = 85; healthText = '配置良好'; healthColor = '#30d158';
-    } else if (activeCategories.size === 2) {
-      healthScore = 75; healthText = '配比一般'; healthColor = '#ff9500';
-    } else if (activeCategories.size === 1) {
-      healthScore = 60; healthText = '风险集中'; healthColor = '#ff453a';
-    }
-
-    let maxCatPct = 0;
-    allocations.forEach(al => { if (al.pct > maxCatPct) maxCatPct = al.pct; });
-    deviationText = '组合配比均衡度良好';
-    if (maxCatPct > 65) deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
-    else if (maxCatPct > 45) deviationText = '大类配比略有偏离，建议微调持仓结构';
-    else if (funds.length === 0) deviationText = '当前账户无持仓数据';
-
-    let localRisk = 50;
-    if (activeCategories.size === 1) localRisk += 15;
-    else if (activeCategories.size === 2) localRisk += 5;
-    if (maxCatPct > 65) localRisk += 10;
-    else if (maxCatPct > 45) localRisk += 5;
-    const profitRates = funds.map(f => {
-      const amount = Number(f.amount) || 0;
-      const profit = Number(f.holdingProfit ?? f.profit) || 0;
-      return amount > 0 ? profit / amount : 0;
-    });
-    const avgRate = profitRates.length ? profitRates.reduce((s, r) => s + r, 0) / profitRates.length : 0;
-    if (avgRate < -0.1) localRisk += 10;
-    else if (avgRate < 0) localRisk += 5;
-    else if (avgRate > 0.15) localRisk -= 5;
-    localRisk = Math.max(5, Math.min(95, localRisk));
-
     // P3.18 修复：本地引擎模式不读取任何 AI 缓存（避免历史 AI 胡编理由继续显示）
     const aiResult = wx.getStorageSync('ai_engine') === 'local' ? null : this.loadCachedAiResult(a);
-    // AI 幻觉检查（对齐 Web app-refactor.js:241-256）：实际有持仓但 AI 返回「持仓为空」或 healthScore<=0 时 fallback 本地规则
+    // 健康度/风险评分/组合配比建议已取消生成（需求：删除无用组合评分，仅保留字段为 null 以兼容）
+    // summary 仍以 AI 返回为准；保留轻量幻觉兜底，防止 AI 声称"无持仓"
     const hasActualHoldings = funds.length > 0;
     const aiDeviationText = (aiResult && aiResult.deviationText) || '';
-    const aiHealthScore = (aiResult && aiResult.healthScore !== undefined) ? Number(aiResult.healthScore) : null;
-    const isAiDelusional = hasActualHoldings && (
-      /为空|无持仓|空白|无任何持仓|暂无.*数据|无法判断/.test(aiDeviationText) ||
-      (aiHealthScore !== null && aiHealthScore <= 0)
-    );
-    if (aiResult && !isAiDelusional) {
-      healthScore = aiResult.healthScore !== undefined ? Number(aiResult.healthScore) : healthScore;
-      healthText = aiResult.healthText || healthText;
-      healthColor = aiResult.healthColor || healthColor;
-      deviationText = aiResult.deviationText || deviationText;
-    } else if (isAiDelusional) {
-      console.warn('[AI诊断] AI 返回异常结果（声称无持仓或 healthScore<=0），已 fallback 到本地规则引擎');
-    }
-    // riskScore 同样做幻觉检查
-    const aiRisk = (aiResult && !isAiDelusional && Number.isFinite(Number(aiResult.riskScore))) ? Number(aiResult.riskScore) : null;
-    const riskScore = aiRisk !== null ? Math.max(0, Math.min(100, Math.round(aiRisk))) : localRisk;
-    const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
+    const isAiDelusional = hasActualHoldings &&
+      /为空|无持仓|空白|无任何持仓|暂无.*数据|无法判断/.test(aiDeviationText);
 
-    const topAlloc = allocations[0];
-    const bondPct = (allocations.find(al => al.category === '债券类') || {}).pct || 0;
-    const goldPct = (allocations.find(al => al.category === '黄金类') || {}).pct || 0;
-    let rebalanceSuggestion = '组合较为稳健，维持现有配置与纪律定投即可。';
-    const aiRebalance = (aiResult && !isAiDelusional && typeof aiResult.rebalanceSuggestion === 'string') ? aiResult.rebalanceSuggestion.trim() : '';
-    if (aiRebalance) {
-      rebalanceSuggestion = aiRebalance;
-    } else if (maxCatPct > 65) {
-      if (topAlloc && topAlloc.category === '债券类') {
-        rebalanceSuggestion = `债券类占比过高（${maxCatPct.toFixed(0)}%），组合偏防守；可适度增加权益/海外资产的配置比例，并保持行业分散。`;
-      } else if (topAlloc && topAlloc.category === '权益类') {
-        const bondPart = bondPct > 0
-          ? `当前债券类约占 ${bondPct.toFixed(0)}%，可在现有基础上适度提高稳健资产占比，进一步降低组合波动`
-          : '建议增配债券/稳健类资产，降低组合波动';
-        rebalanceSuggestion = `权益类占比过高（${maxCatPct.toFixed(0)}%），建议分散到 2-3 个行业，${bondPart}。`;
-      } else {
-        rebalanceSuggestion = `「${topAlloc ? topAlloc.category : '其他'}」占比过高（${maxCatPct.toFixed(0)}%），建议适当分散，降低单一资产集中度。`;
-      }
-    } else if (riskScore >= 70) {
-      rebalanceSuggestion = (bondPct > 0 || goldPct > 0)
-        ? '风险偏高，建议适度降低权益/行业主题基金仓位，在现有稳健资产基础上进一步控制单一行业集中度。'
-        : '风险偏高，建议降低权益/行业主题基金仓位，增配债券与稳健资产，并控制单一行业集中度。';
-    } else if (riskScore >= 40) {
-      rebalanceSuggestion = '风险适中，可小幅提高稳健资产（债券/黄金）占比，保持行业分散。';
-    }
+    // 兼容字段（固定为 null / 空，不参与任何判断与展示）
+    const healthScore = null;
+    const healthText = '';
+    const healthColor = '';
+    const deviationText = '';
+    const riskScore = null;
+    const riskLevel = '';
+    const rebalanceSuggestion = '';
 
     const rows = funds.map(f => {
       const cat = this.sectorNameOf(f);
@@ -650,6 +582,7 @@ Page({
     const activeAccountName = app.globalData.activeAccountName;
     wx.removeStorageSync('LAST_USER_QUERY_' + activeAccountName);
     wx.removeStorageSync('LAST_AI_ANSWER_' + activeAccountName);
+    wx.removeStorageSync('LAST_AI_HISTORY_' + activeAccountName);
     
     this.setData({
       lastUserQuery: '',
@@ -823,8 +756,14 @@ Page({
     const aiAPIKey = wx.getStorageSync('ai_api_key') || '';
 
     try {
+      const historyKey = a.name || '默认账户';
+      let historyArr = [];
+      try { historyArr = wx.getStorageSync('LAST_AI_HISTORY_' + historyKey) || []; } catch (e) { historyArr = []; }
+      if (!Array.isArray(historyArr)) historyArr = [];
+
       const data = await http.post('/api/ai/chat', {
         message: prompt,
+        history: historyArr.slice(-4),
         config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey }
       }, { silent: true });
       if (data && data.success) {
@@ -834,6 +773,10 @@ Page({
         wx.setStorageSync('LAST_USER_QUERY_' + activeAccountName, question);
         wx.setStorageSync('LAST_AI_ANSWER_' + activeAccountName, reply);
         wx.setStorageSync('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
+
+        // 连续追问：累积历史对话（最多保留 4 轮）供后端继承上下文
+        const newHistory = historyArr.concat([{ q: question, a: reply }]).slice(-4);
+        wx.setStorageSync('LAST_AI_HISTORY_' + activeAccountName, newHistory);
 
         this.setData({
           lastUserQuery: question,

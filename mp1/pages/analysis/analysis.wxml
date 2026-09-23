@@ -65,42 +65,14 @@
     </view>
   </view>
 
-  <!-- 2. Portfolio Health and Risk Index Section -->
+  <!-- 2. 分析来源信息（已移除组合配比健康度/风险评分/组合配比建议） -->
   <view class="section" wx:if="{{report}}">
     <view class="section-head">
-      <text class="block-title">组合配比健康度与风险</text>
+      <text class="block-title">今日操作建议</text>
     </view>
-
-    <view class="metrics-grid">
-      <!-- Health Score -->
-      <view class="metric-tile">
-        <text class="metric-label">组合配比健康度</text>
-        <text class="metric-value" style="color: {{report.healthColor}};">{{report.healthScore}}<text class="metric-unit">分</text></text>
-        <text class="metric-desc" style="color: {{report.healthColor}};">{{report.healthText}}</text>
-        <view class="ai-helper-texts" wx:if="{{aiAnalysisTime}}">
-          <text class="ai-helper-line">天才模型: {{aiModelName || '默认'}}</text>
-          <text class="ai-helper-line">诊断时间: {{aiAnalysisTime}}</text>
-        </view>
-      </view>
-
-      <!-- Risk Score -->
-      <view class="metric-tile">
-        <text class="metric-label">整体投资风险评分</text>
-        <text class="metric-value text-red">{{report.riskScore}}<text class="metric-unit">分</text></text>
-        <text class="metric-desc">整体风险级别: <text class="text-bold" style="color: {{report.riskScore >= 70 ? '#ff453a' : (report.riskScore >= 40 ? '#ff9500' : '#30d158')}};">{{report.riskLevel}}风险</text></text>
-      </view>
-    </view>
-
-    <!-- Suggestion Details -->
-    <view class="suggestion-inline">
-      <text class="suggestion-title">如何组合配比降低风险：</text>
-      <text class="suggestion-content">{{report.rebalanceSuggestion}}</text>
-    </view>
-
-    <!-- Deviation Overview -->
-    <view class="deviation-status-row">
-      <text class="status-dot" style="background-color: {{report.healthColor}};"></text>
-      <text class="status-text">{{report.deviationText}}</text>
+    <view class="ai-helper-texts" wx:if="{{aiAnalysisTime}}">
+      <text class="ai-helper-line">天才模型: {{aiModelName || '默认'}}</text>
+      <text class="ai-helper-line">诊断时间: {{aiAnalysisTime}}</text>
     </view>
   </view>
 

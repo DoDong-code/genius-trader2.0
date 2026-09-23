@@ -36,6 +36,22 @@ export function isTradingDay(d = new Date()) {
   return !HOLIDAYS_2026.has(shanghaiDate(d));
 }
 
+// 最近一个 A 股交易日（含当日；非交易日回退到最近交易日）
+// 与 getLatestHkTradingDay 同款结构，仅判断改用 isTradingDay
+export function getLatestTradingDay(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  while (true) {
+    const yyyy = dt.getFullYear();
+    const mm = String(dt.getMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getDate()).padStart(2, '0');
+    if (isTradingDay(new Date(yyyy, Number(mm) - 1, Number(dd)))) {
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    dt.setDate(dt.getDate() - 1);
+  }
+}
+
 // 港股 / 恒生科技类基金：按「当日」规则处理（与美股 QDII 的 T+1 披露规则严格区分）
 export function isHkFund(fund) {
   if (!fund) return false;

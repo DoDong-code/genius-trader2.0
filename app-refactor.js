@@ -241,95 +241,23 @@
     let activeTargetsSum = 0;
     activeCategories.forEach(cat => { activeTargetsSum += categoryTargets[cat] !== undefined ? categoryTargets[cat] : 10; });
 
-    // 本地健康度 / 偏离度（沿用原分析页口径）
-    let healthScore = 60;
-    let healthText = '亟待调整';
-    let healthColor = '#ff3b30';
-    let deviationText = '当前账户无持仓数据';
-    if (activeCategories.size >= 4) {
-      healthScore = 95; healthText = '配置极佳'; healthColor = '#34a853';
-    } else if (activeCategories.size === 3) {
-      healthScore = 85; healthText = '配置良好'; healthColor = '#34a853';
-    } else if (activeCategories.size === 2) {
-      healthScore = 75; healthText = '配比一般'; healthColor = '#ff9500';
-    } else if (activeCategories.size === 1) {
-      healthScore = 60; healthText = '风险集中'; healthColor = '#ff3b30';
-    }
-    let maxCatPct = 0;
-    allocations.forEach(al => { if (al.pct > maxCatPct) maxCatPct = al.pct; });
-    deviationText = '组合配比均衡度良好';
-    if (maxCatPct > 65) deviationText = '单一资产类别配比过大，建议适当分散降低系统性风险';
-    else if (maxCatPct > 45) deviationText = '大类配比略有偏离，建议微调持仓结构';
-    else if (funds.length === 0) deviationText = '当前账户无持仓数据';
-
-    // 本地风险评分（0-100，越高越危险）：集中度 + 亏损 + 波动
-    let localRisk = 50;
-    if (activeCategories.size === 1) localRisk += 15;
-    else if (activeCategories.size === 2) localRisk += 5;
-    if (maxCatPct > 65) localRisk += 10;
-    else if (maxCatPct > 45) localRisk += 5;
-    const profitRates = funds.map(f => {
-      const amount = Number(f.amount) || 0;
-      const profit = Number(f.holdingProfit ?? f.profit) || 0;
-      return amount > 0 ? profit / amount : 0;
-    });
-    const avgRate = profitRates.length ? profitRates.reduce((s, r) => s + r, 0) / profitRates.length : 0;
-    if (avgRate < -0.1) localRisk += 10;
-    else if (avgRate < 0) localRisk += 5;
-    else if (avgRate > 0.15) localRisk -= 5;
-    localRisk = Math.max(5, Math.min(95, localRisk));
-
     // P3.18 修复：本地引擎模式不读取任何 AI 缓存（避免历史 AI 胡编理由继续显示）
     const aiResult = localStorage.getItem('AI_ENGINE') === 'local' ? null : loadCachedAiResult(a);
-    // Sanity check: AI 模型有时会"幻觉"——收到完整持仓数据却返回"持仓为空"
-    // 当实际有持仓但 AI 返回异常值时，fallback 到本地规则引擎
+    // 健康度/风险评分/组合配比建议已取消生成（需求：删除无用组合评分，仅保留字段为 null 以兼容）
+    // summary 仍以 AI 返回为准；保留轻量幻觉兜底，防止 AI 声称"无持仓"
     const hasActualHoldings = funds.length > 0;
     const aiDeviationText = (aiResult && aiResult.deviationText) || '';
-    const aiHealthScore = (aiResult && aiResult.healthScore !== undefined) ? Number(aiResult.healthScore) : null;
-    const isAiDelusional = hasActualHoldings && (
-      /为空|无持仓|空白|无任何持仓|暂无.*数据|无法判断/.test(aiDeviationText) ||
-      (aiHealthScore !== null && aiHealthScore <= 0)
-    );
-    if (aiResult && !isAiDelusional) {
-      healthScore = aiResult.healthScore !== undefined ? Number(aiResult.healthScore) : healthScore;
-      healthText = aiResult.healthText || healthText;
-      healthColor = aiResult.healthColor || healthColor;
-      deviationText = aiResult.deviationText || deviationText;
-    } else if (isAiDelusional) {
-      // AI 返回异常结果时保留本地计算值，但在 summary 中标注
-      console.warn('[AI诊断] AI 返回异常结果(声称无持仓或healthScore<=0)，已 fallback 到本地规则引擎。AI原文:', JSON.stringify(aiResult).slice(0, 200));
-    }
-    // riskScore 也做同样检查：有持仓时 AI 返回 100 分高风险且 deviationText 异常则忽略
-    const aiRisk = (aiResult && !isAiDelusional && Number.isFinite(Number(aiResult.riskScore))) ? Number(aiResult.riskScore) : null;
-    const riskScore = aiRisk !== null ? Math.max(0, Math.min(100, Math.round(aiRisk))) : localRisk;
-    const riskLevel = riskScore >= 70 ? '高' : riskScore >= 40 ? '中' : '低';
+    const isAiDelusional = hasActualHoldings &&
+      /为空|无持仓|空白|无任何持仓|暂无.*数据|无法判断/.test(aiDeviationText);
 
-    // 如何组合配比降低风险：AI 一句话建议优先，本地自适应规则兜底
-    const topAlloc = allocations[0];
-    const bondPct = (allocations.find(al => al.category === '债券类') || {}).pct || 0;
-    const goldPct = (allocations.find(al => al.category === '黄金类') || {}).pct || 0;
-    let rebalanceSuggestion = '组合较为稳健，维持现有配置与纪律定投即可。';
-    const aiRebalance = (aiResult && !isAiDelusional && typeof aiResult.rebalanceSuggestion === 'string') ? aiResult.rebalanceSuggestion.trim() : '';
-    if (aiRebalance) {
-      rebalanceSuggestion = aiRebalance;
-    } else if (maxCatPct > 65) {
-      if (topAlloc && topAlloc.category === '债券类') {
-        rebalanceSuggestion = `债券类占比过高（${maxCatPct.toFixed(0)}%），组合偏防守；可适度增加权益/海外资产的配置比例，并保持行业分散。`;
-      } else if (topAlloc && topAlloc.category === '权益类') {
-        const bondPart = bondPct > 0
-          ? `当前债券类约占 ${bondPct.toFixed(0)}%，可在现有基础上适度提高稳健资产占比，进一步降低波动`
-          : '建议增配债券/稳健类资产，降低组合波动';
-        rebalanceSuggestion = `权益类占比过高（${maxCatPct.toFixed(0)}%），建议分散到 2-3 个行业，${bondPart}。`;
-      } else {
-        rebalanceSuggestion = `「${topAlloc ? topAlloc.category : '其他'}」占比过高（${maxCatPct.toFixed(0)}%），建议适当分散，降低单一资产集中度。`;
-      }
-    } else if (riskScore >= 70) {
-      rebalanceSuggestion = (bondPct > 0 || goldPct > 0)
-        ? '风险偏高，建议适度降低权益/行业主题基金仓位，在现有稳健资产基础上进一步控制单一行业集中度。'
-        : '风险偏高，建议降低权益/行业主题基金仓位，增配债券与稳健资产，并控制单一行业集中度。';
-    } else if (riskScore >= 40) {
-      rebalanceSuggestion = '风险适中，可小幅提高稳健资产（债券/黄金）占比，保持行业分散。';
-    }
+    // 兼容字段（固定为 null / 空，不参与任何判断与展示）
+    const healthScore = null;
+    const healthText = '';
+    const healthColor = '';
+    const deviationText = '';
+    const riskScore = null;
+    const riskLevel = '';
+    const rebalanceSuggestion = '';
 
     // 逐基金统一决策行（本地规则 + AI 建议合并）
     const rows = funds.map(f => {
@@ -966,37 +894,11 @@
           </div>
           ` : ''}
 
-          <!-- Analysis Results KPI Stats -->
+          <!-- 分析来源信息（仅展示模型与时间，已移除健康度/风险评分/组合配比建议） -->
           ${totalAssets > 0 ? `
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
-            <!-- 合并：组合配比健康度 + 风险评分 -->
-            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">组合配比健康度</span>
-                  <strong style="font-size: clamp(30px, 6vw, 50px); line-height: 1.05; color: #1d1d1f; font-weight: 500; letter-spacing: -0.03em;">${healthScore}分</strong>
-                  <span style="font-size: 13px; font-weight: 600; color: ${healthColor}; margin-top: 2px;">${healthText}</span>
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; border-left: 1px solid rgba(0,0,0,0.06); padding-left: 16px;">
-                  <span style="font-size: 11px; color: #86868b; font-weight: 500;">风险评分</span>
-                  <strong style="font-size: clamp(30px, 6vw, 50px); line-height: 1.05; color: #1d1d1f; font-weight: 500; letter-spacing: -0.03em;">${riskScore}分</strong>
-                  <span style="font-size: 13px; font-weight: 600; color: ${riskScore >= 70 ? '#ff3b30' : riskScore >= 40 ? '#ff9500' : '#34a853'}; margin-top: 2px;">${riskLevel}风险</span>
-                </div>
-              </div>
-              <div style="margin-top: auto; padding-top: 16px; border-top: 1px dashed rgba(0,0,0,0.06); font-size: 11px; color: #86868b; display: flex; align-items: center; gap: 12px;">
-                <span>模型: <b style="color: #34a853; font-weight: 500;">${esc(cachedModel || '—')}</b></span>
-                <span>时间: <b style="color: #34a853; font-weight: 500;">${esc(cachedTime || '—')}</b></span>
-              </div>
-            </div>
-            <!-- 持仓分析 + 如何组合配比降低风险 -->
-            <div style="background: rgba(0,0,0,0.02); padding: 16px 20px; border-radius: 12px; display: flex; flex-direction: column; gap: 6px;">
-              <span style="font-size: 11px; color: #86868b; font-weight: 500;">持仓分析</span>
-              <strong style="font-size: 13.5px; color: #1d1d1f; font-weight: 700; min-height: 32px; display: flex; align-items: center; line-height: 1.5;">${deviationText}</strong>
-              <div style="border-top: 1px dashed rgba(0,0,0,0.06); padding-top: 8px; margin-top: 4px;">
-                <span style="font-size: 11px; color: #86868b; font-weight: 500; display: block; margin-bottom: 4px;">如何组合配比降低风险</span>
-                <span style="font-size: 12px; color: #6e6e73; line-height: 1.55; display: block;">${rebalanceSuggestion}</span>
-              </div>
-            </div>
+          <div style="display: flex; align-items: center; gap: 16px; font-size: 11px; color: #86868b;">
+            <span>模型: <b style="color: #34a853; font-weight: 500;">${esc(cachedModel || '—')}</b></span>
+            <span>时间: <b style="color: #34a853; font-weight: 500;">${esc(cachedTime || '—')}</b></span>
           </div>
           ` : ''}
 
@@ -1676,6 +1578,10 @@
         const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
         const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
         const aiAPIKey = window.AI_API_KEY || '';
+        const historyKey = a.name || '默认账户';
+        let historyArr = [];
+        try { historyArr = JSON.parse(localStorage.getItem('LAST_AI_HISTORY_' + historyKey) || '[]'); } catch (e) { historyArr = []; }
+        if (!Array.isArray(historyArr)) historyArr = [];
         const data = await providerApi('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1685,11 +1591,14 @@
             brief: isBrief,
             review: isReview,
             reviewNote,
+            history: historyArr.slice(-4),
             config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey, maxTokens: isBrief ? 600 : 1500 }
           })
         });
         // 诊断流程可能已重新渲染页面，写入时重新获取窗口元素
         saveAiChatState({ status: 'done', reply: data.reply || 'AI 未返回有效回答', question: question || '', time: nowStr });
+        const newHistory = historyArr.concat([{ q: question, a: data.reply || '' }]).slice(-4);
+        try { localStorage.setItem('LAST_AI_HISTORY_' + historyKey, JSON.stringify(newHistory)); } catch (e) {}
         const freshBox = document.querySelector('#ai-answer-window');
         if (freshBox) {
           freshBox.style.display = 'block';
@@ -2716,6 +2625,7 @@
     const clearAiQuestionBtn = e.target.closest('#clear-ai-question-btn');
     if (clearAiQuestionBtn) {
       window.lastAIUserQuestion = '';
+      try { localStorage.removeItem('LAST_AI_HISTORY_' + (acct() && acct().name || '默认账户')); } catch (e) {}
       runAiDiagnostics('');
       const answerBox = document.querySelector('#ai-answer-window');
       if (answerBox) {

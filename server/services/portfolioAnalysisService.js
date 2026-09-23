@@ -122,18 +122,54 @@ function enrichFund(fund, accountFunds, strategy, userId) {
   const profit = Number(fund.holdingProfit ?? fund.profit ?? 0) || 0;
   const profitRate = amount > 0 ? profit / amount : 0;
   const today = Number(fund.today) || 0;
+  // P3.19：成本基数（优先 fund.cost / costBasis；缺失时用 金额-盈亏 反推，避免为 0）
+  let cost = 0;
+  if (Number.isFinite(Number(fund.cost)) && Number(fund.cost) > 0) cost = Number(fund.cost);
+  else if (Number.isFinite(Number(fund.costBasis)) && Number(fund.costBasis) > 0) cost = Number(fund.costBasis);
+  else if (amount > 0) cost = amount - profit;
+  // P3.19：近期交易记录（买卖），最多保留 8 条，供 AI 理解「已减多少 / 近期是否加仓」
+  const transactions = Array.isArray(fund.transactions) ? fund.transactions.slice(-8) : [];
   return {
     code: String(fund.code),
     name: String(fund.name || fund.code),
     amount,
     profit,
     profitRate,
+    cost,
+    transactions,
     todayEstimate: today,
     today_change: amount * today,
     positionType: classifyPositionType(fund, accountFunds, strategy),
     type: String(fund.category || fund.fund_type || '基金'),
     direction: directionFor(fund.code, fund.name)
   };
+}
+
+// P3.19：组合关系摘要（让 AI 横向比较基金，而非孤立分析单只）
+function buildCombinationSummary(holdings) {
+  if (!Array.isArray(holdings) || holdings.length === 0) return '未提供（无持仓）';
+  const dirCount = {};
+  let aShare = 0, overseas = 0, other = 0;
+  holdings.forEach(h => {
+    const d = h.direction || h.type || '其他';
+    dirCount[d] = (dirCount[d] || 0) + 1;
+    const amt = Number(h.amount) || 0;
+    const nm = String(h.name || '');
+    if (/沪深300|半导体|产业趋势|数字经济|灵活配置|混合|权益|A股|国内|中证|蓝筹/.test(d) || /A股|国内|沪深|中证|蓝筹/.test(nm)) aShare += amt;
+    else if (/海外|全球|恒生|纳指|标普|QDII|美股/.test(d) || /海外|全球|恒生|纳斯达克|美股|标普/.test(nm)) overseas += amt;
+    else other += amt;
+  });
+  const total = aShare + overseas + other || 1;
+  const pct = v => `${((v / total) * 100).toFixed(0)}%`;
+  const dupRoles = Object.keys(dirCount).filter(d => dirCount[d] > 1);
+  const lines = [];
+  lines.push(`A股/国内暴露 ${pct(aShare)}，海外/全球暴露 ${pct(overseas)}，其他 ${pct(other)}。`);
+  if (dupRoles.length) {
+    lines.push(`承担相同角色（重复功能）的基金分组：${dupRoles.map(d => `${d}(${dirCount[d]}只)`).join('、')} —— 请说明哪些可互相替代、减仓时优先减哪只。`);
+  } else {
+    lines.push(`各基金角色区分度较好，无明显重复。`);
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -225,11 +261,21 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
       base.ret7d = periodReturn(history, 7);
       base.ret30d = periodReturn(history, 30);
       base.ret60d = periodReturn(history, 60);
+      // P3.19：历史摘要（替代把完整 history 数组塞给模型，节省 token、聚焦结论）
+      try {
+        const lastRec = history.length ? history[history.length - 1] : null;
+        const navDate = lastRec ? lastRec.date : null;
+        const f = v => (v === null || v === undefined || !Number.isFinite(v)) ? '未提供' : `${(v * 100).toFixed(2)}%`;
+        base.historySummary = `近7日 ${f(base.ret7d)} ／ 近30日 ${f(base.ret30d)} ／ 近60日 ${f(base.ret60d)}；最近净值日 ${navDate || '未提供'}`;
+      } catch (e2) {
+        base.historySummary = '未提供';
+      }
     } catch (e) {
       base.history = [];
       base.ret7d = null;
       base.ret30d = null;
       base.ret60d = null;
+      base.historySummary = '未提供';
     }
     const fundMeta = await requestMemo(`fund:${code}`, () => getFund(code)) || {};
     if (!base.name || base.name === String(fund.code)) base.name = fundMeta.fund_name || base.name;
@@ -248,6 +294,8 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     strategies: Array.isArray(target.strategy) ? target.strategy.slice() : [],
     strategy,
     holdings,
+    closedPositions: Array.isArray(target.closedPositions) ? target.closedPositions.slice(-10) : [],
+    combinationSummary: buildCombinationSummary(holdings),
     accounts: accounts.map(a => ({ name: a.name, source: a.source, totalValue: (a.funds || []).reduce((s, f) => s + (Number(f.amount) || 0), 0) }))
   };
 }
