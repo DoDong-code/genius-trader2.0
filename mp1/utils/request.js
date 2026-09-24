@@ -69,7 +69,8 @@ export function request(url, options = {}) {
       method,
       data,
       header: headers,
-      timeout: 30000,
+      // 默认 30s；诊断类长生成请求可在 options.timeout 覆盖（毫秒）
+      timeout: (options && Number.isFinite(Number(options.timeout)) && Number(options.timeout) > 0) ? Number(options.timeout) : 30000,
       success(res) {
         finish();
         if (res.statusCode >= 200 && res.statusCode < 300) {

@@ -24,7 +24,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// src/services/ai/analysisPrompt.ts
+// genius-trader2.0/src/services/ai/analysisPrompt.ts
 var analysisPrompt_exports = {};
 __export(analysisPrompt_exports, {
   ACTION_VERBS: () => ACTION_VERBS,
@@ -107,16 +107,17 @@ ${combination}
 4. \u5C0A\u91CD\u8D26\u6237\u81EA\u8EAB\u7B56\u7565\uFF0C\u4E0D\u5F97\u4EC5\u56E0\u67D0\u7C7B\u5360\u6BD4\u9AD8\u5C31\u673A\u68B0\u5EFA\u8BAE\u589E\u914D\u503A\u5238/\u7A33\u5065\u8D44\u4EA7\uFF1B\u987B\u7ED3\u5408\u6574\u4E2A\u7EC4\u5408\u4E0E\u7528\u6237\u5B9E\u9645\u7B56\u7565\u5224\u65AD\u3002
 5. \u8BC4\u4F30\u7406\u7531\u4E2D\u7684\u6570\u5B57\u5FC5\u987B\u76F4\u63A5\u5F15\u7528\u4E0A\u65B9\u6570\u636E\uFF0C\u4E25\u7981\u7F16\u9020\u672A\u63D0\u4F9B\u7684\u6570\u5B57\u3002
 
-\u3010\u8F93\u51FA\u8981\u6C42\uFF08\u6781\u7B80\uFF09\u3011
-- summary\uFF1A\u4ECA\u65E5\u603B\u4F53\u5224\u65AD\uFF0C\u6700\u591A 3-4 \u53E5\u8BDD\uFF0C\u53EA\u8BF4\u6700\u91CD\u8981\u7684\u4E8B\u3002
-- operations\uFF1A\u5FC5\u987B\u8986\u76D6\u4E0A\u65B9\u6240\u6709\u6301\u4ED3\u57FA\u91D1\uFF0C\u6BCF\u53EA\u4E00\u6761\u3002action \u5FC5\u987B\u4ECE\u56FA\u5B9A\u8BCD\u8868\u9009\u53D6\uFF1A${ACTION_VERBS.join(" / ")}\uFF1Breason \u6700\u591A 1-2 \u53E5\u8BDD\u3002
+\u3010\u8F93\u51FA\u8981\u6C42\uFF08\u6781\u7B80\uFF0C\u52A1\u5FC5\u77ED\uFF0C\u51CF\u5C11\u751F\u6210\u8017\u65F6\uFF09\u3011
+- summary\uFF1A\u4ECA\u65E5\u603B\u4F53\u5224\u65AD\uFF0C\u6700\u591A 3 \u53E5\u8BDD\uFF0C\u53EA\u8BF4\u6700\u91CD\u8981\u7684\u4E8B\uFF0C\u4E0D\u8981\u5C55\u5F00\u3002
+- operations\uFF1A\u5FC5\u987B\u8986\u76D6\u4E0A\u65B9\u6240\u6709\u6301\u4ED3\u57FA\u91D1\uFF0C\u6BCF\u53EA\u4E00\u6761\u3002action \u5FC5\u987B\u4ECE\u56FA\u5B9A\u8BCD\u8868\u9009\u53D6\uFF1A${ACTION_VERBS.join(" / ")}\u3002
+- reason\uFF1A\u9650 1 \u53E5\u3001\u2264 15 \u4E2A\u6C49\u5B57\u7684\u6781\u77ED\u8BF4\u660E\uFF08\u4F8B\u5982\u201C\u4ED3\u4F4D\u8FC7\u91CD\uFF0C\u9022\u9AD8\u51CF\u201D\u201C\u957F\u671F\u903B\u8F91\u5F31\uFF0C\u62E9\u673A\u9000\u201D\uFF09\uFF0C\u4E25\u7981\u5199\u6210\u591A\u53E5\u957F\u6587\u3002
 - \u7528\u57FA\u91D1\u771F\u5B9E code \u56DE\u586B fundCode\u3002
 
 \u8BF7\u4E25\u683C\u6309\u7167\u4EE5\u4E0B JSON \u8FD4\u56DE\uFF08\u7EAF JSON\uFF0C\u4E0D\u8981 markdown\u3001\u4E0D\u8981 \`\`\`json\`\`\` \u5757\u3001\u4E0D\u8981\u591A\u4F59\u6587\u5B57\uFF09\uFF1A
 {
-  "summary": "\u4ECA\u65E5\u603B\u4F53\u64CD\u4F5C\u5224\u65AD\uFF083-4\u53E5\uFF09",
+  "summary": "\u4ECA\u65E5\u603B\u4F53\u64CD\u4F5C\u5224\u65AD\uFF083\u53E5\u4EE5\u5185\uFF09",
   "operations": [
-    { "fundCode": "\u57FA\u91D1\u4EE3\u7801", "action": "\u52A8\u4F5C(\u56FA\u5B9A\u8BCD\u8868)", "reason": "1-2\u53E5\u7406\u7531" }
+    { "fundCode": "\u57FA\u91D1\u4EE3\u7801", "action": "\u52A8\u4F5C(\u56FA\u5B9A\u8BCD\u8868)", "reason": "\u226415\u5B57\u6781\u77ED\u8BF4\u660E" }
   ]
 }
 \uFF08\u517C\u5BB9\u5B57\u6BB5 healthScore / riskScore / rebalanceSuggestion \u4E00\u5F8B\u8FD4\u56DE null\uFF0C\u4E0D\u8981\u751F\u6210\uFF0C\u4E5F\u4E0D\u53C2\u4E0E\u4EFB\u4F55\u64CD\u4F5C\u5EFA\u8BAE\u3002\uFF09
@@ -180,7 +181,7 @@ async function analyzeWithPrompt(portfolioData, config, chatImpl) {
 }
 var ACTION_VERBS;
 var init_analysisPrompt = __esm({
-  "src/services/ai/analysisPrompt.ts"() {
+  "genius-trader2.0/src/services/ai/analysisPrompt.ts"() {
     ACTION_VERBS = [
       "\u7EE7\u7EED\u6301\u6709",
       "\u6682\u4E0D\u64CD\u4F5C",
@@ -195,7 +196,7 @@ var init_analysisPrompt = __esm({
   }
 });
 
-// src/services/ai/index.ts
+// genius-trader2.0/src/services/ai/index.ts
 var index_exports = {};
 __export(index_exports, {
   analyzePortfolio: () => analyzePortfolio6,
@@ -203,7 +204,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// src/services/ai/openai.ts
+// genius-trader2.0/src/services/ai/openai.ts
 async function chat(message, config) {
   const baseURL = config.baseURL || "https://api.openai.com/v1";
   const apiKey = config.apiKey || process.env.OPENAI_API_KEY || "";
@@ -257,7 +258,7 @@ async function analyzePortfolio(portfolioData, config) {
   }
 }
 
-// src/services/ai/deepseek.ts
+// genius-trader2.0/src/services/ai/deepseek.ts
 async function chat2(message, config) {
   const mergedConfig = {
     ...config,
@@ -277,7 +278,7 @@ async function analyzePortfolio2(portfolioData, config) {
   return analyzePortfolio(portfolioData, mergedConfig);
 }
 
-// src/services/ai/kimi.ts
+// genius-trader2.0/src/services/ai/kimi.ts
 async function chat3(message, config) {
   const apiKey = config.apiKey || process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "";
   const mergedConfig = {
@@ -299,7 +300,7 @@ async function analyzePortfolio3(portfolioData, config) {
   return analyzePortfolio(portfolioData, mergedConfig);
 }
 
-// src/services/ai/gemini.ts
+// genius-trader2.0/src/services/ai/gemini.ts
 async function chat4(message, config) {
   const apiKey = config.apiKey || process.env.GEMINI_API_KEY || "";
   const model = config.model || "gemini-2.5-pro";
@@ -371,7 +372,7 @@ async function analyzePortfolio4(portfolioData, config) {
   }
 }
 
-// src/services/ai/claude.ts
+// genius-trader2.0/src/services/ai/claude.ts
 async function chat5(message, config) {
   const apiKey = config.apiKey || process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY || "";
   const model = config.model || "claude-3-5-sonnet-latest";
@@ -443,7 +444,7 @@ async function analyzePortfolio5(portfolioData, config) {
   }
 }
 
-// src/services/ai/index.ts
+// genius-trader2.0/src/services/ai/index.ts
 async function chat6(message, config) {
   const provider = (config.provider || "OpenAI").toLowerCase();
   switch (provider) {

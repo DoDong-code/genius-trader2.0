@@ -679,7 +679,7 @@ Page({
     });
 
     try {
-      const data = await http.post('/api/ai/analyze', requestBody, { silent: true });
+      const data = await http.post('/api/ai/analyze', requestBody, { silent: true, timeout: 120000 });
       if (data && data.success && data.analysis) {
         const analysis = data.analysis;
         const activeAccountName = a.name || '默认账户';

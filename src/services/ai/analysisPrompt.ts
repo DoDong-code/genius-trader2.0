@@ -145,16 +145,17 @@ ${combination}
 4. 尊重账户自身策略，不得仅因某类占比高就机械建议增配债券/稳健资产；须结合整个组合与用户实际策略判断。
 5. 评估理由中的数字必须直接引用上方数据，严禁编造未提供的数字。
 
-【输出要求（极简）】
-- summary：今日总体判断，最多 3-4 句话，只说最重要的事。
-- operations：必须覆盖上方所有持仓基金，每只一条。action 必须从固定词表选取：${ACTION_VERBS.join(' / ')}；reason 最多 1-2 句话。
+【输出要求（极简，务必短，减少生成耗时）】
+- summary：今日总体判断，最多 3 句话，只说最重要的事，不要展开。
+- operations：必须覆盖上方所有持仓基金，每只一条。action 必须从固定词表选取：${ACTION_VERBS.join(' / ')}。
+- reason：限 1 句、≤ 15 个汉字的极短说明（例如“仓位过重，逢高减”“长期逻辑弱，择机退”），严禁写成多句长文。
 - 用基金真实 code 回填 fundCode。
 
 请严格按照以下 JSON 返回（纯 JSON，不要 markdown、不要 \`\`\`json\`\`\` 块、不要多余文字）：
 {
-  "summary": "今日总体操作判断（3-4句）",
+  "summary": "今日总体操作判断（3句以内）",
   "operations": [
-    { "fundCode": "基金代码", "action": "动作(固定词表)", "reason": "1-2句理由" }
+    { "fundCode": "基金代码", "action": "动作(固定词表)", "reason": "≤15字极短说明" }
   ]
 }
 （兼容字段 healthScore / riskScore / rebalanceSuggestion 一律返回 null，不要生成，也不参与任何操作建议。）

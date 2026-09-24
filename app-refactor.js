@@ -1057,11 +1057,15 @@
   let providerQrTimer = null;
 
   function providerApi(path, options) {
-    const headers = Object.assign({}, (options && options.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
-    // 统一 20s 超时：第三方慢/挂时必须有明确反馈，禁止无限等待（同步按钮「没反应」根因之一）
+    const opts = Object.assign({}, options);
+    // 默认 20s 超时；诊断类长请求可在 options.timeout 覆盖（毫秒），避免大账户长生成被前端误判为“请求超时”
+    const timeoutMs = (opts && Number.isFinite(Number(opts.timeout)) && Number(opts.timeout) > 0) ? Number(opts.timeout) : 20000;
+    delete opts.timeout;
+    const headers = Object.assign({}, (opts && opts.headers) || {}, window.auth && window.auth.authHeaders ? window.auth.authHeaders() : {});
+    // 第三方慢/挂时必须有明确反馈，禁止无限等待（同步按钮「没反应」根因之一）
     const controller = (typeof AbortController === 'function') ? new AbortController() : null;
-    const timer = controller ? window.setTimeout(() => controller.abort(), 20000) : null;
-    return fetch(path, Object.assign({}, options, { headers, signal: controller ? controller.signal : undefined }))
+    const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
+    return fetch(path, Object.assign({}, opts, { headers, signal: controller ? controller.signal : undefined }))
       .then(async res => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
@@ -2399,6 +2403,7 @@
 
     providerApi('/api/ai/analyze', {
       method: 'POST',
+      timeout: 120000,
       headers: {
         'Content-Type': 'application/json'
       },
