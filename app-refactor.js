@@ -889,7 +889,10 @@
           </div>
 
           <!-- AI 问答回答窗口 -->
-          <div id="ai-answer-window" style="display: none; background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 14px 16px; font-size: 13px; color: #1d1d1f; line-height: 1.7; box-shadow: 0 2px 10px rgba(0,0,0,0.03); white-space: pre-wrap; word-break: break-word;"></div>
+          <div id="ai-answer-window-wrapper" style="position: relative; display: none;">
+            <button id="close-ai-answer-btn" title="关闭回答" style="position: absolute; top: 6px; right: 6px; z-index: 10; width: 24px; height: 24px; border-radius: 50%; border: none; background: rgba(0,0,0,0.05); color: #666; font-size: 12px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s;">✕</button>
+            <div id="ai-answer-window" style="background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.08); border-radius: 12px; padding: 14px 34px 14px 16px; font-size: 13px; color: #1d1d1f; line-height: 1.7; box-shadow: 0 2px 10px rgba(0,0,0,0.03); white-space: pre-wrap; word-break: break-word;"></div>
+          </div>
 
           ${summary ? `
           <div style="background: rgba(0, 113, 227, 0.03); border-left: 4px solid #0071e3; padding: 14px 18px; border-radius: 8px; font-size: 13.5px; color: #1d1d1f; line-height: 1.6; margin-top: 12px;">
@@ -1517,19 +1520,31 @@
   }
 
   // 提问结果持久化：切换视图也不丢失，回来自动恢复（含进行中/完成/失败状态）
+  function aiChatStorageKey() {
+    const a = (typeof acct === 'function' && acct()) || {};
+    return 'LAST_AI_CHAT_' + (a.name || '默认账户');
+  }
   function saveAiChatState(state) {
     window.__aiChatState = state;
-    try { localStorage.setItem('LAST_AI_CHAT', JSON.stringify(state)); } catch (e) {}
+    try { localStorage.setItem(aiChatStorageKey(), JSON.stringify(state)); } catch (e) {}
   }
   function loadAiChatState() {
-    try { return JSON.parse(localStorage.getItem('LAST_AI_CHAT') || 'null'); } catch (e) { return null; }
+    try { return JSON.parse(localStorage.getItem(aiChatStorageKey()) || 'null'); } catch (e) { return null; }
+  }
+  function clearAiAnswerWindow() {
+    saveAiChatState(null);
+    const wrapper = document.querySelector('#ai-answer-window-wrapper');
+    const box = document.querySelector('#ai-answer-window');
+    if (wrapper) wrapper.style.display = 'none';
+    if (box) box.textContent = '';
   }
   function restoreAiAnswerWindow() {
+    const wrapper = document.querySelector('#ai-answer-window-wrapper');
     const box = document.querySelector('#ai-answer-window');
-    if (!box) return;
+    if (!wrapper || !box) return;
     const st = loadAiChatState();
     if (!st) return;
-    box.style.display = 'block';
+    wrapper.style.display = 'block';
     if (st.status === 'loading') box.textContent = st.reply || 'AI 正在思考，请稍候…';
     else if (st.status === 'done') box.textContent = st.reply || 'AI 未返回有效回答';
     else if (st.status === 'error') box.textContent = st.reply || '回答生成失败';
@@ -1537,16 +1552,17 @@
   // AI 问答回答窗口：根据上方提问生成答案（输入“复盘”触发复盘分析）
   function askAiQuestion(question, submitBtn) {
     const a = acct();
+    const answerWrapper = document.querySelector('#ai-answer-window-wrapper');
     const answerBox = document.querySelector('#ai-answer-window');
     const nowStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    // 新提问时清除旧回答显示，避免切换账户后仍看到上一个账户的历史回答
+    clearAiAnswerWindow();
     // P3.18：本地引擎模式 —— 提问也走本地（不调用外部 AI）
     if (localStorage.getItem('AI_ENGINE') === 'local') {
       const localReply = '本地引擎模式：当前未配置外部 AI 接口。请基于上方「今日操作建议」与持仓数据自行判断。';
       saveAiChatState({ status: 'done', reply: localReply, question: question || '', time: nowStr });
-      if (answerBox) {
-        answerBox.style.display = 'block';
-        answerBox.textContent = localReply;
-      }
+      if (answerWrapper) answerWrapper.style.display = 'block';
+      if (answerBox) answerBox.textContent = localReply;
       if (typeof window.showToast === 'function') showToast('本地引擎模式：不调用外部 AI', 'success');
       return;
     }
@@ -1558,10 +1574,8 @@
       submitBtn.textContent = '思考中…';
     }
     saveAiChatState({ status: 'loading', reply: 'AI 正在思考，请稍候…', question: question || '', time: nowStr });
-    if (answerBox) {
-      answerBox.style.display = 'block';
-      answerBox.textContent = 'AI 正在思考，请稍候…';
-    }
+    if (answerWrapper) answerWrapper.style.display = 'block';
+    if (answerBox) answerBox.textContent = 'AI 正在思考，请稍候…';
 
     const holdings = effectiveFundsOf(a).map(f => ({
       name: f.name,
@@ -1611,19 +1625,17 @@
         saveAiChatState({ status: 'done', reply: data.reply || 'AI 未返回有效回答', question: question || '', time: nowStr });
         const newHistory = historyArr.concat([{ q: question, a: data.reply || '' }]).slice(-4);
         try { localStorage.setItem('LAST_AI_HISTORY_' + historyKey, JSON.stringify(newHistory)); } catch (e) {}
+        const freshWrapper = document.querySelector('#ai-answer-window-wrapper');
         const freshBox = document.querySelector('#ai-answer-window');
-        if (freshBox) {
-          freshBox.style.display = 'block';
-          freshBox.textContent = data.reply || 'AI 未返回有效回答';
-        }
+        if (freshWrapper) freshWrapper.style.display = 'block';
+        if (freshBox) freshBox.textContent = data.reply || 'AI 未返回有效回答';
         if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; submitBtn.style.pointerEvents = ''; submitBtn.textContent = '提问'; }
       } catch (err) {
         saveAiChatState({ status: 'error', reply: `回答生成失败：${err.message || '网络错误'}`, question: question || '', time: nowStr });
+        const freshWrapper = document.querySelector('#ai-answer-window-wrapper');
         const freshBox = document.querySelector('#ai-answer-window');
-        if (freshBox) {
-          freshBox.style.display = 'block';
-          freshBox.textContent = `回答生成失败：${err.message || '网络错误'}`;
-        }
+        if (freshWrapper) freshWrapper.style.display = 'block';
+        if (freshBox) freshBox.textContent = `回答生成失败：${err.message || '网络错误'}`;
         if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; submitBtn.style.pointerEvents = ''; submitBtn.textContent = '提问'; }
       }
     })();
@@ -2353,6 +2365,8 @@
   function runAiDiagnostics(userQuery) {
     const a = acct();
     if (!a) return;
+    // 新诊断/调仓时清除上一个账户/上一次问答的历史回答，避免与当前账户诊断结果并列显示
+    clearAiAnswerWindow();
 
     // 2. Build the portfolio payload to send to the real AI engine
     const portfolioData = {
@@ -2646,11 +2660,13 @@
       window.lastAIUserQuestion = '';
       try { localStorage.removeItem('LAST_AI_HISTORY_' + (acct() && acct().name || '默认账户')); } catch (e) {}
       runAiDiagnostics('');
-      const answerBox = document.querySelector('#ai-answer-window');
-      if (answerBox) {
-        answerBox.style.display = 'none';
-        answerBox.textContent = '';
-      }
+      clearAiAnswerWindow();
+      return;
+    }
+
+    const closeAiAnswerBtn = e.target.closest('#close-ai-answer-btn');
+    if (closeAiAnswerBtn) {
+      clearAiAnswerWindow();
       return;
     }
 
