@@ -425,6 +425,8 @@ Page({
       hasAi: Boolean(aiResult),
       summary: aiResult && aiResult.summary ? aiResult.summary : null,
       rows,
+      // 仅含今日需要操作的基金（actionType 为 hold 表示持有/观望/不操作，过滤掉）
+      actionRows: rows.filter(r => r.actionType !== 'hold'),
       aiResult
     };
   },

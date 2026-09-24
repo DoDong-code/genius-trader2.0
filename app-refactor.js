@@ -725,6 +725,9 @@
     } = report;
     const aiResult = report.aiResult;
 
+    // 仅展示今日需要操作的基金（actionType 为 hold 表示持有/观望/不操作，过滤掉）
+    const actionRows = rows.filter(r => r.actionType !== 'hold');
+
     const activeAccountName = a.name || '默认账户';
     const isLocalEngine = localStorage.getItem('AI_ENGINE') === 'local';
     let cachedTime = '';
@@ -915,6 +918,11 @@
               <span style="font-size: 32px; display: block; margin-bottom: 12px;">📈</span>
               <span>当前暂无任何持仓基金。请在“持仓列表”中添加您的第一支基金，即可获得今日诊断及操作建议！</span>
             </div>
+          ` : actionRows.length === 0 ? `
+            <div style="padding: 40px 10px; text-align: center; color: #86868b;">
+              <span style="font-size: 32px; display: block; margin-bottom: 12px;">✅</span>
+              <span>今日无需要操作的基金，其余基金均为持有 / 观望，暂无需操作。</span>
+            </div>
           ` : `
             <!-- Desktop Table View -->
             <div class="analysis-table-wrapper" style="width: 100%; overflow-x: auto;">
@@ -929,7 +937,7 @@
                   </tr>
                 </thead>
                 <tbody>
-                  ${rows.map(row => {
+                  ${actionRows.map(row => {
                     const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, todayAmount, adviceText, adviceColor, adviceBg, adviceReason } = row;
                     return `
                       <tr style="border-bottom: 1px solid rgba(0,0,0,0.05); transition: background 0.15s;">
@@ -968,7 +976,7 @@
 
             <!-- Mobile Cards View (Hidden on desktop, visible on mobile) -->
             <div class="analysis-cards" style="display: none; flex-direction: column; gap: 16px;">
-              ${rows.map(row => {
+              ${actionRows.map(row => {
                 const { name: fundName, code: fundCode, cat, amount: fundAmount, currentPct, todayRate, isTodayPositive, todayAmount, adviceText, adviceColor, adviceBg, adviceReason } = row;
                 return `
                   <div style="background: #f5f5f7; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; border: 1px solid rgba(0,0,0,0.03);">

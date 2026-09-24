@@ -439,8 +439,15 @@ async function handleFundApi(request, response, url) {
         const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
         let portfolio;
         try {
-          // DeepSeek 内部分析：继续使用当前登录用户自己的活动账户
-          portfolio = await buildAnalysisPortfolio(userId, { useActive: true });
+          // 修复账户错配：优先采用前端当前选中的账户名（body.portfolio.account），
+          // 避免「前端选中默认账户(5万+)，AI 却分析了另一只账户」的错配。
+          // 后端 state.active 与前端的 s.getActive() 解析可能不一致，不再信任 useActive 单点。
+          const reqAccount = (body && body.portfolio && body.portfolio.account) || null;
+          portfolio = await buildAnalysisPortfolio(userId, reqAccount ? { account: reqAccount } : { useActive: true });
+          // 显式账户未匹配到（name 不一致等边缘情况）时回退 useActive，保证分析不中断
+          if (reqAccount && (!portfolio || !portfolio.account)) {
+            portfolio = await buildAnalysisPortfolio(userId, { useActive: true });
+          }
         } catch (err) {
           // 兜底：使用客户端提供的结构，不破坏现有功能
           portfolio = body.portfolio;

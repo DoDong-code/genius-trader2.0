@@ -82,8 +82,8 @@
       <text class="block-title">持仓分析</text>
     </view>
 
-    <view class="fund-advice-list" wx:if="{{report && report.rows.length > 0}}">
-      <block wx:for="{{report.rows}}" wx:key="code">
+    <view class="fund-advice-list" wx:if="{{report && report.actionRows.length > 0}}">
+      <block wx:for="{{report.actionRows}}" wx:key="code">
         <view class="fund-advice-item">
           <view class="advice-card-header">
             <view class="fund-meta-left">
@@ -128,6 +128,10 @@
       </block>
     </view>
 
+    <view class="empty-container" wx:elif="{{report && report.rows.length > 0}}">
+      <view class="empty-icon">✅</view>
+      <text class="empty-text">今日无需要操作的基金，其余基金均为持有 / 观望</text>
+    </view>
     <view class="empty-container" wx:else>
       <view class="empty-icon">📈</view>
       <text class="empty-text">当前账户无持仓，没有可生成的交易建议</text>
