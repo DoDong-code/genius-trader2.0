@@ -66,7 +66,11 @@ export async function chat(message: string, config: AIConfig): Promise<string> {
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
+    const status = response.status;
+    const code = errorData?.error?.code || errorData?.error?.type || '';
+    const message = errorData?.error?.message || `HTTP error! status: ${status}`;
+    // 把状态码和错误码拼进 message，方便前端精确诊断（quota/rate_limit/invalid_request 等）
+    throw new Error(`[${status}${code ? ` ${code}` : ''}] ${message}`);
   }
 
   const data = await response.json();

@@ -24,7 +24,7 @@ var __copyProps = (to, from, except, desc) => {
 };
 var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// genius-trader2.0/src/services/ai/analysisPrompt.ts
+// src/services/ai/analysisPrompt.ts
 var analysisPrompt_exports = {};
 __export(analysisPrompt_exports, {
   ACTION_VERBS: () => ACTION_VERBS,
@@ -181,7 +181,7 @@ async function analyzeWithPrompt(portfolioData, config, chatImpl) {
 }
 var ACTION_VERBS;
 var init_analysisPrompt = __esm({
-  "genius-trader2.0/src/services/ai/analysisPrompt.ts"() {
+  "src/services/ai/analysisPrompt.ts"() {
     ACTION_VERBS = [
       "\u7EE7\u7EED\u6301\u6709",
       "\u6682\u4E0D\u64CD\u4F5C",
@@ -196,7 +196,7 @@ var init_analysisPrompt = __esm({
   }
 });
 
-// genius-trader2.0/src/services/ai/index.ts
+// src/services/ai/index.ts
 var index_exports = {};
 __export(index_exports, {
   analyzePortfolio: () => analyzePortfolio6,
@@ -204,7 +204,7 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
-// genius-trader2.0/src/services/ai/openai.ts
+// src/services/ai/openai.ts
 async function chat(message, config) {
   const baseURL = config.baseURL || "https://api.openai.com/v1";
   const apiKey = config.apiKey || process.env.OPENAI_API_KEY || "";
@@ -231,7 +231,10 @@ async function chat(message, config) {
   clearTimeout(timer);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
+    const status = response.status;
+    const code = errorData?.error?.code || errorData?.error?.type || "";
+    const message2 = errorData?.error?.message || `HTTP error! status: ${status}`;
+    throw new Error(`[${status}${code ? ` ${code}` : ""}] ${message2}`);
   }
   const data = await response.json();
   return data?.choices?.[0]?.message?.content || "";
@@ -262,7 +265,7 @@ async function analyzePortfolio(portfolioData, config) {
   }
 }
 
-// genius-trader2.0/src/services/ai/deepseek.ts
+// src/services/ai/deepseek.ts
 async function chat2(message, config) {
   const mergedConfig = {
     ...config,
@@ -282,7 +285,7 @@ async function analyzePortfolio2(portfolioData, config) {
   return analyzePortfolio(portfolioData, mergedConfig);
 }
 
-// genius-trader2.0/src/services/ai/kimi.ts
+// src/services/ai/kimi.ts
 async function chat3(message, config) {
   const apiKey = config.apiKey || process.env.KIMI_API_KEY || process.env.MOONSHOT_API_KEY || "";
   const mergedConfig = {
@@ -304,7 +307,7 @@ async function analyzePortfolio3(portfolioData, config) {
   return analyzePortfolio(portfolioData, mergedConfig);
 }
 
-// genius-trader2.0/src/services/ai/gemini.ts
+// src/services/ai/gemini.ts
 async function chat4(message, config) {
   const apiKey = config.apiKey || process.env.GEMINI_API_KEY || "";
   const model = config.model || "gemini-2.5-pro";
@@ -376,7 +379,7 @@ async function analyzePortfolio4(portfolioData, config) {
   }
 }
 
-// genius-trader2.0/src/services/ai/claude.ts
+// src/services/ai/claude.ts
 async function chat5(message, config) {
   const apiKey = config.apiKey || process.env.CLAUDE_API_KEY || process.env.ANTHROPIC_API_KEY || "";
   const model = config.model || "claude-3-5-sonnet-latest";
@@ -448,7 +451,7 @@ async function analyzePortfolio5(portfolioData, config) {
   }
 }
 
-// genius-trader2.0/src/services/ai/index.ts
+// src/services/ai/index.ts
 async function chat6(message, config) {
   const provider = (config.provider || "OpenAI").toLowerCase();
   switch (provider) {

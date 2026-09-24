@@ -2430,7 +2430,9 @@
       if (err && err.name === 'AbortError' || lowerMsg.includes('abort') || lowerMsg.includes('timeout') || lowerMsg.includes('the operation was aborted')) {
         errMsg = `${providerName} 请求超时。当前诊断账户持仓较多，模型生成需要更长时间，请稍后重试。`;
       } else if (lowerMsg.includes('quota') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('rate_limit') || lowerMsg.includes('limit') || lowerMsg.includes('exceeded') || lowerMsg.includes('insufficient_quota')) {
-        errMsg = `${providerName} API 额度已用尽或触发限频。\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商，或配置您自己高配额的 API Key；\n3. 如使用 Google AI Studio，可开启随现随付（Pay-as-you-go）方案。`;
+        // 保留后端原始错误详情（HTTP 状态码 / 错误码 / 服务商返回 message），便于区分 quota/rate_limit/invalid_key
+        const raw = err && err.message ? err.message : '';
+        errMsg = `${providerName} API 额度已用尽或触发限频。\n原始错误：${raw}\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商，或配置您自己高配额的 API Key；\n3. 如使用 Google AI Studio，可开启随现随付（Pay-as-you-go）方案。`;
       }
       alert(`AI 诊断分析失败:\n${errMsg}\n\n系统将继续使用内置规则计算引擎提供基础版偏离度调仓操作建议。`);
     })
