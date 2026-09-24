@@ -2424,9 +2424,13 @@
     })
     .catch(err => {
       console.error('AI Analysis failed:', err);
-      let errMsg = err.message;
-      if (errMsg.toLowerCase().includes('quota') || errMsg.toLowerCase().includes('resource_exhausted') || errMsg.toLowerCase().includes('rate_limit') || errMsg.toLowerCase().includes('limit')) {
-        errMsg = `Gemini/AI API 额度已用尽（Resource Exhausted）或触发限频。\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商（如 Kimi、DeepSeek、OpenAI）或配置您自己高配额的 API Key；\n3. 如果是在 Google AI Studio 调试，可以考虑为您的 API Key 开启随现随付（Pay-as-you-go）方案。`;
+      const lowerMsg = (err && err.message || '').toLowerCase();
+      const providerName = (aiProvider || 'AI').trim();
+      let errMsg = err && err.message ? err.message : '未知错误';
+      if (err && err.name === 'AbortError' || lowerMsg.includes('abort') || lowerMsg.includes('timeout') || lowerMsg.includes('the operation was aborted')) {
+        errMsg = `${providerName} 请求超时。当前诊断账户持仓较多，模型生成需要更长时间，请稍后重试。`;
+      } else if (lowerMsg.includes('quota') || lowerMsg.includes('resource_exhausted') || lowerMsg.includes('rate_limit') || lowerMsg.includes('limit') || lowerMsg.includes('exceeded') || lowerMsg.includes('insufficient_quota')) {
+        errMsg = `${providerName} API 额度已用尽或触发限频。\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商，或配置您自己高配额的 API Key；\n3. 如使用 Google AI Studio，可开启随现随付（Pay-as-you-go）方案。`;
       }
       alert(`AI 诊断分析失败:\n${errMsg}\n\n系统将继续使用内置规则计算引擎提供基础版偏离度调仓操作建议。`);
     })

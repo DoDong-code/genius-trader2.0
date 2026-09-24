@@ -42,6 +42,10 @@ export async function chat(message: string, config: AIConfig): Promise<string> {
     throw new Error('未配置 OpenAI API Key，请检查环境变量或临时输入');
   }
 
+  // 服务端超时：前端给诊断 120s，服务端最多等 110s，避免 Render 网关/长连接先断开导致错误信息丢失
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 110000);
+
   const response = await fetch(`${baseURL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -54,8 +58,11 @@ export async function chat(message: string, config: AIConfig): Promise<string> {
         { role: 'user', content: message }
       ],
       temperature: 0.7
-    })
+    }),
+    signal: controller.signal
   });
+
+  clearTimeout(timer);
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

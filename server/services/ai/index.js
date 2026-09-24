@@ -211,6 +211,8 @@ async function chat(message, config) {
   if (!apiKey) {
     throw new Error("\u672A\u914D\u7F6E OpenAI API Key\uFF0C\u8BF7\u68C0\u67E5\u73AF\u5883\u53D8\u91CF\u6216\u4E34\u65F6\u8F93\u5165");
   }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 11e4);
   const response = await fetch(`${baseURL}/chat/completions`, {
     method: "POST",
     headers: {
@@ -223,8 +225,10 @@ async function chat(message, config) {
         { role: "user", content: message }
       ],
       temperature: 0.7
-    })
+    }),
+    signal: controller.signal
   });
+  clearTimeout(timer);
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(errorData?.error?.message || `HTTP error! status: ${response.status}`);
