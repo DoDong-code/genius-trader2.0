@@ -24,6 +24,28 @@
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------
+-- 【步骤 0 核查结论 · 2026-10-09 已执行（仅只读，无任何写入）】Neon production / neondb
+--   fund_nav.nav          = real (precision 24)
+--   fund_nav.acc_nav      = real (precision 24)
+--   fund_holdings.weight  = real (precision 24)
+--   suspect_rows: fund_nav = 0，fund_holdings = 0
+--   → 结论：三列均非 integer，且无越界脏行 ⇒ 步骤 1（ALTER）/ 步骤 2（DELETE）
+--     在当前 Neon 库上【均无需执行】。
+--
+--   那日志里的 `value "3735971251" is out of range for type integer` 从哪来？
+--   代码链路：weekly-history → syncWeeklyHistory() → importFund()
+--            → 仅写 fund_nav.nav/acc_nav 与 fund_holdings.weight（navSyncService.js:130/165）
+--   Neon 这三列是 real，不可能报 integer 越界 ⇒ 报错只能来自尚未迁移的
+--   Render PostgreSQL（其 nav 列极可能为 integer，历史净值被静默取整）。
+--
+-- ⚠️ 本文件保留用途：D.2 从 Render 导入 Neon 之后复查。
+--    若 pg_restore 连同 schema 一起导入，会把 Render 的 integer 列类型带进 Neon
+--    （REAL 退化为 INTEGER）⇒ 导入后请重跑步骤 0；若结果为 integer 再执行步骤 1。
+--    建议导入用 pg_restore --data-only，让 Neon 保留 ensureCloudSchema 建立的 real 列。
+--    （代码侧解析层过滤 + importFund 数值防火墙已堵住 37 亿级脏值再次入库。）
+-- ----------------------------------------------------------------------------
+
+-- ----------------------------------------------------------------------------
 -- 步骤 0（只读）：核查 fund_nav / fund_holdings 的实际列类型与越界行数
 -- ----------------------------------------------------------------------------
 -- 在任何写入之前，先确认生产库真实 schema。重点列：
