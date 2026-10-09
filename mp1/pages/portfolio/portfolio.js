@@ -97,9 +97,10 @@ Page({
     // 账户 tab 布局状态：tab 总长超过 2/3 屏宽时为 true（单独一行），否则与时间组同一行（纯 UI 布局，非业务逻辑）
     accountTabFullRow: false,
 
-    // 数据源切换（与网页端 estimate_source_<account> 对齐：local / yjb / xbyj）
-    estimateSource: 'local',
-    estimateSourceLabel: '本地估算',
+    // 数据源切换（与网页端 estimate_source_<account> 对齐：auto / local / yjb / xbyj）
+    // 默认 auto：后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，优先已连接第三方、不锁定单一慢源
+    estimateSource: 'auto',
+    estimateSourceLabel: '自动(优先第三方)',
 
     // Sorting state machine
     sortState: 'default',
@@ -242,6 +243,7 @@ Page({
       wx.hideLoading();
       this.setData({ pullRefreshing: false });
       this._pullRefreshing = false;
+      try { wx.stopPullDownRefresh(); } catch (e) { /* 页面级下拉不存在时忽略 */ }
     };
     Promise.resolve(this.refreshEstimatesBySource(source, { force: true, showLoading: false, toast: false }))
       .then(res => {
@@ -455,7 +457,7 @@ Page({
     let estimateSource = this.data.estimateSource;
     try {
       const saved = wx.getStorageSync(`genius-mp-estimate-source-${activeAccountName}`);
-      if (saved && ['local', 'yjb', 'xbyj'].includes(saved)) estimateSource = saved;
+      if (saved && ['local', 'yjb', 'xbyj', 'auto'].includes(saved)) estimateSource = saved;
     } catch (e) { /* ignore */ }
 
     let totalAssets = 0;
@@ -503,7 +505,7 @@ Page({
     this.setData({ holdingsCount: funds.length });
     this.buildAccountTabs(); // 先构建 tab，保证 selectedAccountTab 与 tabs 一致
 
-    const estimateSourceLabel = estimateSource === 'yjb' ? '养基宝' : estimateSource === 'xbyj' ? '小倍' : '本地估算';
+    const estimateSourceLabel = estimateSource === 'yjb' ? '养基宝' : estimateSource === 'xbyj' ? '小倍' : estimateSource === 'auto' ? '自动(优先第三方)' : '本地估算';
 
     this.setData({
       activeAccountName,
@@ -573,14 +575,14 @@ Page({
     this.refreshData();
   },
 
-  // 顶部右侧「数据源」切换：弹出菜单式（与网页版一致），不再循环切换
-  onSwitchEstimateSource() {
-    const status = app.globalData.providerStatus || {};
-    // 仅展示已登录的来源；本地永远可用
-    const items = [{ key: 'local', label: '本地估算' }];
-    if (status.yjbConnected) items.push({ key: 'yjb', label: '养基宝' });
-    if (status.xbyjConnected) items.push({ key: 'xbyj', label: '小倍' });
-    const itemList = items.map(i => `${i.label}${i.key === this.data.estimateSource ? ' ✓' : ''}`);
+    // 顶部右侧「数据源」切换：弹出菜单式（与网页版一致），不再循环切换
+    onSwitchEstimateSource() {
+      const status = app.globalData.providerStatus || {};
+      // 仅展示已登录的来源；本地永远可用；auto 为默认（后端并行优先第三方）
+      const items = [{ key: 'auto', label: '自动(优先第三方)' }, { key: 'local', label: '本地估算' }];
+      if (status.yjbConnected) items.push({ key: 'yjb', label: '养基宝' });
+      if (status.xbyjConnected) items.push({ key: 'xbyj', label: '小倍' });
+      const itemList = items.map(i => `${i.label}${i.key === this.data.estimateSource ? ' ✓' : ''}`);
     // 二次验收修复：wx.showActionSheet 自带底部「取消」，不再手动往 itemList 塞「取消」（曾出现两个取消）
     wx.showActionSheet({
       itemList,
@@ -691,6 +693,8 @@ Page({
         });
       }
       resolveFn({ source, total, updated, failed, providerHits });
+      // 结构化日志：区分来源、命中、失败、provider 实际命中数（不记录任何 token/key）
+      console.log(`[estimate][mp] source=${source} total=${total} updated=${updated} failed=${failed} providerHits=${providerHits}`);
       // 用户在本次刷新「进行中」切换了数据源（并发保护会丢弃那次切换）→ 立即按新源补拉一次，
       // 否则会出现「切了源但数字不变化」
       const pendingSource = this._pendingSource;
@@ -717,9 +721,16 @@ Page({
         active += 1;
         const amount = Number(f.amount) || 0;
         // force=1：手动刷新 / 切源时绕过服务端 fund_code 单 key 缓存，避免返回旧 source 的估值
-        const url = `/api/fund/${encodeURIComponent(f.code)}/estimate?amount=${amount}`
-          + (source === 'local' ? '&mode=local' : `&mode=provider&source=${encodeURIComponent(source)}`)
-          + (force ? '&force=1' : '');
+        // auto：不传 mode，后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，最快返回有效估值
+        let modeParam;
+        if (source === 'auto') {
+          modeParam = '';
+        } else if (source === 'local') {
+          modeParam = '&mode=local';
+        } else {
+          modeParam = `&mode=provider&source=${encodeURIComponent(source)}`;
+        }
+        const url = `/api/fund/${encodeURIComponent(f.code)}/estimate?amount=${amount}${modeParam}${force ? '&force=1' : ''}`;
         http.get(url, null, { silent: true })
           .then(res => {
             const est = (res && (res.estimate || res)) || {};

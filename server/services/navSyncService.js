@@ -168,10 +168,63 @@ async function syncQuarterlyHoldings(options = {}) {
   return results;
 }
 
+/**
+ * 一次性历史缺口审计（只读，不写库）：返回每只基金「最近 windowDays 个交易日」内的缺失日期。
+ * 与 detectNavGaps 的区别：本函数允许 windowDays 超过 scheduled 的 120 天上限，用于排查长周期历史断层。
+ * 不记录任何 API Key / Token / Cookie。
+ */
+async function auditNavGaps(options = {}) {
+  const windowDays = Math.max(Number(options.windowDays) || 250, 10);
+  const funds = await listFunds();
+  const gaps = [];
+  for (const fund of funds) {
+    const code = fund.fund_code;
+    const expected = buildExpectedTradingWindow(windowDays, fund);
+    if (!expected.length) continue;
+    const rows = await dbAsync.all(
+      'SELECT date FROM fund_nav WHERE fund_code = ? AND date >= ? ORDER BY date ASC',
+      [code, expected[0]]
+    );
+    const have = new Set(rows.map(r => String(r.date)));
+    const missing = expected.filter(d => !have.has(d));
+    if (missing.length) {
+      gaps.push({
+        fund_code: code,
+        fund_name: fund.fund_name,
+        missingDates: missing,
+        missingCount: missing.length,
+        range: missing[0] + ' ~ ' + missing[missing.length - 1]
+      });
+    }
+  }
+  return gaps;
+}
+
+/**
+ * 幂等历史回填：对审计出的缺口基金调用 importFund（增量补齐，ON CONFLICT 不覆盖已有正确数据，不虚构净值）。
+ * 仅补全基金实际交易日内、且第三方数据源能提供的历史净值；第三方无法提供的更早历史会如实报告，绝不伪造。
+ */
+async function backfillNavGaps(options = {}) {
+  const gaps = await auditNavGaps(options);
+  if (!gaps.length) return { gaps: 0, filled: [] };
+  const concurrency = Math.min(Math.max(Number(options.concurrency) || 2, 1), 4);
+  const filled = await mapLimit(gaps, concurrency, async (gap) => {
+    try {
+      const result = await importFund(gap.fund_code, {});
+      return { fund_code: gap.fund_code, missingDates: gap.missingDates, records: result.records, inserted: result.inserted };
+    } catch (err) {
+      return { fund_code: gap.fund_code, missingDates: gap.missingDates, error: err && err.message ? err.message : String(err) };
+    }
+  });
+  return { gaps: gaps.length, filled };
+}
+
 module.exports = {
   syncTodayNavs,
   syncWeeklyHistory,
   detectNavGaps,
+  auditNavGaps,
+  backfillNavGaps,
   buildExpectedTradingWindow,
   syncQuarterlyHoldings,
   currentQuarterStart

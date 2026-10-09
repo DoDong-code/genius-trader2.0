@@ -454,14 +454,20 @@
       });
   }
 
-  // 每只基金每个页面会话只兜底一次：避免 20 分钟轮询反复触发重量级同步（爆内存风险）
+  // 每只基金每个账户每个页面会话只兜底一次：按「账户|基金」去重，避免跨账户串用、也避免 20 分钟轮询反复触发重量级同步
   var navDeepDone = {};
+
+  function navDeepKey(code) {
+    var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
+    return accountName + '|' + String(code);
+  }
 
   // 兜底链路：与详情抽屉同源 —— refreshFund(code, true) 走 ?refresh=1&fast=1 全量快照，
   // 自带 404 → /api/fund/import/:code → 重试，因此未导入的基金也能拿到 latest_nav。
   function applySnapshotNav(code) {
-    if (navDeepDone[code]) return Promise.resolve(false);
-    navDeepDone[code] = true;
+    var key = navDeepKey(code);
+    if (navDeepDone[key]) return Promise.resolve(false);
+    navDeepDone[key] = true;
     if (typeof window.refreshFund !== 'function') return Promise.resolve(false);
     return window.refreshFund(code, true).then(function (res) {
       if (!res || res.success === false) return false;
@@ -475,7 +481,7 @@
 
   function deepFallback(codes, enabled) {
     if (!enabled || !codes.length) return Promise.resolve();
-    var queue = codes.filter(function (code) { return !navDeepDone[code]; });
+    var queue = codes.filter(function (code) { return !navDeepDone[navDeepKey(code)]; });
     function drainDeep() {
       if (!queue.length) return Promise.resolve();
       return Promise.all(queue.splice(0, MAX_CONCURRENT).map(applySnapshotNav)).then(drainDeep);
@@ -636,7 +642,10 @@
   function estimateFund(code, amount, force) {
     var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
     var source = preferredEstimateSource();
-    if (source === 'local') {
+    if (source === 'auto') {
+      // 自动模式：不传 mode，后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，最快返回有效估值
+      // 不锁定单一数据源，避免一个慢源拖住整体估值显示
+    } else if (source === 'local') {
       endpoint += '&mode=local';
     } else if (typeof window.getProviderStatus === 'function') {
       var available = window.getProviderStatus();
@@ -648,15 +657,22 @@
     } else {
       endpoint += '&mode=provider&source=' + encodeURIComponent(source);
     }
-    return requestJson(endpoint);
+    var t0 = Date.now();
+    return requestJson(endpoint).then(function (res) {
+      var actual = res && (res.data_source_actual || res.source || res.estimate_source);
+      var hasEst = !!(res && res.estimate_change !== undefined && res.estimate_change !== null);
+      console.log('[estimate][web] code=' + code + ' reqSource=' + source + ' actual=' + actual + ' hit=' + hasEst + ' latency=' + (Date.now() - t0) + 'ms');
+      return res;
+    });
   }
 
   function preferredEstimateSource() {
     var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
     try {
-      return localStorage.getItem('estimate_source_' + accountName) || 'local';
+      // 默认 'auto'：后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，优先已连接第三方、不锁定单一慢源
+      return localStorage.getItem('estimate_source_' + accountName) || 'auto';
     } catch (err) {
-      return 'local';
+      return 'auto';
     }
   }
 

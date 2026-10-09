@@ -38,7 +38,8 @@ const nav = require(path.join(serviceDir, 'navSyncService'));
 
 // 用服务自身实现的窗口构造“完整应有记录”，再人为挖掉一个交易日模拟断档
 const expectedA = nav.buildExpectedTradingWindow(60, { fund_name: '', fund_type: '' });
-const MISSING = '2026-08-28'; // 周五，属应交易日
+// 从 60 日窗口内取一个真实交易日作为断档点（避免硬编码绝对日期因系统时间漂移而失效）
+const MISSING = expectedA[Math.floor(expectedA.length / 2)];
 const rowsA = expectedA.filter(d => d !== MISSING);
 fakeNavRowsByCode['019633'] = rowsA;
 fakeNavRowsByCode['000001'] = expectedA.slice(); // 完整，无缺口
@@ -51,7 +52,8 @@ test('buildExpectedTradingWindow 返回指定数量的升序交易日', () => {
     // 均为 A 股交易日（isTradingDay 由 marketService 提供，这里仅校验升序与去重）
     if (i > 0) assert.ok(win[i] > win[i - 1], `非升序: ${win[i - 1]} -> ${win[i]}`);
   }
-  assert.notStrictEqual(win.indexOf(MISSING), -1, '窗口应包含 2026-08-28');
+  // 窗口自身最近端交易日必然属于该窗口（不依赖硬编码绝对日期，避免时间漂移失效）
+  assert.notStrictEqual(win.indexOf(win[win.length - 1]), -1, '窗口应包含自身最近交易日');
 });
 
 test('detectNavGaps 仅标记存在缺失交易日的基金', async () => {

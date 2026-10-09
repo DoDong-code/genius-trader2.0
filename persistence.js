@@ -701,20 +701,32 @@
   }
   window.estimateFund = estimateFund;
 
+  // 合并多次刷新触发的重渲染：每个动画帧最多渲染一次，避免 N 只基金并发刷新时 O(N^2) 重绘抖动
+  let _renderScheduled = false;
+  function scheduleRender() {
+    if (_renderScheduled) return;
+    _renderScheduled = true;
+    const raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame : setTimeout;
+    raf(function() {
+      _renderScheduled = false;
+      if (typeof window.renderRowsFromStore === 'function') window.renderRowsFromStore();
+    });
+  }
+
   // Unified Fund Data Service
   window.fundDataService = {
     refresh: function(code, force, options) {
       options = options || {};
       const estimateOnly = options.estimateOnly === true;
       console.log('[DATA][REQUEST] code=' + code + ' force=' + !!force + ' estimateOnly=' + estimateOnly);
-      
+
       const fund = window.fundStore.get(code);
-      
+
       // Update statuses to LOADING or REFRESHING
       const isNavReady = fund.nav && fund.nav.status === 'READY';
       const isEstReady = fund.estimate && fund.estimate.status === 'READY';
       const isProfitReady = fund.todayProfit && fund.todayProfit.status === 'READY';
-      
+
       const updateData = {
         estimate: { status: isEstReady ? 'REFRESHING' : 'LOADING' },
         todayProfit: { status: isProfitReady ? 'REFRESHING' : 'LOADING' }
@@ -722,46 +734,55 @@
       if (!estimateOnly) {
         updateData.nav = { status: isNavReady ? 'REFRESHING' : 'LOADING' };
       }
-      
       window.fundStore.update(code, updateData);
-      
+
       var state = window.portfolioState;
       var account = state && state.accounts && state.accounts[state.getActive()];
       var currentFundObj = account && account.funds && account.funds.find(function(f) { return String(f.code) === String(code); });
       var amount = currentFundObj ? (Number(currentFundObj.amount) || 0) : 0;
-      
-      return Promise.allSettled([
-        estimateOnly ? Promise.resolve(null) : refreshFund(code, force),
-        estimateFund(code, amount, force)
-      ]).then(function(results) {
-        const snapshotRes = results[0].status === 'fulfilled' ? results[0].value : null;
-        const estimateRes = results[1].status === 'fulfilled' ? results[1].value : null;
-        
-        console.log('[DATA][SUCCESS] code=' + code + ' source=' + (estimateRes && (estimateRes.source || estimateRes.estimate_source) || 'local'));
-        
-        const mergedData = {
-          snapshot: snapshotRes,
-          estimate: estimateRes
-        };
-        
-        window.mergeFundData(code, mergedData);
-        return window.fundStore.get(code);
+
+      // 版本守卫：同一基金并发多次刷新时，慢响应不得覆盖更快更新的有效响应
+      if (!window.__fundRefreshVersion) window.__fundRefreshVersion = {};
+      const version = (window.__fundRefreshVersion[code] = (window.__fundRefreshVersion[code] || 0) + 1);
+      const startedAt = Date.now();
+
+      // 估值与快照彻底解耦：估值一旦有效立即合并并渲染，不等待慢速快照/历史导入完成
+      const estimateP = estimateFund(code, amount, force).then(function(estimateRes) {
+        if (window.__fundRefreshVersion[code] !== version) return; // 已被更新请求取代
+        console.log('[DATA][ESTIMATE] code=' + code + ' source=' + (estimateRes && (estimateRes.source || estimateRes.estimate_source) || 'local') + ' latency=' + (Date.now() - startedAt) + 'ms');
+        window.mergeFundData(code, { estimate: estimateRes });
+        scheduleRender();
       }).catch(function(err) {
-        console.error('[DATA][ERROR] code=' + code, err);
-        
-        // Revert statuses from REFRESHING back to READY, or if they failed from LOADING, set to ERROR
+        if (window.__fundRefreshVersion[code] !== version) return;
+        console.error('[DATA][ESTIMATE-ERR] code=' + code, err && err.message);
         const f = window.fundStore.get(code);
-        const revertData = {
+        window.fundStore.update(code, {
           estimate: { status: f.estimate.status === 'REFRESHING' ? 'READY' : 'ERROR' },
           todayProfit: { status: f.todayProfit.status === 'REFRESHING' ? 'READY' : 'ERROR' }
-        };
-        if (!estimateOnly) {
-          revertData.nav = { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' };
-        }
-        window.fundStore.update(code, revertData);
-        
-        throw err;
+        });
+        scheduleRender();
       });
+
+      let snapshotP = Promise.resolve(null);
+      if (!estimateOnly) {
+        snapshotP = refreshFund(code, force).then(function(snapshotRes) {
+          if (window.__fundRefreshVersion[code] !== version) return;
+          console.log('[DATA][SNAPSHOT] code=' + code + ' latency=' + (Date.now() - startedAt) + 'ms');
+          window.mergeFundData(code, { snapshot: snapshotRes });
+          scheduleRender();
+        }).catch(function(err) {
+          if (window.__fundRefreshVersion[code] !== version) return;
+          console.error('[DATA][SNAPSHOT-ERR] code=' + code, err && err.message);
+          const f = window.fundStore.get(code);
+          window.fundStore.update(code, {
+            nav: { status: f.nav.status === 'REFRESHING' ? 'READY' : 'ERROR' }
+          });
+          scheduleRender();
+        });
+      }
+
+      // 返回的 Promise 在「估值完成」时即 resolve（快照仍在后台补齐），调用方可立即拿到 store
+      return estimateP.then(function() { return window.fundStore.get(code); });
     },
     
     refreshMany: function(codes, force) {

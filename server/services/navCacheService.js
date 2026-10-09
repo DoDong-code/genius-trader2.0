@@ -99,39 +99,10 @@ async function ensureTodayNav(fundCode, options = {}) {
   // ③ 并发锁：同一基金同时只有一个获取请求
   if (inFlight.has(fundCode)) return inFlight.get(fundCode);
   const promise = (async () => {
-    // 1. 小倍养基 fetcher
-    async function fetchFromXiaobei() {
-      logFetch('xiaobeiyangji', fundCode);
-      const est = await fetchProviderEstimate(fundCode, undefined, {
-        force: true,
-        source: 'xiaobeiyangji',
-        userId: Number(options.userId) || 0
-      }).catch(() => null);
-      if (!est) return null;
-      const date = est.trade_date || est.nav_date || null;
-      const nav = Number(est.estimate_nav);
-      if (date === expected && Number.isFinite(nav) && nav > 0) {
-        return { nav, date, source: 'xiaobeiyangji' };
-      }
-      return null;
-    }
-
-    // 2. 养基宝 fetcher
-    async function fetchFromYangjibao() {
-      logFetch('yangjibao', fundCode);
-      const est = await fetchProviderEstimate(fundCode, undefined, {
-        force: true,
-        source: 'yangjibao',
-        userId: Number(options.userId) || 0
-      }).catch(() => null);
-      if (!est) return null;
-      const date = est.trade_date || est.nav_date || null;
-      const nav = Number(est.estimate_nav);
-      if (date === expected && Number.isFinite(nav) && nav > 0) {
-        return { nav, date, source: 'yangjibao' };
-      }
-      return null;
-    }
+    // 正式净值（fund_nav）只从「权威已确认净值源」取：Yahoo Finance / 天天基金(Eastmoney)。
+    // 注意：小倍养基 / 养基宝 在此故意不纳入 —— 它们在盘中返回的是「估值」而非「确认净值」，
+    // 若把关口放宽到 provider 会违反「不得将盘中估值写成正式历史净值」硬约束（见需求 §三.4）。
+    // 盘中估值走 /estimate（providerEstimate 已优先 provider + 本地兜底），与本路径职责分离。
 
     // 3. Yahoo Fetcher (symbol: ${fundCode}.OF)
     async function fetchFromYahoo() {

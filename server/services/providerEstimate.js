@@ -33,20 +33,25 @@ const BULK_FETCH_TIMEOUT_MS = 8000;
 //   - cacheGet() returns null (and evicts) on TTL expiry
 //   - cacheSet() evicts the oldest entry when over capacity
 //   - a periodic sweeper drops expired-but-untouched entries
-const estimateCache = new Map(); // fund_code -> { at, value }
+// KEY 含 userId：同一基金不同登录账户的 provider 估值互不可见（防跨账户凭证/数据串用）
+const estimateCache = new Map(); // `${code}|${userId}` -> { at, value }
 
-function cacheGet(code) {
-  const e = estimateCache.get(String(code));
+function cacheKey(code, userId) {
+  return `${String(code)}|${Number(userId) || 0}`;
+}
+
+function cacheGet(code, userId) {
+  const e = estimateCache.get(cacheKey(code, userId));
   if (!e) return null;
   if (Date.now() - e.at >= CACHE_TTL_MS) {
-    estimateCache.delete(String(code));
+    estimateCache.delete(cacheKey(code, userId));
     return null;
   }
   return e;
 }
 
-function cacheSet(code, entry) {
-  const key = String(code);
+function cacheSet(code, userId, entry) {
+  const key = cacheKey(code, userId);
   if (!estimateCache.has(key) && estimateCache.size >= ESTIMATE_CACHE_MAX) {
     const oldest = estimateCache.keys().next().value;
     if (oldest !== undefined) estimateCache.delete(oldest);
@@ -158,7 +163,7 @@ async function preFetchAllProviderEstimates(sourceName, userId) {
             };
             const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
             if (normalized) {
-              cacheSet(code, { at: Date.now(), value: normalized });
+              cacheSet(code, userId, { at: Date.now(), value: normalized });
             }
           }
         }
@@ -189,7 +194,7 @@ async function preFetchAllProviderEstimates(sourceName, userId) {
             };
             const normalized = normalizeProviderEstimate(provider, rawObj, code, undefined);
             if (normalized) {
-              cacheSet(code, { at: Date.now(), value: normalized });
+              cacheSet(code, userId, { at: Date.now(), value: normalized });
             }
           }
         }
@@ -249,37 +254,41 @@ async function tryProviderEstimate(sourceName, code, amount, userId = 0) {
  */
 async function fetchProviderEstimate(code, amount, options = {}) {
   const userId = Number(options.userId) || 0;
-  // 统一 source 别名：微信端短名(xbyj/yjb) → 服务端内部名(xiaobeiyangji/yangjibao)；内部名原样透传
-  const source = options.source ? (SOURCE_ALIASES[String(options.source)] || options.source) : undefined;
+  // 统一 source 别名：微信端短名(xbyj/yjb) → 服务端内部名(xiaobeiyangji/yangjibao)；'auto' 视为「全部已连接 provider」
+  let source = options.source ? (SOURCE_ALIASES[String(options.source)] || options.source) : undefined;
+  if (source === 'auto') source = undefined; // auto = 让 PROVIDER_ORDER 全部参与（由后端按连接态择优）
   const targetSources = source ? [source] : PROVIDER_ORDER;
+  const t0 = Date.now();
 
-  // 1. 如果不是强刷，且缓存存在有效数据，立即返回
+  // 1. 缓存优先：命中且未过期 → 立即返回（按 userId 隔离，避免跨账户串用）
   if (!options.force) {
-  const cached = cacheGet(code);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+    const cached = cacheGet(code, userId);
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
       if (cached.value) {
         const copy = { ...cached.value };
         if (Number.isFinite(amount)) {
           copy.estimate_profit = round2(amount * copy.estimate_change);
           copy.estimateProfit = copy.estimate_profit;
         }
+        console.log(`[estimate][cache-hit] code=${code} user=${userId} age=${Date.now() - cached.at}ms`);
         return copy;
       }
       return cached.value;
     }
+    console.log(`[estimate][cache-miss] code=${code} user=${userId} sources=${targetSources.join(',')}`);
   }
 
-  // 2. 并发安全地触发批量预拉取（Promise合并）
-  for (const src of targetSources) {
-    try {
-      await getBulkFetchPromise(src, userId);
-    } catch (e) {
-      // 容错：批量预拉取异常时不阻断流程
-    }
-  }
+  // 2. 后台预热其余基金缓存（Promise 合并 + 整体超时护栏），不阻塞当前基金的估值返回——
+  // 避免「等全量持仓批量拉完」才轮到当前基金，也避免一个源慢拖住另一个源。
+  // 当前基金的实际估值由下方单基金请求兜底层按「先到先得」返回，批量预拉取仅用于暖其它基金缓存。
+  targetSources.forEach(src => {
+    getBulkFetchPromise(src, userId).catch(e => {
+      console.warn(`[estimate][bulk-fail] source=${src} user=${userId} err=${e && e.message}`);
+    });
+  });
 
-  // 3. 再次查询缓存（大概率已通过批量接口预先加载）
-  const cachedAfter = cacheGet(code);
+  // 3. 批量预拉取后再次查缓存（大概率已填充）
+  const cachedAfter = cacheGet(code, userId);
   if (cachedAfter && Date.now() - cachedAfter.at < CACHE_TTL_MS) {
     if (cachedAfter.value) {
       const copy = { ...cachedAfter.value };
@@ -287,24 +296,31 @@ async function fetchProviderEstimate(code, amount, options = {}) {
         copy.estimate_profit = round2(amount * copy.estimate_change);
         copy.estimateProfit = copy.estimate_profit;
       }
+      console.log(`[estimate][bulk-filled] code=${code} user=${userId} latency=${Date.now() - t0}ms`);
       return copy;
     }
     return cachedAfter.value;
   }
 
-  // 4. 兜底逐个拉取（若批量同步未能涵盖此基金代码）
+  // 4. 兜底：逐 provider 单基金请求（任一有效即胜出，先到先得）
+  const order = source ? PROVIDER_ORDER.filter(name => name === source) : PROVIDER_ORDER;
   const hit = await new Promise(resolve => {
-    const order = source ? PROVIDER_ORDER.filter(name => name === source) : PROVIDER_ORDER;
-    const pending = order.map(sourceName =>
-      tryProviderEstimate(sourceName, code, amount, userId).catch(() => null)
-    );
     let settled = 0;
+    const pending = order.map(sourceName => {
+      const st = Date.now();
+      return tryProviderEstimate(sourceName, code, amount, userId)
+        .then(v => {
+          console.log(`[estimate][single] source=${sourceName} code=${code} user=${userId} ok=${!!v} latency=${Date.now() - st}ms`);
+          return v;
+        })
+        .catch(err => {
+          console.warn(`[estimate][single-fail] source=${sourceName} code=${code} user=${userId} err=${err && err.message}`);
+          return null;
+        });
+    });
     pending.forEach(p => {
       p.then(value => {
-        if (value) {
-          resolve(value);
-          return;
-        }
+        if (value) { resolve(value); return; }
         settled += 1;
         if (settled === pending.length) resolve(null);
       });
@@ -312,7 +328,8 @@ async function fetchProviderEstimate(code, amount, options = {}) {
   });
 
   if (hit && !options.force) {
-    cacheSet(String(code), { at: Date.now(), value: hit });
+    cacheSet(String(code), userId, { at: Date.now(), value: hit });
+    console.log(`[estimate][done] code=${code} user=${userId} source=${hit.source || hit.estimate_source || '?'} latency=${Date.now() - t0}ms`);
   }
   return hit;
 }

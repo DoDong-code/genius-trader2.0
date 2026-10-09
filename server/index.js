@@ -219,16 +219,20 @@ function startMemoryDiagnostics() {
 // 注意：setTimeout/setInterval 上限为 32 位有符号整数（~24.8 天），91 天会溢出变成 1ms，
 // 因此统一用 30 分钟 tick + 内存 lastRun 时间戳控制周期，绝不直接设 7 天/91 天定时器。
 // 每个任务有独立运行锁，防止重叠；DISABLE_NAV_SYNC=1 可整体关闭。
-function startNavSyncScheduler() {
-  if (process.env.DISABLE_NAV_SYNC === '1') {
-    console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
-    return;
-  }
-  const { isCloud, getSyncMarker, setSyncMarker } = require('./database/dbAsync');
-  if (!isCloud() && process.env.NODE_ENV !== 'production') {
-    console.log('[NAV-SYNC] disabled in local/dev mode (set NODE_ENV=production or run on cloud to enable)');
-    return;
-  }
+  function startNavSyncScheduler() {
+    if (process.env.DISABLE_NAV_SYNC === '1') {
+      console.log('[NAV-SYNC] disabled by DISABLE_NAV_SYNC=1');
+      return;
+    }
+    const { isCloud, getSyncMarker, setSyncMarker } = require('./database/dbAsync');
+    // 放宽生产判定：Render 免费/基础版会在无流量时休眠，若仅按 NODE_ENV=production 判定、
+    // 而环境未显式设置该变量，会导致每日/每周 NAV 同步任务永不启动 → 历史净值持续断层。
+    // 现改为「Render 托管 / NODE_ENV=production / 云端数据库」任一成立即视为生产环境并启动同步。
+    const isProdLike = process.env.NODE_ENV === 'production' || process.env.RENDER === 'true' || isCloud();
+    if (!isProdLike) {
+      console.log('[NAV-SYNC] disabled: not in production/render/cloud env (local dev)');
+      return;
+    }
   const {
     syncTodayNavs,
     syncWeeklyHistory,
@@ -355,14 +359,15 @@ function startNavSyncScheduler() {
   const initialDaily = setTimeout(() => { runDailyNav(); }, 30 * 1000);
   if (initialDaily.unref) initialDaily.unref();
 
-  // 首次维护（含每周历史 + 每季度持仓）在启动 1 小时后执行
-  const initialMaintenance = setTimeout(() => { tick(); }, 60 * 60 * 1000);
+  // 启动后尽快跑一次完整维护（含每周历史补缺口 + 每季度持仓）：Render 免费版在空闲即休眠，
+  // 「服务被用户请求唤醒」时立即补齐历史净值缺口，避免依赖 30 分钟 tick（休眠期间不会触发）。
+  const initialMaintenance = setTimeout(() => { tick(); }, 60 * 1000);
   if (initialMaintenance.unref) initialMaintenance.unref();
 
   const tickTimer = setInterval(() => { tick(); }, 30 * 60 * 1000);
   if (tickTimer.unref) tickTimer.unref();
 
-  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, quarterly holdings via 30m tick)');
+  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, quarterly holdings; boot catch-up at ~60s)');
 }
 
 async function startServer(port = 3000, host = '0.0.0.0') {
