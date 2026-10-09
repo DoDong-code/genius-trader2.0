@@ -167,7 +167,7 @@ function parseFundScript(code, source) {
   );
 
   const history = navTrend
-    .filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)))
+    .filter(item => Number.isFinite(Number(item.x)) && Number.isFinite(Number(item.y)) && Number(item.y) > 0 && Number(item.y) < 100000)
     .map(item => ({
       date: shanghaiDate(Number(item.x)),
       nav: Number(item.y),
@@ -345,6 +345,22 @@ async function collectFund(code, options = {}) {
 
 async function importFund(code, options = {}) {
   const data = await collectFund(code, options);
+  // P0 数值越界防火墙：解析错位（如把基金规模/份额 亿级数值误读为 nav）或上游脏数据会产生
+  // 远超真实净值范围的异常值（生产曾出现 3735971251），若写入 INTEGER 列会直接 integer out of range
+  // 并拖垮整个 NAV 同步事务 → 进程崩溃。此处从「写入源头」拦截：单位净值 0<nav<1e5、累计净值 0<=acc_nav<1e5、
+  // 持仓占比 0<=weight<=100，越界行直接丢弃（仅诊断日志，不写库、不抛出），缺口检测后续补齐。
+  const isFiniteNum = (v) => Number.isFinite(v);
+  const safeNav = (v) => isFiniteNum(v) && v > 0 && v < 100000;
+  const safeAcc = (v) => isFiniteNum(v) && v >= 0 && v < 100000;
+  const safeWeight = (v) => isFiniteNum(v) && v >= 0 && v <= 100;
+  const safeHistory = (data.history || []).filter(it => it && it.date && safeNav(it.nav) && safeAcc(it.accNav));
+  const safeHoldings = (data.holdings || []).filter(it => it && safeWeight(it.weight));
+  const skippedRows = (data.history ? data.history.length : 0) - safeHistory.length
+    + (data.holdings ? data.holdings.length : 0) - safeHoldings.length;
+  if (skippedRows > 0) {
+    console.warn(`[importFund] ${data.fundCode} 跳过 ${skippedRows} 条数值越界行（疑似解析错位/规模字段误读），已避免写入生产库`);
+  }
+
   const existingDates = new Set(
     (await dbAsync.all('SELECT date FROM fund_nav WHERE fund_code = ?', [data.fundCode]))
       .map(row => row.date)
@@ -368,14 +384,14 @@ async function importFund(code, options = {}) {
         nav = excluded.nav,
         acc_nav = excluded.acc_nav
     `;
-    const historyToUpsert = data.history.filter((item, index) => {
-      return !existingDates.has(item.date) || (index >= data.history.length - 5);
+    const historyToUpsert = safeHistory.filter((item, index) => {
+      return !existingDates.has(item.date) || (index >= safeHistory.length - 5);
     });
     for (const item of historyToUpsert) {
       await database.run(upsertNavSql, [data.fundCode, item.date, item.nav, item.accNav]);
     }
 
-    if (data.holdings.length) {
+    if (safeHoldings.length) {
       const upsertHoldingSql = `
         INSERT INTO fund_holdings (fund_code, stock_code, stock_name, weight, report_date)
         VALUES (?, ?, ?, ?, ?)
@@ -383,7 +399,7 @@ async function importFund(code, options = {}) {
           stock_name = excluded.stock_name,
           weight = excluded.weight
       `;
-      for (const item of data.holdings) {
+      for (const item of safeHoldings) {
         await database.run(upsertHoldingSql, [
           data.fundCode,
           item.stock_code,
@@ -397,15 +413,16 @@ async function importFund(code, options = {}) {
 
   markSyncState(data.fundCode, 'history', 24 * 60 * 60 * 1000);
   if (data.refreshedHoldings) {
-  markSyncState(data.fundCode, 'holdings', 93 * 24 * 60 * 60 * 1000);
+    markSyncState(data.fundCode, 'holdings', 93 * 24 * 60 * 60 * 1000);
   }
 
   return {
     success: true,
     fund: data.fundName,
     fund_code: data.fundCode,
-    records: data.history.length,
-    inserted: data.history.filter(item => !existingDates.has(item.date)).length,
+    records: safeHistory.length,
+    inserted: safeHistory.filter(item => !existingDates.has(item.date)).length,
+    skipped_rows: skippedRows,
     cached: data.fromCache,
     history_source: data.source.history
   };

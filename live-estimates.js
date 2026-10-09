@@ -669,8 +669,11 @@
   function preferredEstimateSource() {
     var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
     try {
+      var stored = localStorage.getItem('estimate_source_' + accountName);
+      // 历史 'local' 迁移为 'auto'（不覆盖有效手动选择 xiaobeiyangji / yangjibao）
+      if (stored === 'local') return 'auto';
       // 默认 'auto'：后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，优先已连接第三方、不锁定单一慢源
-      return localStorage.getItem('estimate_source_' + accountName) || 'auto';
+      return stored || 'auto';
     } catch (err) {
       return 'auto';
     }
@@ -922,8 +925,8 @@
   function summarizeSourceRefresh(to, version, results) {
     if (version !== window.__sourceRefreshVersion) return;
     var label = sourceDisplayName(to);
-    if (to === 'local') {
-      showSourceToast('本地引擎：已基于持仓计算今日估值', 'success');
+    if (to === 'auto') {
+      showSourceToast('自动：已基于多源（小倍/养基宝/本地引擎）快速估值', 'success');
       return;
     }
     var errors = results.filter(function (r) { return r.status === 'ERROR'; });

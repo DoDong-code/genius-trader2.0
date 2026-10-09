@@ -675,9 +675,13 @@
   function preferredEstimateSource() {
     var accountName = window.portfolioState && window.portfolioState.getActive ? window.portfolioState.getActive() : '';
     try {
-      return localStorage.getItem('estimate_source_' + accountName) || 'local';
+      var stored = localStorage.getItem('estimate_source_' + accountName);
+      // 历史 'local' 迁移为 'auto'（不覆盖有效手动选择 xiaobeiyangji / yangjibao）
+      if (stored === 'local') return 'auto';
+      // 无偏好 / 无效 / 首次创建 → 默认 'auto'（后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得）
+      return stored || 'auto';
     } catch (err) {
-      return 'local';
+      return 'auto';
     }
   }
   window.preferredEstimateSource = preferredEstimateSource;
@@ -685,7 +689,10 @@
   function estimateFund(code, amount, force) {
     var endpoint = getApiBase() + '/api/fund/' + encodeURIComponent(code) + '/estimate?amount=' + encodeURIComponent(amount) + (force ? '&force=1' : '');
     var source = preferredEstimateSource();
-    if (source === 'local') {
+    if (source === 'auto') {
+      // 自动模式：不拼 mode，后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，最快返回有效估值
+    } else if (source === 'local') {
+      // 历史遗留 'local'（未迁移）兜底走本地引擎
       endpoint += '&mode=local';
     } else if (typeof window.getProviderStatus === 'function') {
       var available = window.getProviderStatus();

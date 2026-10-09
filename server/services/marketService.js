@@ -230,7 +230,7 @@ function parseHistoryPayload(source) {
       nav: Number(item.DWJZ),
       accNav: Number(item.LJJZ || item.DWJZ),
       changePercent: Number.isFinite(Number(item.JZZZL)) ? Number(item.JZZZL) / 100 : null
-    })).filter(item => item.date && Number.isFinite(item.nav))
+    })).filter(item => item.date && Number.isFinite(item.nav) && item.nav > 0 && item.nav < 100000 && Number.isFinite(item.accNav) && item.accNav >= 0 && item.accNav < 100000)
   };
 }
 
@@ -254,7 +254,7 @@ function parseTiantianHistory(source) {
       accNav: Number.isFinite(accNav) ? accNav : nav,
       changePercent: changeCell == null ? null : Number(changeCell.replace('%', '')) / 100
     };
-  }).filter(item => item?.date && Number.isFinite(item.nav));
+  }).filter(item => item?.date && Number.isFinite(item.nav) && item.nav > 0 && item.nav < 100000 && Number.isFinite(item.accNav) && item.accNav >= 0 && item.accNav < 100000);
   const pages = Number(raw.match(/pages\s*:\s*['"]?(\d+)/i)?.[1] || 1);
   const total = Number(raw.match(/records\s*:\s*['"]?(\d+)/i)?.[1] || history.length);
   return { total, pages: Number.isFinite(pages) ? pages : 1, history };

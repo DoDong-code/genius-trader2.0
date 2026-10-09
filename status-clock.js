@@ -13,7 +13,7 @@
   }
 
   var SOURCE_OPTIONS = [
-    { key: 'local', label: '本地' },
+    { key: 'auto', label: '自动' },
     { key: 'xiaobeiyangji', label: '小倍' },
     { key: 'yangjibao', label: '养基宝' }
   ];
@@ -28,7 +28,7 @@
 
   function sourceDisplayName(key) {
     var found = SOURCE_OPTIONS.filter(function (o) { return o.key === key; })[0];
-    return found ? found.label : '本地';
+    return found ? found.label : '自动';
   }
 
   function currentAccountName() {
@@ -37,9 +37,13 @@
 
   function preferredSource() {
     try {
-      return localStorage.getItem('estimate_source_' + currentAccountName()) || 'local';
+      var stored = localStorage.getItem('estimate_source_' + currentAccountName());
+      // 历史 'local' 迁移为 'auto'（不覆盖有效手动选择 xiaobeiyangji / yangjibao）
+      if (stored === 'local') return 'auto';
+      // 无偏好 / 无效 / 首次创建 → 默认 'auto'
+      return stored || 'auto';
     } catch (err) {
-      return 'local';
+      return 'auto';
     }
   }
 
@@ -63,7 +67,7 @@
       if (menu && menu.dataset.sourceSig !== sig) {
         menu.dataset.sourceSig = sig;
         menu.innerHTML = SOURCE_OPTIONS.map(function (opt) {
-          var disabled = opt.key !== 'local' && available[opt.key] !== true;
+          var disabled = opt.key !== 'auto' && available[opt.key] !== true;
           return '<button type="button" class="estimate-source-option' + (disabled ? ' disabled' : '') + '" data-source-option="' + opt.key + '"' + (disabled ? ' title="未登录"' : '') + '>' + opt.label + '</button>';
         }).join('');
       }

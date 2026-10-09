@@ -453,11 +453,13 @@ Page({
       this.data.navDateMap = initialMap;
     }
 
-    // 恢复当前账户的「数据源」偏好（与网页端 estimate_source_<account> 对齐）
-    let estimateSource = this.data.estimateSource;
+    // 恢复当前账户的「数据源」偏好（与网页端 estimate_source_<account> 对齐：auto / xbyj / yjb）
+    let estimateSource = this.data.estimateSource || 'auto';
     try {
       const saved = wx.getStorageSync(`genius-mp-estimate-source-${activeAccountName}`);
-      if (saved && ['local', 'yjb', 'xbyj', 'auto'].includes(saved)) estimateSource = saved;
+      // 历史 'local' 迁移为 'auto'（不覆盖有效手动选择 xbyj / yjb）
+      if (saved === 'local') estimateSource = 'auto';
+      else if (saved && ['yjb', 'xbyj', 'auto'].includes(saved)) estimateSource = saved;
     } catch (e) { /* ignore */ }
 
     let totalAssets = 0;
@@ -505,7 +507,8 @@ Page({
     this.setData({ holdingsCount: funds.length });
     this.buildAccountTabs(); // 先构建 tab，保证 selectedAccountTab 与 tabs 一致
 
-    const estimateSourceLabel = estimateSource === 'yjb' ? '养基宝' : estimateSource === 'xbyj' ? '小倍' : estimateSource === 'auto' ? '自动(优先第三方)' : '本地估算';
+    // 菜单仅三项（自动/小倍/养基宝）：未知/历史 local 统一显示为「自动」，与迁移逻辑一致
+    const estimateSourceLabel = estimateSource === 'yjb' ? '养基宝' : estimateSource === 'xbyj' ? '小倍' : '自动';
 
     this.setData({
       activeAccountName,
@@ -577,11 +580,13 @@ Page({
 
     // 顶部右侧「数据源」切换：弹出菜单式（与网页版一致），不再循环切换
     onSwitchEstimateSource() {
-      const status = app.globalData.providerStatus || {};
-      // 仅展示已登录的来源；本地永远可用；auto 为默认（后端并行优先第三方）
-      const items = [{ key: 'auto', label: '自动(优先第三方)' }, { key: 'local', label: '本地估算' }];
-      if (status.yjbConnected) items.push({ key: 'yjb', label: '养基宝' });
-      if (status.xbyjConnected) items.push({ key: 'xbyj', label: '小倍' });
+      // 菜单仅三项：自动 / 小倍 / 养基宝（"本地"已改名"自动"；历史 local 迁移为 auto）
+      // 与网页端 SOURCE_OPTIONS 对齐：auto 始终可用，未连接的第三方在请求时回退为 auto（不必然失败）
+      const items = [
+        { key: 'auto', label: '自动' },
+        { key: 'xbyj', label: '小倍' },
+        { key: 'yjb', label: '养基宝' }
+      ];
       const itemList = items.map(i => `${i.label}${i.key === this.data.estimateSource ? ' ✓' : ''}`);
     // 二次验收修复：wx.showActionSheet 自带底部「取消」，不再手动往 itemList 塞「取消」（曾出现两个取消）
     wx.showActionSheet({
@@ -723,7 +728,12 @@ Page({
         // force=1：手动刷新 / 切源时绕过服务端 fund_code 单 key 缓存，避免返回旧 source 的估值
         // auto：不传 mode，后端并行「小倍养基 / 养基宝 → 本地引擎」先到先得，最快返回有效估值
         let modeParam;
-        if (source === 'auto') {
+        // 未连接的第三方源不发起 provider 请求（避免必然失败的死请求），回退为 auto 并行快速估值
+        const pStatus = app.globalData.providerStatus || {};
+        const providerConnected = source === 'yjb' ? Boolean(pStatus.yjbConnected)
+          : source === 'xbyj' ? Boolean(pStatus.xbyjConnected)
+          : true;
+        if (source === 'auto' || !providerConnected) {
           modeParam = '';
         } else if (source === 'local') {
           modeParam = '&mode=local';

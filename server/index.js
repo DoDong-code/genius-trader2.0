@@ -288,14 +288,25 @@ function startMemoryDiagnostics() {
    */
   async function runGuarded(label, lockName, runningRef, intervalOk, task, markerKey) {
     if (runningRef.value) return; // 进程内快速去重
-    if (intervalOk && !(await intervalOk())) return; // 间隔未到（读共享标记）
     runningRef.value = true;
     const startedAt = Date.now();
     try {
+      // 间隔预检查（读共享 sync_markers）纳入 try 保护：被复用到的 aborted 连接（25P02）等异常
+      // 绝不能逃逸到 tick()/进程层；失败即按「未到期间隔」跳过，等待下次 tick 重试。
+      if (intervalOk) {
+        let due = false;
+        try { due = Boolean(await intervalOk()); } catch (e) {
+          console.error(`[NAV-SYNC] ${label} 间隔检查异常（按未到期间隔跳过）:`, e && e.message);
+          due = false;
+        }
+        if (!due) return null;
+      }
       const { acquired, reason, result } = await withAdvisoryLock(lockName, async () => {
         // 进入锁内再次确认间隔，避免多实例抢锁窗口内的竞态导致重复执行
-        if (markerKey && intervalOk && !(await intervalOk())) {
-          return { __skipped: true };
+        if (markerKey && intervalOk) {
+          let due2 = false;
+          try { due2 = Boolean(await intervalOk()); } catch (e) { due2 = false; }
+          if (!due2) return { __skipped: true };
         }
         return await task();
       });
@@ -315,6 +326,7 @@ function startMemoryDiagnostics() {
       console.log(`[NAV-SYNC] ${label} completed in ${Date.now() - startedAt}ms: ${summarize(result)}`);
       return result;
     } catch (err) {
+      // 单任务失败隔离：仅记录，绝不抛出到 tick()/setInterval 回调 → 不靠全局 uncaughtException 续跑。
       console.error(`[NAV-SYNC] ${label} failed:`, err && err.message);
     } finally {
       runningRef.value = false;
@@ -351,20 +363,23 @@ function startMemoryDiagnostics() {
       await runDailyNav();
       await maybeWeekly();
       await maybeQuarterly();
+    } catch (err) {
+      // 单任务失败隔离：仅记录，绝不抛出到 setInterval/setTimeout 回调 → 不靠全局 uncaughtException 续跑。
+      console.error('[NAV-SYNC] tick 单任务失败已隔离（不退出进程）:', err && err.message);
     } finally {
       ticking = false;
     }
   }
 
-  const initialDaily = setTimeout(() => { runDailyNav(); }, 30 * 1000);
+  const initialDaily = setTimeout(() => { runDailyNav().catch(e => console.error('[NAV-SYNC] initialDaily 失败（已隔离）:', e && e.message)); }, 30 * 1000);
   if (initialDaily.unref) initialDaily.unref();
 
   // 启动后尽快跑一次完整维护（含每周历史补缺口 + 每季度持仓）：Render 免费版在空闲即休眠，
   // 「服务被用户请求唤醒」时立即补齐历史净值缺口，避免依赖 30 分钟 tick（休眠期间不会触发）。
-  const initialMaintenance = setTimeout(() => { tick(); }, 60 * 1000);
+  const initialMaintenance = setTimeout(() => { tick().catch(e => console.error('[NAV-SYNC] initialMaintenance 失败（已隔离）:', e && e.message)); }, 60 * 1000);
   if (initialMaintenance.unref) initialMaintenance.unref();
 
-  const tickTimer = setInterval(() => { tick(); }, 30 * 60 * 1000);
+  const tickTimer = setInterval(() => { tick().catch(e => console.error('[NAV-SYNC] tickTimer 失败（已隔离）:', e && e.message)); }, 30 * 60 * 1000);
   if (tickTimer.unref) tickTimer.unref();
 
   console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, quarterly holdings; boot catch-up at ~60s)');

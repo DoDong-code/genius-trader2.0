@@ -23,6 +23,7 @@ function makeFakePg() {
     constructor() {
       this.queries = [];
       this.released = false;
+      this.ended = false;
       this._failQuery = false;
     }
     async query(sql) {
@@ -36,6 +37,11 @@ function makeFakePg() {
     }
     release() {
       this.released = true;
+    }
+    // 与真实 pg.Client 对齐：end() 用于「连接已断/事务无法复位」时主动销毁（绝不归还池）。
+    end() {
+      this.ended = true;
+      return Promise.resolve();
     }
   }
   class FakePool {
@@ -148,7 +154,13 @@ test('query 异常路径：client 在 finally 释放', async () => {
   const p = dbAsync.run('INSERT INTO user_data VALUES (?, ?)', [1, '{}']);
   const fake = FakePool._last; // 同步构造池已在 run() 内部完成
   await assert.rejects(p);
-  assert.strictEqual(fake.lastClient.released, true, '异常后 client 必须 release');
+  // 异常路径的两条分支都满足「无连接泄漏」：
+  //  - 正常：ROLLBACK 成功 → safeRelease（released=true）
+  //  - 连接已断（ROLLBACK 亦失败）：销毁连接（ended=true），绝不归还池，避免毒连接被复用触发 25P02
+  assert.ok(
+    fake.lastClient.released === true || fake.lastClient.ended === true,
+    '异常后 client 必须被释放或销毁（无连接泄漏）'
+  );
 });
 
 test('statement_timeout 不再通过 startup options 注入（Neon 兼容）且每连接仍 SET', async () => {

@@ -177,10 +177,21 @@ async function connectWithRetry(poolInstance) {
 // 统一包装云端查询，自动实现连接生命周期管理与 finally release
 async function queryCloud(sql, params = []) {
   const client = await acquireClient();
+  let clientDead = false;
   try {
     return await client.query(convertPlaceholders(sql), params);
+  } catch (err) {
+    // 单语句查询失败（含复用到的 aborted 事务连接 25P02）：先 ROLLBACK 复位；
+    // 连接已断开则销毁（绝不归还池），避免毒连接被后续请求复用导致 25P02 反复触发、拖垮进程。
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      clientDead = true;
+      try { await client.end().catch(() => {}); } catch (_) {}
+    }
+    throw err;
   } finally {
-    safeRelease(client);
+    if (!clientDead) safeRelease(client);
   }
 }
 
@@ -233,6 +244,7 @@ async function transaction(work) {
     // 超预算时必须真实 reject（而非仅静默 ROLLBACK），否则一个卡死的事务会永久占用 PG client。
     const txnTimeoutMs = Number(process.env.PG_TRANSACTION_TIMEOUT_MS || 20000);
     let watchdog = null;
+    let clientDead = false;
     const timeoutError = new Error('[dbAsync] transaction 整体超时，强制 ROLLBACK');
     timeoutError.code = 'TRANSACTION_TIMEOUT';
     timeoutError.statusCode = 504;
@@ -269,11 +281,19 @@ async function transaction(work) {
       await client.query('COMMIT');
       return result;
     } catch (error) {
-      await client.query('ROLLBACK').catch(() => {});
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackErr) {
+        // 连接已断/事务无法复位：销毁连接，绝不归还池（避免毒连接被复用触发下次 25P02）。
+        clientDead = true;
+        try { await client.end().catch(() => {}); } catch (_) {}
+        console.error('[dbAsync] 事务失败且连接不可用，已销毁（不归还连接池）:', rollbackErr && rollbackErr.message);
+      }
       throw error;
     } finally {
       if (watchdog) clearTimeout(watchdog); // 成功或超时都清除定时器，杜绝泄漏
-      safeRelease(client);
+      // 仅当连接未失效时才归还池；已销毁的连接（clientDead）绝不归还，避免毒连接被复用。
+      if (!clientDead) safeRelease(client);
     }
   }
 
