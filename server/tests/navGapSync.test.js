@@ -87,3 +87,30 @@ test('detectNavGaps 无缺口时返回空数组（不触发任何补偿）', asy
   assert.strictEqual(result.gaps, 0);
   assert.strictEqual(importFundCalls.length, 0, '无缺口时不调用 importFund');
 });
+
+// QDII/美股基金净值 T+1（甚至 T+2）才披露：缺口窗口末端必须回退到「上一交易日」，
+// 与 expectedNavDateFor() 的展示口径一致。否则「尚未披露」的日期会被永久判为缺口
+// —— 回填永远补不上，表现为每次打开页面都提示历史净值缺失。
+test('QDII 基金窗口末端回退一个交易日（未披露日不判为缺口）', () => {
+  const { expectedNavDateFor } = require(path.join(serviceDir, 'estimateStatus'));
+  const plain = { fund_name: '测试普通混合C', fund_type: '' };
+  const qdii = { fund_name: '测试全球科技混合(QDII)C', fund_type: 'QDII' };
+
+  const winPlain = nav.buildExpectedTradingWindow(10, plain);
+  const winQdii = nav.buildExpectedTradingWindow(10, qdii);
+  assert.strictEqual(winQdii.length, 10);
+  // 末端必须与展示口径完全一致
+  assert.strictEqual(
+    winQdii[winQdii.length - 1], expectedNavDateFor(qdii),
+    'QDII 窗口末端应等于 expectedNavDateFor(qdii)'
+  );
+  assert.strictEqual(
+    winPlain[winPlain.length - 1], expectedNavDateFor(plain),
+    '普通基金窗口末端应等于 expectedNavDateFor(plain)'
+  );
+  // 且严格早于普通基金（多回退一个交易日）
+  assert.ok(
+    winQdii[winQdii.length - 1] < winPlain[winPlain.length - 1],
+    `QDII 末端应早于普通基金: ${winQdii[winQdii.length - 1]} vs ${winPlain[winPlain.length - 1]}`
+  );
+});

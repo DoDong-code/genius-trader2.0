@@ -236,7 +236,8 @@ function startMemoryDiagnostics() {
   const {
     syncTodayNavs,
     syncWeeklyHistory,
-    syncQuarterlyHoldings
+    syncQuarterlyHoldings,
+    detectNavGaps
   } = require('./services/navSyncService');
   const { withAdvisoryLock } = require('./database/lock');
 
@@ -246,6 +247,9 @@ function startMemoryDiagnostics() {
   let ticking = false;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   const QUARTER_MS = 91 * 24 * 60 * 60 * 1000;
+  // 存在已知缺口时的重跑间隔：远小于 7 天，让历史断层尽快自愈；
+  // 无缺口时仍按周跑，绝不无谓打上游。
+  const GAP_RETRY_MS = 6 * 60 * 60 * 1000;
 
   // 跨实例“上次成功执行”共享标记：存在 PostgreSQL sync_markers（云端）或 SQLite sync_markers（本地）。
   // 用共享标记而非进程内 lastRun —— 多副本各自记时会导致每周/每季任务被重复触发、重复打上游。
@@ -341,7 +345,18 @@ function startMemoryDiagnostics() {
   async function maybeWeekly() {
     await runGuarded(
       'weekly-history', 'nav-sync:weekly', weeklyRef,
-      () => isDue('weekly-history', WEEK_MS),
+      async () => {
+        // 有缺口 → 6 小时重跑一次（自愈）；无缺口 → 维持 7 天周期。
+        // detectNavGaps 是纯 DB 查询、不打上游，每次 tick 调用是安全的。
+        let hasGaps = false;
+        try {
+          hasGaps = (await detectNavGaps({ windowDays: 60 })).length > 0;
+        } catch (err) {
+          console.warn('[NAV-SYNC] 缺口预检失败，回退 7 天周期:', err && err.message);
+        }
+        if (hasGaps) console.log('[NAV-SYNC] 检测到 NAV 缺口，weekly-history 间隔放宽为 6 小时');
+        return isDue('weekly-history', hasGaps ? GAP_RETRY_MS : WEEK_MS);
+      },
       () => syncWeeklyHistory({ concurrency: 2 }),
       'weekly-history'
     );

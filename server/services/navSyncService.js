@@ -76,7 +76,14 @@ function isExpectedTradingDay(dateStr, fund) {
 
 function buildExpectedTradingWindow(count, fund, now = new Date()) {
   const window = [];
-  let cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // 窗口末端严格与 expectedNavDateFor() 对齐：
+  // QDII/美股基金净值 T+1（甚至 T+2）才披露，expected 已是「上一交易日」。
+  // 若末端直接取最近交易日，会把「尚未披露」的日期永久判为缺口
+  // —— 回填永远补不上（第三方确实还没有），表现为每次打开都提示缺失。
+  // 对非 QDII 基金 expectedNavDateFor 即最近交易日，与旧行为完全等价。
+  const anchor = expectedNavDateFor(fund, now);
+  const parts = String(anchor).split('-');
+  let cursor = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
   while (window.length < count) {
     const ds = shanghaiDateString(cursor.getTime());
     if (isExpectedTradingDay(ds, fund)) window.push(ds);
