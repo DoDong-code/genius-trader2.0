@@ -154,7 +154,7 @@
       var freshness = minutes < 1 ? '刚刚' : minutes + ' 分钟前';
       var isPicker = Boolean(status.querySelector('.estimate-source-picker'));
       if (!trading) {
-        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 非交易日，展示最近交易日数据' + (isPicker ? sourceTagText() : '') + '</span><span class="mobile-label">' + dataDate + '</span>';
+        update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 今日休市，展示最近交易日数据' + (isPicker ? sourceTagText() : '') + '</span><span class="mobile-label">' + dataDate + '</span>';
       } else {
         update.innerHTML = '<span class="desktop-label">数据日期：' + dataDate + ' · 数据更新 · ' + freshness + (isPicker ? sourceTagText() : '') + '</span><span class="mobile-label">' + dataDate + '</span>';
       }
