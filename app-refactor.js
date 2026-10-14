@@ -1260,9 +1260,11 @@
   }
 
   async function refreshProviderStatus() {
+    // 预热：页面加载即发出，顺带唤醒可能处于冷启动的后端实例（Render 免费版空闲休眠）。
+    // 超时放宽到 60s，让唤醒过程走完；失败一律吞掉，不影响页面渲染。
     const [yjb, xbyj] = await Promise.all([
-      providerApi('/api/provider/yangjibao/status').catch(() => null),
-      providerApi('/api/provider/xiaobeiyangji/status').catch(() => null)
+      providerApi('/api/provider/yangjibao/status', { timeout: 60000 }).catch(() => null),
+      providerApi('/api/provider/xiaobeiyangji/status', { timeout: 60000 }).catch(() => null)
     ]);
     providerStatusCache.yangjibao = yjb;
     providerStatusCache.xiaobeiyangji = xbyj;
@@ -1485,10 +1487,13 @@
     // 防重复点击：任一同步进行中直接忽略
     if (importBtn && importBtn.disabled) return Promise.resolve();
     setBusy(true);
+    // 一键同步是重操作（第三方 2~N 次请求 + 服务端写库），且 Render 免费实例空闲后会冷启动
+    // （唤醒常需 30~60s）。沿用 providerApi 默认 20s 必然「同步超时」，故单独放宽到 90s。
     return providerApi(`/api/provider/${sourceName}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ overwrite: Boolean(overwrite) })
+      body: JSON.stringify({ overwrite: Boolean(overwrite) }),
+      timeout: 90000
     }).then(async data => {
       setBusy(false);
       const accountCount = (data.accounts || []).length;
@@ -1511,6 +1516,10 @@
       setBusy(false);
       if (err.data && err.data.token_expired) {
         showToast('登录已过期，请重新登录后再次同步', 'warning');
+      } else if (err && err.timeout) {
+        // 前端放弃等待 ≠ 后端失败：服务可能仍在冷启动或第三方仍在响应，
+        // 明确告知用户稍等刷新，避免反复点击造成重复导入。
+        showToast('响应超时（服务可能正在唤醒），请等待约 1 分钟后刷新页面查看结果', 'error');
       } else {
         showToast(`同步失败：${err.message || '网络错误'}`, 'error');
       }
