@@ -404,6 +404,24 @@ async function handleFundApi(request, response, url) {
             allocation: h.allocation || null
           });
         }
+        // §五 异常数据校验：上游自带收益率与服务端约定口径（profit/amount）不一致时记录警告；
+        // 展示仍按约定口径，不静默改数据。空值不警告、不转 0%。
+        const percentFormat = require('../services/percentFormat');
+        const dataWarnings = [];
+        for (const h of (portfolio.holdings || [])) {
+          const rawFund = rawFunds.find(f => String(f.code) === String(h.code)) || null;
+          const claimedRate = rawFund
+            ? (rawFund.holdingRate !== undefined && rawFund.holdingRate !== null
+                ? rawFund.holdingRate
+                : (rawFund.hold !== undefined && rawFund.hold !== null ? rawFund.hold : rawFund.profitRate))
+            : undefined;
+          try {
+            dataWarnings.push(...percentFormat.validateHolding({
+              code: h.code, name: h.name,
+              amount: h.amount, profit: h.profit, profitRate: claimedRate
+            }));
+          } catch (e) { /* 校验失败不阻塞导出 */ }
+        }
         return {
           generatedAt: new Date().toISOString(),
           account: {
@@ -414,6 +432,7 @@ async function handleFundApi(request, response, url) {
           },
           strategies: Array.isArray(portfolio.strategies) ? portfolio.strategies.slice() : [],
           portfolioSummary: portfolio.portfolioSummary || null,
+          dataWarnings,
           holdings: fundsOut
         };
       }, { userId });
@@ -424,6 +443,60 @@ async function handleFundApi(request, response, url) {
       sendJson(response, 200, { success: true, export: payload });
     } catch (err) {
       sendJson(response, err.statusCode || 500, { success: false, error: err.message || '导出失败' });
+    }
+    return true;
+  }
+
+  // 数据精简与百分比统一改造：轻量性能端点（Web + 小程序表格共用）。
+  // 返回服务端经 percentFormat.formatPct 一次性格式化的百分比字符串（+/-/0.00%/—），
+  // 前端只做展示、不做任何 *100 换算，保证两端同一口径、禁止重复转换。
+  // 注意：本端点只返回展示用字符串 + trend + navDate，不混传比例小数。
+  if (url.pathname === '/api/portfolio/performance' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    if (!userId) {
+      sendJson(response, 401, { success: false, error: '请先登录' });
+      return true;
+    }
+    const accountName = url.searchParams.get('account') || undefined;
+    try {
+      const { runInRequestScope } = require('../utils/requestScope');
+      const payload = await runInRequestScope(async () => {
+        const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+        const percentFormat = require('../services/percentFormat');
+        const pf = v => percentFormat.formatPct(v);
+        const portfolio = await buildAnalysisPortfolio(
+          userId,
+          accountName ? { account: accountName } : { useActive: true }
+        );
+        if (!portfolio || !portfolio.account) return null;
+        const performance = {};
+        for (const h of (portfolio.holdings || [])) {
+          const p = h.performance || {};
+          performance[String(h.code)] = {
+            ret1m: pf(p.return1m),
+            ret3m: pf(p.return3m),
+            ret6m: pf(p.return6m),
+            ret1y: pf(p.return1y),
+            mdd: pf(p.maxDrawdown1y),
+            trend: String(p.trend || 'unknown'),
+            navDate: h.navDate || p.dataAsOf || null
+          };
+        }
+        return {
+          generatedAt: new Date().toISOString(),
+          account: portfolio.account.name,
+          performance
+        };
+      }, { userId });
+      if (!payload) {
+        sendJson(response, 404, { success: false, error: '账户不存在' });
+        return true;
+      }
+      sendJson(response, 200, { success: true, ...payload });
+    } catch (err) {
+      sendJson(response, err.statusCode || 500, { success: false, error: err.message || '查询失败' });
     }
     return true;
   }

@@ -963,13 +963,58 @@ Page({
           : '—',
         todayProfitPctStr: pct(finalTodayPct),
         // UI 展示：去掉蓝色徽章里的「已更新」前缀，只保留日期，减少行高避免列表下方被遮挡
-        dataBadge: badge ? { ...badge, text: badge.text.replace(/^已更新/, '') } : null
+        dataBadge: badge ? { ...badge, text: badge.text.replace(/^已更新/, '') } : null,
+        // 性能条（服务端预格式化百分比；无数据为空串，wxml 按 wx:if 隐藏）
+        perfLine: this._perfLineOf(f.code)
       };
     });
 
     this.setData({ filteredFunds });
     // 异步并发刷新每只基金的 navDate（首次/缓存失效时拉取）
     this._refreshNavDatesIfNeeded(account.funds || []);
+    // 数据精简与百分比统一改造：异步补入 近1/3/6/12月收益、最大回撤、趋势、净值日期
+    // （服务端 /api/portfolio/performance 预格式化百分比字符串，前端只展示、不重复换算）
+    this._loadPerfMap(account ? account.name : '');
+  },
+
+  // 性能数据内存缓存（10 分钟 TTL；百分比字符串由服务端统一定制，空值 —）
+  _perfMap: {},
+  _perfMapMeta: { account: '', ts: 0, loaded: false },
+
+  _perfLineOf(code) {
+    const p = this._perfMap && this._perfMap[code];
+    if (!p) return '';
+    const TREND = { up: '上升', sideways: '震荡', down: '下降', unknown: '数据不足' };
+    const seg = (label, v) => `${label} ${v || '—'}`;
+    return [
+      seg('近1月', p.ret1m), seg('近3月', p.ret3m), seg('近6月', p.ret6m),
+      seg('近1年', p.ret1y), seg('回撤', p.mdd),
+      `趋势 ${TREND[p.trend] || '数据不足'}`,
+      `净值 ${p.navDate || '—'}`
+    ].join(' · ');
+  },
+
+  _loadPerfMap(accountName) {
+    if (!accountName || typeof http === 'undefined') return;
+    const meta = this._perfMapMeta;
+    const now = Date.now();
+    if (meta.loaded && meta.account === accountName && (now - meta.ts) < 10 * 60 * 1000) return;
+    meta.loaded = true; // 防重入：无论成败，10 分钟内不重复请求
+    meta.account = accountName;
+    meta.ts = now;
+    http.get(
+      `/api/portfolio/performance?account=${encodeURIComponent(accountName)}`,
+      null,
+      { silent: true }
+    ).then(res => {
+      if (res && res.success && res.performance) {
+        this._perfMap = res.performance;
+        meta.ts = Date.now();
+        this.filterAndSortFunds(); // 重新渲染 perfLine（本次进入 _loadPerfMap 会命中 TTL 直接返回）
+      }
+    }).catch(() => {
+      // 性能端点不可用（未登录/旧后端/超时）→ 静默跳过，不影响原有持仓页功能
+    });
   },
 
   // 并发拉取每只基金的 latest_nav.date（fast=1 不重算，直接读缓存）

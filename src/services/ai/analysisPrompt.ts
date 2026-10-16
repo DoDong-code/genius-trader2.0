@@ -78,12 +78,20 @@ export interface AnalysisAccount {
   maxFunds?: number;
 }
 
+export interface AnalysisHoldingsTable {
+  date?: string;
+  columns: string[];
+  funds: Array<Array<string | number | null>>;
+}
+
 export interface PortfolioInput {
   account?: AnalysisAccount;
   strategies?: string[];
   strategy?: { core?: string[]; forbidden?: string[]; rules?: string[] };
   portfolioSummary?: AnalysisPortfolioSummary | null;
   holdings?: AnalysisHolding[];
+  /** 紧凑数据表（服务端一次性格式化，columns 与 funds 行严格按序对应）；缺失时回退逐基金文本块 */
+  analysisTable?: AnalysisHoldingsTable | null;
   closedPositions?: Array<{ name?: string; code?: string; closedBefore?: string; amount?: number; reason?: string | string[] }>;
   combinationSummary?: string;
   totalAssets?: number;
@@ -94,9 +102,26 @@ export const ACTION_VERBS = [
   '继续持有', '暂不操作', '暂不补仓', '分批补仓', '做T', '适量减仓', '反弹减仓', '反弹退出', '退出', '观察'
 ];
 
-function fmtPct(v: number | null | undefined): string {
-  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '未提供';
-  return `${(Number(v) * 100).toFixed(2)}%`;
+function fmtPct(v: number | string | null | undefined): string {
+  // 统一百分比格式：两位小数、正值 +、负值 -、零 0.00%、空 —；
+  // 已格式化字符串（±x.xx%）原样返回，禁止二次乘 100。
+  if (typeof v === 'string') {
+    const s = v.trim();
+    if (/^[+-]?\d+(?:\.\d+)?\s*%$/.test(s)) {
+      const t = s.replace(/\s*%$/, '%');
+      return !t.startsWith('-') && !t.startsWith('+') && parseFloat(t) > 0 ? `+${t}` : t;
+    }
+    if (s === '' ) return '—';
+    const n = Number(s);
+    if (!Number.isFinite(n)) return '—';
+    return fmtPct(n);
+  }
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return '—';
+  const pct = Number(v) * 100;
+  if (pct === 0 || Object.is(pct, -0)) return '0.00%';
+  const text = pct.toFixed(2);
+  if (parseFloat(text) === 0) return '0.00%';
+  return pct > 0 ? `+${text}%` : `-${text.slice(1)}%`;
 }
 
 function fmtMoney(v: number | null | undefined): string {
@@ -225,6 +250,33 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
     `可用现金：${ps.cashAvailable === null || ps.cashAvailable === undefined ? '未提供' : fmtMoney(ps.cashAvailable)}；已实现盈亏：${ps.realizedProfitLoss === null || ps.realizedProfitLoss === undefined ? '未提供' : fmtMoney(ps.realizedProfitLoss)}`
   ].join('\n') : '未提供';
 
+  // —— 紧凑数据表（服务端已一次性格式化百分比；缺失时回退旧版逐基金文本块） ——
+  const dataTable = (data.analysisTable
+    && Array.isArray(data.analysisTable.columns) && data.analysisTable.columns.length > 0
+    && Array.isArray(data.analysisTable.funds)) ? data.analysisTable : null;
+
+  const dataTableBlock = dataTable
+    ? [
+        `date: ${dataTable.date || ''}`,
+        `columns: ${dataTable.columns.join(',')}`,
+        ...dataTable.funds.map(row => row
+          .map(cell => (cell === null || cell === undefined) ? '' : String(cell))
+          .join(' | '))
+      ].join('\n')
+    : null;
+
+  const enhancedBlocks = dataTableBlock
+    ? `【持仓数据表（columns 与每行数据严格按序对应；百分比已是格式化字符串："+"正、"-"负、"0.00%"零；"—"=缺失，严禁编造。navDate=正式净值截至日期，不是当日估值。ret1m/ret3m/ret6m/ret1y=近1/3/6/12月收益率，mdd=近1年最大回撤，ddHigh=当前距1年高点跌幅，trend=趋势分类(up/sideways/down/unknown)，bench=业绩基准名称，rel1m=相对基准近1月超额收益）】
+${dataTableBlock}`
+    : `【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
+${performanceBlock}
+
+【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
+${benchmarkBlock}
+
+【历史净值表现（每只）】
+${historyBlock}`;
+
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || '未提供';
 
@@ -244,11 +296,7 @@ ${portfolioSummaryBlock}
 【当前持仓（金额 / 成本 / 盈亏 / 今日）】
 ${holdingsTable}
 
-【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
-${performanceBlock}
-
-【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
-${benchmarkBlock}
+${enhancedBlocks}
 
 【基金角色与仓位上限（allocation，人工配置优先；overlap 由真实持仓计算）】
 ${allocationBlock}
@@ -256,9 +304,6 @@ ${allocationBlock}
 【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
 近期交易与清仓推导（已减多少、近期是否加仓）：
 ${narrative}
-
-历史净值表现（每只）：
-${historyBlock}
 
 【组合关系（不要孤立分析一只基金）】
 ${combination}
@@ -269,7 +314,7 @@ ${combination}
    - 当前仓位是否合理？
    - 今天是否适合卖？
    注意：长期应退出 ≠ 今天大跌必须割肉；长期值得持有 ≠ 当前仓位过高时不能减仓。
-2. 严禁机械化规则：今天涨→卖、今天跌→减、盈利→止盈、亏损→止损、跌多→补、涨多→卖，一律禁止。必须综合【量化表现（趋势/回撤/波动率）、基准相对表现、基金角色与上限、当前仓位、持仓成本、历史调仓、基金间重合度、用户策略、回本目标、当前市场环境】再给操作。
+2. 严禁机械化规则：今天涨→卖、今天跌→减、盈利→止盈、亏损→止损、跌多→补、涨多→卖，一律禁止。必须综合【持仓数据表（趋势/回撤/周期收益/基准超额）、基金角色与上限、当前仓位、持仓成本、历史调仓、基金间重合度、用户策略、回本目标、当前市场环境】再给操作。
 3. 禁止仅凭以下单一信息给出买卖建议：当日涨跌幅、单只基金浮亏比例、个别股票重合、连续下跌天数、缺少日期的历史净值、不完整或未经验证的新闻。
 4. 必须区分以下情形，给出不同结论：
    ① 基金短期回调，但中期趋势尚未破坏（如近3月收益为正、未跌破趋势）→ 不因短期波动减仓；

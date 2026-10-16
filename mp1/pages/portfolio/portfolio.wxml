@@ -118,6 +118,8 @@
               <text wx:if="{{item.dataBadge}}" class="data-badge {{item.dataBadge.tone === 'blue' ? 'data-badge-blue' : 'data-badge-gray'}}">{{item.dataBadge.text}}</text>
               <text style="font-size: 20rpx; color: #86868b; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;">{{item.code}} · {{item.sector || item.category || '其他'}}</text>
             </view>
+            <!-- 性能条：近1/3/6/12月收益、最大回撤、趋势、净值日期（服务端预格式化百分比，空值 —） -->
+            <text wx:if="{{item.perfLine}}" class="fund-perf-line">{{item.perfLine}}</text>
           </view>
 
           <block wx:for="{{headerColumns}}" wx:for-item="col" wx:key="key">
