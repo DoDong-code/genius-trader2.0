@@ -228,7 +228,9 @@ test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 A
   assert.equal(h.amount, 3000);
   assert.equal(h.cost, 2700);
   assert.equal(h.profit, 300);
-  assert.equal(h.profitRate, 0.1);
+  // 盈亏率统一成本口径 profit/cost = 300/2700 ≈ 0.1111（与 Web/mp1 持仓页 holdingRate 一致；
+  // 旧市值口径 profit/amount=0.1 会把深度亏损账户放大成 -246% 之类的假数值）
+  assert.ok(Math.abs(h.profitRate - 300 / 2700) < 1e-4);
   assert.equal(typeof h.todayEstimate, 'number');
   assert.equal(typeof h.todayChange, 'number');
   assert.ok(Array.isArray(h.history));

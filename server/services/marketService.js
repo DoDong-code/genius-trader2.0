@@ -480,6 +480,11 @@ async function fetchStockPayload(secid) {
     url.searchParams.set('secid', secid);
     url.searchParams.set('ut', 'bd1d9ddb04089700cf9c27f6f7426281');
     url.searchParams.set('invt', '2');
+    // fltt=2：价格/涨跌幅字段直接返回格式化浮点（东财官网自用参数）。
+    // 实测（2026-10-16）：510300 → f43=4.236、159915 → f43=2.789、f170=-0.61（%）。
+    // 旧逻辑对原始整数 f43 硬编码 /100，对 3 位小数报价的 ETF（510/51x/15x 等）
+    // 会放大 10 倍并污染基准序列（生产事故 7.391442 的根因），故改为 fltt=2 直读。
+    url.searchParams.set('fltt', '2');
     url.searchParams.set('fields', 'f12,f14,f43,f57,f58,f170');
     try {
       return JSON.parse(await fetchText(url, {
@@ -507,8 +512,9 @@ async function fetchStockQuote(code) {
         return {
           stock_code: String(data.f12 || normalized),
           stock_name: data.f14 || data.f58 || null,
-          price: Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
-          change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
+          price: Number.isFinite(Number(data.f43)) ? Number(data.f43) : null,
+          // fltt=2 后 f170 已是百分数（如 -0.61 表示 -0.61%），转小数比例
+          change_percent: Number.isFinite(Number(data.f170)) ? Number(data.f170) / 100 : null,
           source: payload?.rt === 4 ? 'push2-delay' : 'push2'
         };
       } catch (error) {
@@ -932,8 +938,9 @@ async function fetchIndexQuotes(force = false) {
       const data = payload && payload.data;
       return {
         name,
-        price: data && Number.isFinite(Number(data.f43)) ? Number(data.f43) / 100 : null,
-        changePercent: data && Number.isFinite(Number(data.f170)) ? Number(data.f170) / 10000 : null,
+        price: data && Number.isFinite(Number(data.f43)) ? Number(data.f43) : null,
+        // fltt=2 后 f170 已是百分数，转小数比例
+        changePercent: data && Number.isFinite(Number(data.f170)) ? Number(data.f170) / 100 : null,
         ok: Boolean(data && Number.isFinite(Number(data.f43)))
       };
     } catch (error) {

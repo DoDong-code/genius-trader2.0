@@ -35,7 +35,26 @@ async function loadUserAccounts(userId) {
     });
   }
   const synced = await listSyncedAccounts(userId);
-  synced.forEach(acc => accounts.push({ ...acc, source: 'sync' }));
+  const savedAccounts = (state && state.accounts) || {};
+  synced.forEach(acc => {
+    // 策略/目标类配置以 user_data（前端保存）为准：sync 账户的 portfolio 表不存策略
+    // （portfolioService 硬编码 strategy: []），此前导致 AI 与导出 JSON 的 strategies
+    // 恒为空数组。仅合并策略类字段，不合并 funds（服务端权威）；
+    // user_data 无该账户时保持 []（如实缺失，不伪造策略）。
+    const saved = savedAccounts[acc.name] || null;
+    const merged = {
+      ...acc,
+      strategy: Array.isArray(saved && saved.strategy)
+        ? saved.strategy.slice()
+        : (Array.isArray(acc.strategy) ? acc.strategy : []),
+      closedPositions: Array.isArray(saved && saved.closedPositions)
+        ? saved.closedPositions.slice()
+        : (Array.isArray(acc.closedPositions) ? acc.closedPositions : [])
+    };
+    if (saved && Number.isFinite(Number(saved.targetRecovery))) merged.targetRecovery = Number(saved.targetRecovery);
+    if (saved && Number.isFinite(Number(saved.maxFunds))) merged.maxFunds = Number(saved.maxFunds);
+    accounts.push({ ...merged, source: 'sync' });
+  });
   return accounts;
 }
 
@@ -122,13 +141,16 @@ function periodReturn(history, days) {
 function enrichFund(fund, accountFunds, strategy, userId) {
   const amount = Number(fund.amount) || 0;
   const profit = Number(fund.holdingProfit ?? fund.profit ?? 0) || 0;
-  const profitRate = amount > 0 ? profit / amount : 0;
   const today = Number(fund.today) || 0;
   // P3.19：成本基数（优先 fund.cost / costBasis；缺失时用 金额-盈亏 反推，避免为 0）
   let cost = 0;
   if (Number.isFinite(Number(fund.cost)) && Number(fund.cost) > 0) cost = Number(fund.cost);
   else if (Number.isFinite(Number(fund.costBasis)) && Number(fund.costBasis) > 0) cost = Number(fund.costBasis);
   else if (amount > 0) cost = amount - profit;
+  // 盈亏率统一成本口径（与 Web / 小程序持仓页 holdingRate 显示一致）：
+  // cost = 当前持仓成本，profit = 当前持仓浮动盈亏（sync 账户 portfolio 表 amount-cost；
+  // manual 账户前端 holdingProfit/costBasis 同口径）。cost 无效时如实 null，禁止 0 冒充。
+  const profitRate = cost > 0 ? profit / cost : null;
   // P3.19：近期交易记录（买卖），最多保留 8 条，供 AI 理解「已减多少 / 近期是否加仓」
   const transactions = Array.isArray(fund.transactions) ? fund.transactions.slice(-8) : [];
   return {
@@ -145,6 +167,84 @@ function enrichFund(fund, accountFunds, strategy, userId) {
     type: String(fund.category || fund.fund_type || '基金'),
     direction: directionFor(fund.code, fund.name)
   };
+}
+
+// —— 紧凑数据表（AI 输入专用）：服务端是百分比唯一格式化点，前端/AI 不重复换算 ——
+function formatPctCell(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'string') return v.includes('%') ? v : (v === '' ? '—' : v);
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  const rounded = Math.round(n * 10000) / 100; // 小数比例 → 百分数，保留两位
+  if (rounded === 0) return '0.00%';
+  const text = Math.abs(rounded).toFixed(2);
+  return rounded > 0 ? `+${text}%` : `-${text}%`;
+}
+
+function formatMoneyCell(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '—';
+  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/**
+ * 紧凑 AI 数据表：一次定义列名，行数据严格对齐 columns。
+ * 覆盖 盈亏(成本口径)/今日/1m/3m/6m/1y/最大回撤/距高点回撤/趋势/基准超额/净值日期，
+ * 替代逐基金多层 performance/benchmark/history 冗长块。空值一律 '—'。
+ */
+function buildAnalysisTable(holdings) {
+  const columns = [
+    'code', 'name', 'amount', 'cost', 'profit', 'profitPct', 'todayPct',
+    '1m', '3m', '6m', '1y', 'mdd', 'ddHigh', 'trend', 'rel1m', 'navDate'
+  ];
+  const funds = (Array.isArray(holdings) ? holdings : []).map(h => {
+    const perf = h.performance || {};
+    return [
+      String(h.code || ''),
+      String(h.name || ''),
+      formatMoneyCell(h.amount),
+      formatMoneyCell(h.cost),
+      formatMoneyCell(h.profit),
+      formatPctCell(h.profitRate),
+      formatPctCell(h.todayEstimate),
+      formatPctCell(perf.return1m),
+      formatPctCell(perf.return3m),
+      formatPctCell(perf.return6m),
+      formatPctCell(perf.return1y),
+      formatPctCell(perf.maxDrawdown1y),
+      formatPctCell(perf.drawdownFromHigh1y),
+      perf.trend || 'unknown',
+      formatPctCell(h.benchmark && h.benchmark.relativeReturn1m),
+      perf.dataAsOf || ''
+    ];
+  });
+  return { columns, funds };
+}
+
+/**
+ * 数据校验警告（导出 JSON 与 AI 输入共用口径说明）：
+ * 只报告真实数据源问题，不把口径差异当错误；缺失如实标注，不伪造。
+ */
+function buildDataWarnings(portfolio) {
+  const warnings = [];
+  const holdings = (portfolio && Array.isArray(portfolio.holdings)) ? portfolio.holdings : [];
+  for (const h of holdings) {
+    if (h.profitRate === null || h.profitRate === undefined) {
+      warnings.push(`${h.code || ''} ${h.name || ''}: 持仓成本无效，盈亏率不可用（profitRate=null）`);
+    }
+    const bench = h.benchmark;
+    if (bench && bench.unavailableReason) {
+      warnings.push(`${h.code || ''} ${h.name || ''}: 基准数据不可用（${bench.unavailableReason}），基准字段已置 null`);
+    }
+    const perf = h.performance || {};
+    if (perf.dataAsOf == null && (perf.return1m != null || perf.return3m != null)) {
+      warnings.push(`${h.code || ''} ${h.name || ''}: 收益率缺少对应净值日期（dataAsOf=null），请勿当作最新数据`);
+    }
+  }
+  if (!portfolio || !Array.isArray(portfolio.strategies) || portfolio.strategies.length === 0) {
+    warnings.push('账户策略缺失（strategies 为空）：未找到该账户的策略配置，portfolioSummary 依据不足');
+  }
+  return warnings;
 }
 
 // P3.19：组合关系摘要（让 AI 横向比较基金，而非孤立分析单只）
@@ -316,7 +416,7 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
       base.performance = perf;
       base.benchmark = await requestMemo(
         `bench:${code}`,
-        () => fundMetrics.getBenchmarkMetrics(code, perf.return1m, perf.return3m)
+        () => fundMetrics.getBenchmarkMetrics(code, perf.return1m, perf.return3m, perf.dataAsOf)
       );
       base.allocation = fundMetrics.buildAllocation(code, overlapMap.get(code) === undefined ? null : overlapMap.get(code));
       // P3.19：历史摘要（替代把完整 history 数组塞给模型，节省 token、聚焦结论）
@@ -360,6 +460,8 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     ),
     strategies: Array.isArray(target.strategy) ? target.strategy.slice() : [],
     strategy,
+    // 紧凑 AI 数据表（prompt 渲染用；导出 JSON 不含此字段，保持原契约）
+    analysisTable: buildAnalysisTable(holdings),
     holdings,
     closedPositions: Array.isArray(target.closedPositions) ? target.closedPositions.slice(-10) : [],
     combinationSummary: buildCombinationSummary(holdings),
@@ -387,5 +489,8 @@ module.exports = {
   loadUserAccounts,
   listAnalysisAccounts,
   parseStrategy,
-  directionFor
+  directionFor,
+  buildAnalysisTable,
+  buildDataWarnings,
+  formatPctCell
 };

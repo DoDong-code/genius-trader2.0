@@ -384,12 +384,17 @@ test('getBenchmarkMetrics：配置基准（007339→510300）→ 从 stock_price
   const rows = dailySeries('2025-06-01', 380, i => 3.8 + i * 0.002);
   const insert = db.prepare('INSERT OR REPLACE INTO stock_price (stock_code, date, price, change_percent, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)');
   for (const r of rows) insert.run('510300', r.date, r.nav, 0);
-  const b = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05);
+  // 基金净值日与基准行情日对齐（±7 天容差）→ relativeReturn 正常计算
+  const b = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-06-15');
   assert.equal(b.name, '沪深300指数');
   assert.equal(b.kind, 'auxiliary');
   assert.ok(b.return1m !== null && b.return3m !== null);
   assert.ok(Math.abs(b.relativeReturn1m - (0.02 - b.return1m)) < 1e-6);
   assert.equal(b.dataAsOf, '2026-06-15'); // 真实最新行情日期，不伪造
+  // 窗口错位（QDII 滞后等）→ relativeReturn 如实 null，禁止跨窗口比较
+  const misaligned = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-01-10');
+  assert.equal(misaligned.return1m, b.return1m); // 基准自身收益照常
+  assert.equal(misaligned.relativeReturn1m, null);
 });
 
 // ---------------------------------------------------------------------------

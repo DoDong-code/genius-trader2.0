@@ -78,11 +78,19 @@ export interface AnalysisAccount {
   maxFunds?: number;
 }
 
+/** 服务端预格式化的紧凑持仓数据表（列名一次定义，行严格对齐 columns；空值 '—'） */
+export interface AnalysisTable {
+  columns: string[];
+  funds: (string | number)[][];
+}
+
 export interface PortfolioInput {
   account?: AnalysisAccount;
   strategies?: string[];
   strategy?: { core?: string[]; forbidden?: string[]; rules?: string[] };
   portfolioSummary?: AnalysisPortfolioSummary | null;
+  /** 有表时优先渲染，跳过逐基金多层冗长块；无表回退旧结构（客户端自带 portfolio 兼容） */
+  analysisTable?: AnalysisTable | null;
   holdings?: AnalysisHolding[];
   closedPositions?: Array<{ name?: string; code?: string; closedBefore?: string; amount?: number; reason?: string | string[] }>;
   combinationSummary?: string;
@@ -228,6 +236,17 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || '未提供';
 
+  // —— 紧凑数据表路径：服务端（buildAnalysisTable）是百分比唯一格式化点，此处只渲染不换算。
+  // 有表时跳过逐基金 holdings/performance/benchmark/history 四个冗长块；无表回退旧结构。 ——
+  const analysisTable = (data.analysisTable && Array.isArray(data.analysisTable.funds) && data.analysisTable.funds.length > 0)
+    ? data.analysisTable
+    : null;
+  const tableBlock = analysisTable ? [
+    '列说明：amount/cost/profit=金额(元)；profitPct=盈亏率(成本口径=盈亏/成本)；todayPct=今日估算涨跌；1m/3m/6m/1y=近1/3/6/12月收益率；mdd=近1年最大回撤；ddHigh=距近1年高点回撤；trend=趋势(up/sideways/down/unknown)；rel1m=近1月相对基准超额；navDate=计算所用净值日期。百分比已格式化为字符串，「—」= 数据缺失，严禁编造或重复换算。',
+    analysisTable.columns.join(' | '),
+    ...analysisTable.funds.map(row => row.join(' | '))
+  ].join('\n') : null;
+
   return `你是一个真正理解这个基金账户“过去发生了什么”的资深投资顾问。你的唯一目标：结合账户历史做判断，并直接给出今天每只基金该怎么操作。少讲废话，把最重要的操作直接给到每只基金。
 
 【当前账户】
@@ -241,14 +260,17 @@ ${strategies}
 ${portfolioSummaryBlock}
 注意：若回本目标标注「定义待确认」，不要自行解释为已确认的目标，仅在需要时提示用户确认。
 
-【当前持仓（金额 / 成本 / 盈亏 / 今日）】
+${tableBlock
+    ? `【持仓数据表（唯一持仓数据源，列顺序严格对应表头；「—」= 缺失）】
+${tableBlock}`
+    : `【当前持仓（金额 / 成本 / 盈亏 / 今日）】
 ${holdingsTable}
 
 【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
 ${performanceBlock}
 
 【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
-${benchmarkBlock}
+${benchmarkBlock}`}
 
 【基金角色与仓位上限（allocation，人工配置优先；overlap 由真实持仓计算）】
 ${allocationBlock}
@@ -256,10 +278,9 @@ ${allocationBlock}
 【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
 近期交易与清仓推导（已减多少、近期是否加仓）：
 ${narrative}
-
+${tableBlock ? '' : `
 历史净值表现（每只）：
-${historyBlock}
-
+${historyBlock}`}
 【组合关系（不要孤立分析一只基金）】
 ${combination}
 

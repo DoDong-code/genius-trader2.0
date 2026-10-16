@@ -353,7 +353,7 @@ async function handleFundApi(request, response, url) {
     try {
       const { runInRequestScope } = require('../utils/requestScope');
       const payload = await runInRequestScope(async () => {
-        const { buildAnalysisPortfolio, loadUserAccounts } = require('../services/portfolioAnalysisService');
+        const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings } = require('../services/portfolioAnalysisService');
         const { requestMemo } = require('../utils/requestScope');
         const portfolio = await buildAnalysisPortfolio(
           userId,
@@ -391,7 +391,11 @@ async function handleFundApi(request, response, url) {
             amount: Number((Number(h.amount) || 0).toFixed(2)),
             cost: Number((Number(h.cost) || 0).toFixed(2)),
             profit: Number((Number(h.profit) || 0).toFixed(2)),
-            profitRate: (Number(h.amount) || 0) > 0 ? Number(((Number(h.profit) || 0) / Number(h.amount)).toFixed(4)) : 0,
+            // 盈亏率与 AI 同源（buildAnalysisPortfolio.enrichFund）：成本口径 profit/cost，
+            // 与 Web / 小程序持仓页 holdingRate 一致；cost 无效时 null，禁止 0 冒充。
+            profitRate: Number.isFinite(Number(h.profitRate))
+              ? Number(Number(h.profitRate).toFixed(4))
+              : null,
             todayChange: Number((Number(h.todayEstimate) || 0).toFixed(4)),
             todayProfit: Number((Number(h.today_change) || 0).toFixed(2)),
             navUpdatedAt: (Array.isArray(h.history) && h.history.length)
@@ -414,6 +418,9 @@ async function handleFundApi(request, response, url) {
           },
           strategies: Array.isArray(portfolio.strategies) ? portfolio.strategies.slice() : [],
           portfolioSummary: portfolio.portfolioSummary || null,
+          // 数据校验警告（真实数据源问题如实标注：profitRate 口径、基准不可用原因、策略缺失）。
+          // 不改变任何原有字段结构，仅追加校验输出。
+          dataWarnings: buildDataWarnings(portfolio),
           holdings: fundsOut
         };
       }, { userId });

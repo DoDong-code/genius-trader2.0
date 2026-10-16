@@ -37,6 +37,8 @@ const BACKFILL_WAIT_MS = Number(process.env.PERF_BACKFILL_WAIT_MS || 8000);
 
 // performance 历史窗口上限（≈ 19 个月交易日；即使按自然日数据也足以覆盖 1 年窗口）
 const PERF_HISTORY_LIMIT = Math.min(Math.max(Number(process.env.PERF_HISTORY_LIMIT || 400), 60), 1000);
+// 相对收益窗口对齐容差：基金净值日与基准行情日相差超过该天数 → relativeReturn 为 null
+const BENCH_ALIGN_TOLERANCE_DAYS = Number(process.env.BENCH_ALIGN_TOLERANCE_DAYS || 7);
 
 // ============================================================================
  // 纯函数：序列规范化
@@ -71,6 +73,38 @@ function normalizeSeries(rows, { valueField = 'nav' } = {}) {
     byDate.set(date, { date, value: raw });
   }
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/**
+ * 序列尺度异常检测（纯函数）：
+ * 逐行与此前 window 行的中位数比较，偏离超过 jumpFactor 倍（>×j 或 <÷j）判为异常行。
+ * 背景（2026-10-16 生产事故）：estimateEngine 将 ETF 实时报价按 2 位小数精度换算（实际 3 位），
+ * 写入 stock_price 当日行价格放大 10 倍，污染基准序列导致收益率爆炸（如 7.39 = 0.739×10 量级）。
+ * 该检测同时防护：不同单位混写、单行脏数据。返回异常行日期 Set。
+ */
+function detectScaleAnomalies(series, { jumpFactor = 4, window = 10 } = {}) {
+  const bad = new Set();
+  if (!Array.isArray(series) || series.length < window + 1) return bad;
+  const values = series.map(p => Number(p.value));
+  for (let i = window; i < series.length; i += 1) {
+    const ref = values.slice(i - window, i).filter(v => v > 0).sort((a, b) => a - b);
+    if (!ref.length) continue;
+    const mid = ref.length >> 1;
+    const median = ref.length % 2 ? ref[mid] : (ref[mid - 1] + ref[mid]) / 2;
+    if (!(median > 0)) continue;
+    if (values[i] > median * jumpFactor || values[i] < median / jumpFactor) {
+      bad.add(series[i].date);
+    }
+  }
+  return bad;
+}
+
+/** 两个 yyyy-mm-dd 的自然日差（a - b） */
+function dayDiff(a, b) {
+  const da = Date.parse(`${a}T00:00:00Z`);
+  const dbb = Date.parse(`${b}T00:00:00Z`);
+  if (!Number.isFinite(da) || !Number.isFinite(dbb)) return null;
+  return Math.round((da - dbb) / 86400000);
 }
 
 // ============================================================================
@@ -451,6 +485,10 @@ async function backfillPerformanceHistory(fundCode, fetcher = defaultFetchFundHi
 async function getPerformanceHistory(code) {
   const fundCode = assertFundCode(code);
   let series = await readNavSeries(fundCode);
+  // 尺度异常防护（8 倍保守阈值：开放式基金单日净值不会跳 8 倍；份额折算类真实跳变
+  // 通常 ≤ 5 倍不会被误剔）。异常行剔除而非返回污染指标。
+  const bad = detectScaleAnomalies(series, { jumpFactor: 8, window: 10 });
+  if (bad.size) series = series.filter(p => !bad.has(p.date));
   if (coversOneYear(series)) return series;
   try {
     const backfill = backfillPerformanceHistory(fundCode);
@@ -477,12 +515,12 @@ async function readBenchmarkSeries(stockCode, limit = 450) {
 
 const benchInFlight = new Map();
 
-async function ensureBenchmarkHistory(stockCode, syncer = defaultSyncBenchmarkHistory) {
+async function ensureBenchmarkHistory(stockCode, syncer = defaultSyncBenchmarkHistory, { force = false } = {}) {
   if (benchInFlight.has(stockCode)) return benchInFlight.get(stockCode);
   const promise = (async () => {
     const markerKey = `bench_history:${stockCode}`;
     const lastRun = Number(await getSyncMarker(markerKey)) || 0;
-    if (Date.now() - lastRun < BACKFILL_TTL_FAIL_MS) return { skipped: true };
+    if (!force && Date.now() - lastRun < BACKFILL_TTL_FAIL_MS) return { skipped: true };
     await setSyncMarker(markerKey, Date.now());
     try {
       const res = await syncer(stockCode, { days: 450 });
@@ -501,41 +539,73 @@ async function ensureBenchmarkHistory(stockCode, syncer = defaultSyncBenchmarkHi
 /**
  * 基准同期指标（需求 §六）。基准来自人工配置的辅助分析基准（fundProfiles）。
  * 未配置基准 → 返回全 null 对象（绝不默认沪深300）。
+ * 污染防护：先检测尺度异常行（如 10 倍污染的实时报价行）→ 强制重同步覆盖 →
+ * 仍异常则剔除异常行计算；剔除后仍异常 → 明确返回不可用（unavailableReason），绝不返回污染收益率。
  * @param {string} fundCode
  * @param {number|null} fundReturn1m 基金近1月收益（算 relativeReturn 用）
  * @param {number|null} fundReturn3m
+ * @param {string|null} fundDataAsOf 基金净值日期（相对收益窗口对齐校验用）
  */
-async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m) {
+async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDataAsOf) {
   const empty = {
     name: null, return1m: null, return3m: null, relativeReturn1m: null,
-    dataAsOf: null, kind: null, source: null
+    dataAsOf: null, kind: null, source: null, unavailableReason: null
   };
   const profile = profileConfig.fundProfiles[String(fundCode)];
   const bench = profile && profile.benchmark;
   if (!bench || !bench.stockCode) return empty;
 
-  let series = await readBenchmarkSeries(bench.stockCode);
+  const BENCH_JUMP_FACTOR = 4; // 指数/ETF 代理单日不会跳 4 倍；超过即视为污染行
+  const readNorm = async () => normalizeSeries(
+    (await readBenchmarkSeries(bench.stockCode)).map(r => ({ date: r.date, nav: r.price }))
+  );
+
+  let norm = await readNorm();
   // 基准行情不足 3 个月窗口（< 45 条）时按需补齐（带节流，失败不影响返回）
-  if (series.length < 45) {
+  if (norm.length < 45) {
     try {
       const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), BACKFILL_WAIT_MS));
       await Promise.race([ensureBenchmarkHistory(bench.stockCode), timeout]);
-      series = await readBenchmarkSeries(bench.stockCode);
+      norm = await readNorm();
     } catch (err) { /* 忽略，用现有数据 */ }
   }
-  const norm = normalizeSeries(series.map(r => ({ date: r.date, nav: r.price })));
+
+  // 尺度污染防护：发现异常行 → 强制重同步（绕过节流，用真实 qfq 收盘覆盖污染行）
+  let anomalies = detectScaleAnomalies(norm, { jumpFactor: BENCH_JUMP_FACTOR, window: 10 });
+  if (anomalies.size) {
+    try {
+      const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), BACKFILL_WAIT_MS));
+      await Promise.race([ensureBenchmarkHistory(bench.stockCode, defaultSyncBenchmarkHistory, { force: true }), timeout]);
+      norm = await readNorm();
+      anomalies = detectScaleAnomalies(norm, { jumpFactor: BENCH_JUMP_FACTOR, window: 10 });
+    } catch (err) { /* 重同步失败：走剔除路径 */ }
+  }
+  if (anomalies.size) norm = norm.filter(p => !anomalies.has(p.date));
+  // 剔除后仍异常 → 数据源本身不可信，明确不可用（P0：禁止伪造收益率）
+  if (detectScaleAnomalies(norm, { jumpFactor: BENCH_JUMP_FACTOR, window: 10 }).size) {
+    return { ...empty, unavailableReason: 'benchmark_series_scale_anomaly' };
+  }
+  if (norm.length < 2) {
+    return { ...empty, unavailableReason: 'benchmark_history_insufficient' };
+  }
+
   const r1m = calendarReturn(norm, 1);
   const r3m = calendarReturn(norm, 3);
+  const benchAsOf = norm[norm.length - 1].date;
+  // 相对收益只在基金与基准数据日期对齐（±7 天）时计算，禁止跨窗口错配比较
+  const gap = (fundDataAsOf && benchAsOf) ? Math.abs(dayDiff(fundDataAsOf, benchAsOf)) : null;
+  const aligned = gap !== null && gap <= BENCH_ALIGN_TOLERANCE_DAYS;
   return {
     name: bench.name || null,
     return1m: round6(r1m),
     return3m: round6(r3m),
-    relativeReturn1m: (round6(r1m) !== null && round6(fundReturn1m) !== null)
+    relativeReturn1m: (aligned && round6(r1m) !== null && round6(fundReturn1m) !== null)
       ? Number((round6(fundReturn1m) - round6(r1m)).toFixed(6))
       : null,
-    dataAsOf: norm.length ? norm[norm.length - 1].date : null,
+    dataAsOf: benchAsOf,
     kind: bench.kind || 'auxiliary',
-    source: bench.source || null
+    source: bench.source || null,
+    unavailableReason: aligned ? null : (gap === null ? 'fund_data_asof_missing' : 'window_misaligned')
   };
 }
 
@@ -568,6 +638,8 @@ module.exports = {
   buildAllocation,
   compactNavHistoryString,
   coversOneYear,
+  detectScaleAnomalies,
+  dayDiff,
   // 数据访问
   readNavSeries,
   getPerformanceHistory,
