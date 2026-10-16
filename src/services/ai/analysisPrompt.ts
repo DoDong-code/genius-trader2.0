@@ -11,6 +11,47 @@ import { AIConfig, PortfolioData, AnalysisResponse } from './openai';
  * - 取消健康度/风险评分的生成（保留字段为 null，不参与判断、不展示）
  */
 
+export interface AnalysisPerformance {
+  return1m?: number | null;
+  return3m?: number | null;
+  return6m?: number | null;
+  return1y?: number | null;
+  maxDrawdown1y?: number | null;
+  drawdownFromHigh1y?: number | null;
+  volatility20d?: number | null;
+  trend?: 'up' | 'sideways' | 'down' | 'unknown' | null;
+  dataAsOf?: string | null;
+  historyDays?: number | null;
+}
+
+export interface AnalysisBenchmark {
+  name?: string | null;
+  return1m?: number | null;
+  return3m?: number | null;
+  relativeReturn1m?: number | null;
+  dataAsOf?: string | null;
+  kind?: string | null;
+  source?: string | null;
+}
+
+export interface AnalysisAllocation {
+  role?: string | null;
+  sector?: string | null;
+  maxAmount?: number | null;
+  overlapWarning?: boolean | null;
+}
+
+export interface AnalysisPortfolioSummary {
+  equityCap?: number | null;
+  coreIndex?: string | null;
+  coreIndexCap?: number | null;
+  recoveryTarget?: number | null;
+  recoveryHorizonMonths?: number | null;
+  cashAvailable?: number | null;
+  realizedProfitLoss?: number | null;
+  recoveryDefinitionStatus?: string | null;
+}
+
 export interface AnalysisHolding {
   code?: string;
   name?: string;
@@ -23,6 +64,9 @@ export interface AnalysisHolding {
   direction?: string;
   positionType?: string;
   historySummary?: string;
+  performance?: AnalysisPerformance | null;
+  benchmark?: AnalysisBenchmark | null;
+  allocation?: AnalysisAllocation | null;
   transactions?: Array<{ type?: string; date?: string; amount?: number; shares?: number }>;
 }
 
@@ -38,6 +82,7 @@ export interface PortfolioInput {
   account?: AnalysisAccount;
   strategies?: string[];
   strategy?: { core?: string[]; forbidden?: string[]; rules?: string[] };
+  portfolioSummary?: AnalysisPortfolioSummary | null;
   holdings?: AnalysisHolding[];
   closedPositions?: Array<{ name?: string; code?: string; closedBefore?: string; amount?: number; reason?: string | string[] }>;
   combinationSummary?: string;
@@ -46,7 +91,7 @@ export interface PortfolioInput {
 
 // 标准动作词表（约束 AI 输出，保证前端可直接展示）
 export const ACTION_VERBS = [
-  '继续持有', '暂不操作', '暂不补仓', '分批补仓', '适量减仓', '反弹减仓', '反弹退出', '退出', '观察'
+  '继续持有', '暂不操作', '暂不补仓', '分批补仓', '做T', '适量减仓', '反弹减仓', '反弹退出', '退出', '观察'
 ];
 
 function fmtPct(v: number | null | undefined): string {
@@ -61,6 +106,33 @@ function fmtMoney(v: number | null | undefined): string {
 
 function money(v: number | null | undefined): number {
   return Number.isFinite(Number(v)) ? Number(v) : 0;
+}
+
+function fmtNum(v: number | null | undefined): string {
+  const n = Number(v);
+  return (v === null || v === undefined || !Number.isFinite(n)) ? '未提供' : String(n);
+}
+
+/** 趋势与角色等枚举值的安全中文映射（未知原样输出「未提供/unknown」） */
+function fmtEnum(v: string | null | undefined, map: Record<string, string>): string {
+  if (!v) return '未提供';
+  return map[v] || v;
+}
+
+const TREND_LABEL: Record<string, string> = {
+  up: '上升趋势', sideways: '横盘震荡', down: '下降趋势', unknown: '数据不足(unknown)'
+};
+
+const ROLE_LABEL: Record<string, string> = {
+  core: '核心宽基', growth: '成长配置', sector: '行业主题',
+  defensive: '防御配置', diversifier: '分散配置', unknown: '未确认'
+};
+
+function fmtDataAsOf(perf?: AnalysisPerformance | null): string {
+  const d = perf && perf.dataAsOf ? String(perf.dataAsOf) : '';
+  const days = perf && perf.historyDays !== null && perf.historyDays !== undefined ? Number(perf.historyDays) : null;
+  if (!d) return '无有效历史净值';
+  return days !== null && Number.isFinite(days) ? `${d}（有效 ${days} 个交易日）` : d;
 }
 
 /**
@@ -109,6 +181,50 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
     ? holdings.map(h => `${h.code || ''} ${h.name || ''}：${h.historySummary || '未提供'}`).join('\n')
     : '（无）';
 
+  // —— 数据增强板块：performance（量化表现，后端按日历窗口计算，全部为小数比率） ——
+  const performanceBlock = holdings.length
+    ? holdings.map(h => {
+        const p = h.performance;
+        if (!p) return `${h.code || ''} ${h.name || ''}：未提供`;
+        return [
+          `${h.code || ''} ${h.name || ''}：`,
+          `近1月 ${fmtPct(p.return1m)} / 近3月 ${fmtPct(p.return3m)} / 近6月 ${fmtPct(p.return6m)} / 近1年 ${fmtPct(p.return1y)}`,
+          `近1年最大回撤 ${fmtPct(p.maxDrawdown1y)} / 当前距1年高点 ${fmtPct(p.drawdownFromHigh1y)} / 20日年化波动率 ${fmtPct(p.volatility20d)}`,
+          `趋势 ${fmtEnum(p.trend, TREND_LABEL)}；数据截至 ${fmtDataAsOf(p)}`
+        ].join('；');
+      }).join('\n')
+    : '（无）';
+
+  // —— 数据增强板块：benchmark（业绩基准对比；未配置基准如实标注，严禁默认沪深300） ——
+  const benchmarkBlock = holdings.length
+    ? holdings.map(h => {
+        const b = h.benchmark;
+        if (!b || !b.name) return `${h.code || ''} ${h.name || ''}：无可用业绩基准（未提供，不要自行假设基准）`;
+        return `${h.code || ''} ${h.name || ''}：基准「${b.name}」（${b.kind === 'official' ? '官方业绩基准' : '辅助分析基准'}）基准近1月 ${fmtPct(b.return1m)} / 近3月 ${fmtPct(b.return3m)}；相对基准近1月超额 ${fmtPct(b.relativeReturn1m)}；基准数据截至 ${b.dataAsOf || '未提供'}`;
+      }).join('\n')
+    : '（无）';
+
+  // —— 数据增强板块：allocation（基金角色与仓位上限，人工配置优先） ——
+  const allocationBlock = holdings.length
+    ? holdings.map(h => {
+        const a = h.allocation;
+        if (!a) return `${h.code || ''} ${h.name || ''}：未提供`;
+        const cap = (a.maxAmount === null || a.maxAmount === undefined) ? '无单独上限' : fmtMoney(a.maxAmount);
+        const overlap = (a.overlapWarning === null || a.overlapWarning === undefined)
+          ? '重合数据不足(未判定)'
+          : (a.overlapWarning ? '与组合内其他基金存在真实重仓重合' : '无显著重仓重合');
+        return `${h.code || ''} ${h.name || ''}：角色 ${fmtEnum(a.role, ROLE_LABEL)} / 方向 ${a.sector || '未提供'} / 目标上限 ${cap} / ${overlap}`;
+      }).join('\n')
+    : '（无）';
+
+  const ps = data.portfolioSummary;
+  const portfolioSummaryBlock = ps ? [
+    `权益总持仓目标上限：${ps.equityCap === null || ps.equityCap === undefined ? '未提供' : fmtMoney(ps.equityCap)}`,
+    `核心宽基：${ps.coreIndex || '未指定'}，目标上限 ${ps.coreIndexCap === null || ps.coreIndexCap === undefined ? '未提供' : fmtMoney(ps.coreIndexCap)}`,
+    `回本目标：${ps.recoveryTarget === null || ps.recoveryTarget === undefined ? '未提供' : fmtMoney(ps.recoveryTarget)}（定义待确认，见下），期限 ${ps.recoveryHorizonMonths === null || ps.recoveryHorizonMonths === undefined ? '未提供' : `${ps.recoveryHorizonMonths} 个月`}`,
+    `可用现金：${ps.cashAvailable === null || ps.cashAvailable === undefined ? '未提供' : fmtMoney(ps.cashAvailable)}；已实现盈亏：${ps.realizedProfitLoss === null || ps.realizedProfitLoss === undefined ? '未提供' : fmtMoney(ps.realizedProfitLoss)}`
+  ].join('\n') : '未提供';
+
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || '未提供';
 
@@ -121,8 +237,21 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
 用户投资策略（所有建议必须遵守，不得违背）：
 ${strategies}
 
+【组合策略上限（人工配置，优先级最高）】
+${portfolioSummaryBlock}
+注意：若回本目标标注「定义待确认」，不要自行解释为已确认的目标，仅在需要时提示用户确认。
+
 【当前持仓（金额 / 成本 / 盈亏 / 今日）】
 ${holdingsTable}
+
+【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
+${performanceBlock}
+
+【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
+${benchmarkBlock}
+
+【基金角色与仓位上限（allocation，人工配置优先；overlap 由真实持仓计算）】
+${allocationBlock}
 
 【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
 近期交易与清仓推导（已减多少、近期是否加仓）：
@@ -140,10 +269,21 @@ ${combination}
    - 当前仓位是否合理？
    - 今天是否适合卖？
    注意：长期应退出 ≠ 今天大跌必须割肉；长期值得持有 ≠ 当前仓位过高时不能减仓。
-2. 严禁机械化规则：今天涨→卖、今天跌→减、盈利→止盈、亏损→止损、跌多→补、涨多→卖，一律禁止。必须综合【历史趋势、当前仓位、持仓成本、历史调仓、基金角色、基金间重复度、用户策略、回本目标、当前市场环境】再给操作。
-3. 若建议减仓，必须明确说明“为什么减这只、而不是另一只”。
-4. 尊重账户自身策略，不得仅因某类占比高就机械建议增配债券/稳健资产；须结合整个组合与用户实际策略判断。
-5. 评估理由中的数字必须直接引用上方数据，严禁编造未提供的数字。
+2. 严禁机械化规则：今天涨→卖、今天跌→减、盈利→止盈、亏损→止损、跌多→补、涨多→卖，一律禁止。必须综合【量化表现（趋势/回撤/波动率）、基准相对表现、基金角色与上限、当前仓位、持仓成本、历史调仓、基金间重合度、用户策略、回本目标、当前市场环境】再给操作。
+3. 禁止仅凭以下单一信息给出买卖建议：当日涨跌幅、单只基金浮亏比例、个别股票重合、连续下跌天数、缺少日期的历史净值、不完整或未经验证的新闻。
+4. 必须区分以下情形，给出不同结论：
+   ① 基金短期回调，但中期趋势尚未破坏（如近3月收益为正、未跌破趋势）→ 不因短期波动减仓；
+   ② 中期趋势走弱（近3月/近1年收益显著为负、回撤持续扩大）→ 控制新增仓位；
+   ③ 大幅回撤后出现企稳信号但未确认反转 → 观察，不急抄底；
+   ④ 基金表现显著弱于其业绩基准 → 说明相对弱势及可能原因；
+   ⑤ 基金与其他持仓存在真实风险集中（overlapWarning）→ 作为组合风险提示，说明集中度，不直接等于卖出；
+   ⑥ 数据不足（historyDays 少、基准未提供、回撤未提供）→ 明确列出缺失项及其影响，可给「观察」结论，不得强行下判断。
+5. 基金之间的持仓重合度只能作为组合风险的一项参考，绝不能仅凭「沪深300与某基金存在个别重仓股票重合」就建议减仓沪深300等核心宽基。
+6. 核心宽基定位与目标上限是有效策略输入：若 allocation 中某基金 role=核心宽基且设有 maxAmount，任何针对它的减仓建议必须论证「为什么需要调整核心配置本身」（如超过上限、组合暴露失衡），不得以持仓重合为理由。
+7. 可以提出持有、观察、补仓、减仓或做T建议，但必须给出具体数据依据、操作条件（如「若反弹至X」或「若跌破前低」）及主要风险。不得因为「每日分析」的要求就强制生成买卖操作；没有值得操作的就明确说「暂不操作」。
+8. 若建议减仓，必须明确说明“为什么减这只、而不是另一只”。
+9. 尊重账户自身策略，不得仅因某类占比高就机械建议增配债券/稳健资产；须结合整个组合与用户实际策略判断。
+10. 评估理由中的数字必须直接引用上方数据，严禁编造未提供的数字；某项数据「未提供」时不得假装它存在。
 
 【输出要求（极简，务必短，减少生成耗时）】
 - summary：今日总体判断，最多 3 句话，只说最重要的事，不要展开。

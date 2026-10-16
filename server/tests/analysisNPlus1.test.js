@@ -44,8 +44,20 @@ const state = {
 
 const portfolioAnalysisService = require('../services/portfolioAnalysisService');
 
+// 数据增强改造后：分析路径的历史读取单元是 fundMetricsService.getPerformanceHistory
+// （内部 readNavSeries → navService.getHistory，不足 1 年时会触发按需回填）。
+// 本测试聚焦 N+1 去重，因此把 getPerformanceHistory 桩定为「调用真实 readNavSeries
+// （→ 已打桩的 getHistory，可捕获 limit）」，避免测试触碰真实 DB / 外部数据源。
+const fundMetricsService = require('../services/fundMetricsService');
+let perfHistoryCalls = 0;
+fundMetricsService.getPerformanceHistory = async (code) => {
+  perfHistoryCalls += 1;
+  return fundMetricsService.readNavSeries(code);
+};
+
 test('each fund is built exactly once across a multi-account analysis loop', async () => {
   counters.getFund = 0; counters.getHistory = 0; counters.providerEstimate = 0; counters.latestPair = 0;
+  perfHistoryCalls = 0;
 
   const accountsList = await portfolioAnalysisService.loadUserAccounts(1);
   assert.strictEqual(accountsList.length, 3);
@@ -59,20 +71,24 @@ test('each fund is built exactly once across a multi-account analysis loop', asy
 
   // 唯一基金 10 个；每个被 3 个账户重复引用，但去重后每个只构建一次。
   assert.strictEqual(counters.getFund, 10, `getFund 应为 10（唯一基金数），实际 ${counters.getFund}（疑似 N+1）`);
-  assert.strictEqual(counters.getHistory, 10, `getHistory 应为 10，实际 ${counters.getHistory}（疑似 N+1）`);
+  assert.strictEqual(perfHistoryCalls, 10, `getPerformanceHistory 应为 10，实际 ${perfHistoryCalls}（疑似 N+1）`);
   assert.strictEqual(counters.providerEstimate, 10, `estimate 应为 10，实际 ${counters.providerEstimate}（疑似重复计算）`);
 });
 
 test('history is capped, not full history, for analysis', async () => {
-  // 验证分析路径读取历史时带 limit（ANALYSIS_HISTORY_LIMIT 默认 260）。
+  // 验证分析路径读取历史时带 limit（数据增强后为 fundMetricsService.PERF_HISTORY_LIMIT，默认 400，
+  // 覆盖 1 年窗口；仍为限量读取，绝不加载全量历史）。
   counters.getHistory = 0;
   lastHistoryLimit = null;
+  perfHistoryCalls = 0;
 
   await runInRequestScope(async () => {
     await portfolioAnalysisService.buildAnalysisPortfolio(1, { accountId: 'acc1', timeoutMs: 5000 });
   }, { userId: 1 });
 
-  assert.ok(lastHistoryLimit && lastHistoryLimit > 0 && lastHistoryLimit <= 260, `分析历史应限量读取，实际 limit=${lastHistoryLimit}`);
+  const { PERF_HISTORY_LIMIT } = require('../services/fundMetricsService');
+  assert.ok(lastHistoryLimit && lastHistoryLimit > 0 && lastHistoryLimit === PERF_HISTORY_LIMIT,
+    `分析历史应限量读取（PERF_HISTORY_LIMIT=${PERF_HISTORY_LIMIT}），实际 limit=${lastHistoryLimit}`);
 });
 
 test('requestMemo dedups concurrent identical keys within a scope', async () => {

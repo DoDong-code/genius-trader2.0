@@ -2863,6 +2863,37 @@
         }
 
         const NAV_HISTORY_DAYS = 15;
+
+        // 优先走服务端统一导出端点：与 AI 分析同源，包含 performance / benchmark /
+        // allocation / portfolioSummary 数据增强字段。端点不可用时回退本地构建（旧逻辑）。
+        try {
+          const exportRes = await providerApi(
+            `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}`,
+            { timeout: 45000 }
+          );
+          if (exportRes && exportRes.success && exportRes.export) {
+            const jsonText = JSON.stringify(exportRes.export, null, 2);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              await navigator.clipboard.writeText(jsonText);
+              showToast(`已复制当前账户「${activeName}」的分析 JSON`);
+            } else {
+              const tempInput = document.createElement('textarea');
+              tempInput.value = jsonText;
+              tempInput.style.position = 'fixed';
+              tempInput.style.opacity = '0';
+              document.body.appendChild(tempInput);
+              tempInput.select();
+              document.execCommand('copy');
+              document.body.removeChild(tempInput);
+              showToast(`已复制当前账户「${activeName}」的分析 JSON`);
+            }
+            return;
+          }
+        } catch (exportErr) {
+          // 服务端导出不可用（未登录/旧版本后端/超时）→ 静默回退本地构建
+          console.warn('analysis-export endpoint unavailable, fallback to local build:', exportErr && exportErr.message);
+        }
+
         const funds = effectiveFundsOf(account);
         const totalValue = funds.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
         const uniqueCodes = [...new Set(funds.map(f => String(f.code || '')).filter(c => /^\d{6}$/.test(c)))];

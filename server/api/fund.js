@@ -6,6 +6,7 @@ const {
   listFunds
 } = require('../services/fundService');
 const { getHistory } = require('../services/navService');
+const fundMetrics = require('../services/fundMetricsService');
 const { estimatePortfolio } = require('../services/estimateService');
 const {
   calculateFundEstimate,
@@ -333,6 +334,97 @@ async function handleFundApi(request, response, url) {
     }
     await replaceSyncedAccount(body.account_id, body.funds, userId);
     sendJson(response, 200, { success: true });
+    return true;
+  }
+
+  // 数据增强：统一「基金分析 JSON」导出端点（Web + 小程序共用同一数据源与计算规则）。
+  // 与 AI 分析（/api/ai/analyze）同源：buildAnalysisPortfolio 生成 performance / benchmark /
+  // allocation / portfolioSummary，并保留原有导出字段（amount/cost/profit/todayChange/.../
+  // navHistory/topHoldings）。navHistory 保持近 15 个交易日的精简字符串，不扩大体积。
+  if (url.pathname === '/api/portfolio/analysis-export' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    if (!userId) {
+      sendJson(response, 401, { success: false, error: '请先登录' });
+      return true;
+    }
+    const accountName = url.searchParams.get('account') || undefined;
+    try {
+      const { runInRequestScope } = require('../utils/requestScope');
+      const payload = await runInRequestScope(async () => {
+        const { buildAnalysisPortfolio, loadUserAccounts } = require('../services/portfolioAnalysisService');
+        const { requestMemo } = require('../utils/requestScope');
+        const portfolio = await buildAnalysisPortfolio(
+          userId,
+          accountName ? { account: accountName } : { useActive: true }
+        );
+        if (!portfolio || !portfolio.account) {
+          return null;
+        }
+        const accounts = await loadUserAccounts(userId);
+        const rawAccount = accounts.find(a => a.name === portfolio.account.name) || null;
+        const rawFunds = (rawAccount && Array.isArray(rawAccount.funds)) ? rawAccount.funds : [];
+        const fundsOut = [];
+        for (const h of (portfolio.holdings || [])) {
+          const rawFund = rawFunds.find(f => String(f.code) === String(h.code)) || null;
+          let topHoldings = '';
+          try {
+            topHoldings = await requestMemo(`tophold:${h.code}`, async () => {
+              const rows = await getFundHoldings(String(h.code)) || [];
+              const list = rows
+                .map(r => {
+                  const w = Number(r.weight);
+                  const pct = Number.isFinite(w) ? (w < 1 ? w * 100 : w) : null;
+                  return { name: String(r.stock_name || ''), pct };
+                })
+                .filter(r => r.name && r.pct !== null)
+                .slice(0, 10);
+              return list.length ? list.map(r => `${r.name}(${r.pct.toFixed(2)}%)`).join(', ') : '';
+            });
+          } catch (e) { topHoldings = ''; }
+          fundsOut.push({
+            code: h.code,
+            name: h.name,
+            category: String((rawFund && (rawFund.category || rawFund.fund_type)) || h.type || ''),
+            subAccount: rawFund ? rawFund.subAccount || undefined : undefined,
+            amount: Number((Number(h.amount) || 0).toFixed(2)),
+            cost: Number((Number(h.cost) || 0).toFixed(2)),
+            profit: Number((Number(h.profit) || 0).toFixed(2)),
+            profitRate: (Number(h.amount) || 0) > 0 ? Number(((Number(h.profit) || 0) / Number(h.amount)).toFixed(4)) : 0,
+            todayChange: Number((Number(h.todayEstimate) || 0).toFixed(4)),
+            todayProfit: Number((Number(h.today_change) || 0).toFixed(2)),
+            navUpdatedAt: (Array.isArray(h.history) && h.history.length)
+              ? h.history[h.history.length - 1].date
+              : (rawFund && rawFund.navUpdatedAt) || null,
+            navHistory: fundMetrics.compactNavHistoryString(h.history || [], 15),
+            topHoldings,
+            performance: h.performance || null,
+            benchmark: h.benchmark || null,
+            allocation: h.allocation || null
+          });
+        }
+        return {
+          generatedAt: new Date().toISOString(),
+          account: {
+            name: portfolio.account.name,
+            type: (rawAccount && rawAccount.accountType) || portfolio.account.type || 'manual',
+            fundCount: fundsOut.length,
+            totalValue: Number((Number(portfolio.account.totalValue) || 0).toFixed(2))
+          },
+          strategies: Array.isArray(portfolio.strategies) ? portfolio.strategies.slice() : [],
+          portfolioSummary: portfolio.portfolioSummary || null,
+          holdings: fundsOut
+        };
+      }, { userId });
+      if (!payload) {
+        sendJson(response, 404, { success: false, error: '账户不存在' });
+        return true;
+      }
+      sendJson(response, 200, { success: true, export: payload });
+    } catch (err) {
+      sendJson(response, err.statusCode || 500, { success: false, error: err.message || '导出失败' });
+    }
     return true;
   }
 

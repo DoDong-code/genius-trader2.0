@@ -274,6 +274,26 @@ Page({
         return;
       }
       const NAV_HISTORY_DAYS = 15;
+
+      // 优先走服务端统一导出端点：与 AI 分析同源，含 performance / benchmark /
+      // allocation / portfolioSummary 数据增强字段；端点不可用时回退本地构建（旧逻辑）。
+      try {
+        const exportRes = await http.get(
+          '/api/portfolio/analysis-export',
+          { account: account.name || '' },
+          { silent: true, timeout: 45000 }
+        );
+        if (exportRes && exportRes.success && exportRes.export) {
+          wx.setClipboardData({
+            data: JSON.stringify(exportRes.export, null, 2),
+            success: () => wx.showToast({ title: `已复制「${account.name || '当前账户'}」的分析 JSON`, icon: 'none' })
+          });
+          return;
+        }
+      } catch (exportErr) {
+        // 服务端导出不可用 → 回退本地构建
+      }
+
       const funds = (account.funds || []).filter(f => f && f.code);
       const totalValue = funds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
       const codes = [...new Set(funds.map(f => String(f.code)).filter(c => /^\d{6}$/.test(c)))];

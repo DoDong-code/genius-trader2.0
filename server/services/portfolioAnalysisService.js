@@ -15,6 +15,8 @@ const { fetchProviderEstimate } = require('./providerEstimate');
 const { calculateFundEstimate } = require('./estimateEngine');
 const { requestMemo } = require('../utils/requestScope');
 const config = require('../config/estimateConfig');
+const dbAsync = require('../database/dbAsync');
+const fundMetrics = require('./fundMetricsService');
 
 // P0-2：单次分析历史数据规模上限（约 1 年交易日），禁止无条件加载完整历史。
 const ANALYSIS_HISTORY_LIMIT = Number(process.env.ANALYSIS_HISTORY_LIMIT || 260);
@@ -173,6 +175,48 @@ function buildCombinationSummary(holdings) {
 }
 
 /**
+ * 账户级持仓重合判定（真实 fund_holdings 数据，不做名称推断）：
+ * - 每只基金取最新报告期的前十大持仓；
+ * - 同一股票在两只基金中占比均 >= 3% 才算真实重合；
+ * - 有持仓数据的基金不足 2 只 → 全部 null（无法判定，绝不默认「无重合」）。
+ * 单次查询（IN），失败静默降级为全 null，不影响分析主流程。
+ */
+async function computeAccountOverlap(accountFunds) {
+  const codes = (Array.isArray(accountFunds) ? accountFunds : [])
+    .map(f => String(f && f.code || ''))
+    .filter(c => /^\d{6}$/.test(c));
+  const overlapMap = new Map(codes.map(c => [c, null]));
+  if (codes.length < 2) return overlapMap;
+  try {
+    const placeholders = codes.map(() => '?').join(',');
+    const rows = await dbAsync.all(
+      `SELECT fund_code, stock_code, stock_name, weight, report_date
+       FROM fund_holdings WHERE fund_code IN (${placeholders})`,
+      codes
+    );
+    const latestReport = new Map();
+    const byFund = new Map();
+    for (const r of rows) {
+      const code = String(r.fund_code);
+      if (!byFund.has(code)) byFund.set(code, []);
+      byFund.get(code).push(r);
+      const prev = latestReport.get(code);
+      if (!prev || String(r.report_date) > prev) latestReport.set(code, String(r.report_date));
+    }
+    const normalized = new Map();
+    for (const [code, fundRows] of byFund.entries()) {
+      const maxReport = latestReport.get(code);
+      normalized.set(code, fundMetrics.normalizeHoldingRows(fundRows.filter(r => String(r.report_date) === maxReport)));
+    }
+    const computed = fundMetrics.computeOverlapMap(normalized);
+    for (const [code, value] of computed.entries()) overlapMap.set(code, value);
+  } catch (err) {
+    // 持仓查询失败：保持全 null（数据不足），不影响主流程
+  }
+  return overlapMap;
+}
+
+/**
  * 构建统一分析组合（默认当前活动账户；可指定 account 名称，仅限用户自己的账户）
  */
 async function listAnalysisAccounts(userId) {
@@ -215,6 +259,7 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
           ? '存在多个账户，请通过 account 或 accountId 明确指定'
           : '当前用户暂无账户',
         account: null,
+        portfolioSummary: fundMetrics.parsePortfolioSummary([], []),
         strategies: [],
         strategy: { core: [], forbidden: [], rules: [] },
         holdings: [],
@@ -226,6 +271,7 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     return {
       success: true,
       account: null,
+      portfolioSummary: fundMetrics.parsePortfolioSummary([], []),
       strategies: [],
       strategy: { core: [], forbidden: [], rules: [] },
       holdings: [],
@@ -236,6 +282,8 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
   const accountFunds = Array.isArray(target.funds) ? target.funds : [];
   const strategy = parseStrategy(target.strategy);
   const totalValue = accountFunds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+  // 真实持仓重合判定（每账户一次，循环内复用）
+  const overlapMap = await computeAccountOverlap(accountFunds);
   const holdings = [];
 
   for (const fund of accountFunds) {
@@ -253,14 +301,24 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     base.positionType = classifyPositionType({ ...fund, today }, accountFunds, strategy);
     try {
       // P0-2：history 按分析需要限量读取，禁止无条件加载完整历史。
+      // 数据增强：getPerformanceHistory 在库内历史不足以覆盖 1 年窗口时按需增量回填
+      // （sync_markers 节流 + ON CONFLICT DO NOTHING，绝不覆盖已确认净值；超时降级用现有数据）。
       const history = await requestMemo(
         `hist:${code}`,
-        () => getHistory(code, { limit: ANALYSIS_HISTORY_LIMIT })
+        () => fundMetrics.getPerformanceHistory(code)
       );
       base.history = history;
       base.ret7d = periodReturn(history, 7);
       base.ret30d = periodReturn(history, 30);
       base.ret60d = periodReturn(history, 60);
+      // 数据增强：performance / benchmark / allocation（缺数据如实 null，绝不伪造）
+      const perf = fundMetrics.computePerformance(history);
+      base.performance = perf;
+      base.benchmark = await requestMemo(
+        `bench:${code}`,
+        () => fundMetrics.getBenchmarkMetrics(code, perf.return1m, perf.return3m)
+      );
+      base.allocation = fundMetrics.buildAllocation(code, overlapMap.get(code) === undefined ? null : overlapMap.get(code));
       // P3.19：历史摘要（替代把完整 history 数组塞给模型，节省 token、聚焦结论）
       try {
         const lastRec = history.length ? history[history.length - 1] : null;
@@ -276,6 +334,10 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
       base.ret30d = null;
       base.ret60d = null;
       base.historySummary = '未提供';
+      // 数据增强：历史读取失败时，performance/benchmark 全 null、allocation 仍按配置给出
+      base.performance = fundMetrics.computePerformance([]);
+      base.benchmark = { name: null, return1m: null, return3m: null, relativeReturn1m: null, dataAsOf: null, kind: null, source: null };
+      base.allocation = fundMetrics.buildAllocation(code, overlapMap.get(code) === undefined ? null : overlapMap.get(code));
     }
     const fundMeta = await requestMemo(`fund:${code}`, () => getFund(code)) || {};
     if (!base.name || base.name === String(fund.code)) base.name = fundMeta.fund_name || base.name;
@@ -291,6 +353,11 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
       targetRecovery: Number(target.targetRecovery) || 0,
       maxFunds: Number(target.maxFunds) || accountFunds.length
     },
+    // 数据增强：组合策略摘要（从账户策略文本解析，未解析到的字段如实 null）
+    portfolioSummary: fundMetrics.parsePortfolioSummary(
+      target.strategy,
+      accountFunds.map(f => ({ code: f.code, name: f.name }))
+    ),
     strategies: Array.isArray(target.strategy) ? target.strategy.slice() : [],
     strategy,
     holdings,
