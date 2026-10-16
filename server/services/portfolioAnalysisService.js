@@ -17,7 +17,6 @@ const { requestMemo } = require('../utils/requestScope');
 const config = require('../config/estimateConfig');
 const dbAsync = require('../database/dbAsync');
 const fundMetrics = require('./fundMetricsService');
-const percentFormat = require('./percentFormat');
 
 // P0-2：单次分析历史数据规模上限（约 1 年交易日），禁止无条件加载完整历史。
 const ANALYSIS_HISTORY_LIMIT = Number(process.env.ANALYSIS_HISTORY_LIMIT || 260);
@@ -218,65 +217,6 @@ async function computeAccountOverlap(accountFunds) {
 }
 
 /**
- * 紧凑 AI 数据表（数据精简与百分比统一改造）：
- * - 一次性 columns 定义 + 每基金一行数组，替代逐基金多层 performance/benchmark 冗长文本；
- * - 所有百分比在此经 percentFormat.formatPct 转换一次（唯一转换点），
- *   AI 端与前端展示直接使用格式化字符串，禁止二次乘 100；
- * - 金额/成本/盈亏为数值（两位小数，不带千分位），禁止百分比化；
- * - 空值一律 '—'（禁止 0% 冒充），trend/navDate/bench 如实输出，缺失为空串。
- */
-const TABLE_COLUMNS = [
-  'code', 'name', 'amount', 'cost', 'profit', 'profitPct', 'todayPct',
-  'ret1m', 'ret3m', 'ret6m', 'ret1y', 'mdd', 'ddHigh',
-  'trend', 'navDate', 'bench', 'rel1m'
-];
-
-function shanghaiToday() {
-  try {
-    return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Shanghai' });
-  } catch (e) {
-    return new Date().toISOString().slice(0, 10);
-  }
-}
-
-function round2(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
-}
-
-function buildHoldingsTable(holdings, dateStr) {
-  const pf = v => percentFormat.formatPct(v);
-  const rows = (Array.isArray(holdings) ? holdings : []).map(h => {
-    const p = h.performance || {};
-    const b = h.benchmark || {};
-    return [
-      String(h.code || ''),
-      String(h.name || ''),
-      round2(h.amount),
-      round2(h.cost),
-      round2(h.profit),
-      pf(h.profitRate),
-      pf(h.todayEstimate),
-      pf(p.return1m),
-      pf(p.return3m),
-      pf(p.return6m),
-      pf(p.return1y),
-      pf(p.maxDrawdown1y),
-      pf(p.drawdownFromHigh1y),
-      String(p.trend || 'unknown'),
-      String(h.navDate || p.dataAsOf || ''),
-      b.name ? String(b.name) : '',
-      pf(b.relativeReturn1m)
-    ];
-  });
-  return {
-    date: dateStr || shanghaiToday(),
-    columns: TABLE_COLUMNS.slice(),
-    funds: rows
-  };
-}
-
-/**
  * 构建统一分析组合（默认当前活动账户；可指定 account 名称，仅限用户自己的账户）
  */
 async function listAnalysisAccounts(userId) {
@@ -368,8 +308,6 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
         () => fundMetrics.getPerformanceHistory(code)
       );
       base.history = history;
-      // 数据精简：holdings 附带净值日期（数据来源标记，防止把旧净值误认为当日净值）
-      base.navDate = history.length ? String(history[history.length - 1].date) : null;
       base.ret7d = periodReturn(history, 7);
       base.ret30d = periodReturn(history, 30);
       base.ret60d = periodReturn(history, 60);
@@ -392,7 +330,6 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
       }
     } catch (e) {
       base.history = [];
-      base.navDate = null;
       base.ret7d = null;
       base.ret30d = null;
       base.ret60d = null;
@@ -424,8 +361,6 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     strategies: Array.isArray(target.strategy) ? target.strategy.slice() : [],
     strategy,
     holdings,
-    // 数据精简：紧凑 AI 数据表（columns 与 funds 行严格按序对应，百分比已格式化）
-    analysisTable: buildHoldingsTable(holdings),
     closedPositions: Array.isArray(target.closedPositions) ? target.closedPositions.slice(-10) : [],
     combinationSummary: buildCombinationSummary(holdings),
     accounts: accounts.map(a => ({ name: a.name, source: a.source, totalValue: (a.funds || []).reduce((s, f) => s + (Number(f.amount) || 0), 0) }))
@@ -452,7 +387,5 @@ module.exports = {
   loadUserAccounts,
   listAnalysisAccounts,
   parseStrategy,
-  directionFor,
-  buildHoldingsTable,
-  TABLE_COLUMNS
+  directionFor
 };

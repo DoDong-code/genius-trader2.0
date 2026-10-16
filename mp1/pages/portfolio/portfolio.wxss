@@ -512,12 +512,3 @@
   font-weight: 500;
   letter-spacing: 1rpx;
 }
-
-/* 数据精简与百分比统一改造：持仓行性能条（服务端预格式化百分比，前端只展示） */
-.fund-perf-line {
-  display: block;
-  font-size: 20rpx;
-  color: #86868b;
-  line-height: 1.5;
-  word-break: break-all;
-}

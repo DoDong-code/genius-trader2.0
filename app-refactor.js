@@ -637,59 +637,6 @@
 
   window.refreshMarketIndices = function () { return loadMarketIndices(true); };
 
-  // ===== 数据精简与百分比统一改造：持仓行性能条 =====
-  // 服务端 /api/portfolio/performance 返回已格式化的百分比字符串（唯一转换点），
-  // 前端只做展示，绝不重复 *100；空值显示 —；10 分钟内存缓存。
-  const perfStripCache = { account: null, data: null, ts: 0 };
-  const TREND_SHORT = { up: '上升', sideways: '震荡', down: '下降', unknown: '数据不足' };
-
-  function perfStripHtml(perf) {
-    if (!perf) return '';
-    const seg = (label, v) => `<span>${label} <b>${v || '—'}</b></span>`;
-    const trend = TREND_SHORT[perf.trend] || '数据不足';
-    return `<small class="fund-perf-line">` +
-      seg('近1月', perf.ret1m) + seg('近3月', perf.ret3m) + seg('近6月', perf.ret6m) +
-      seg('近1年', perf.ret1y) + seg('最大回撤', perf.mdd) +
-      `<span>趋势 <b>${trend}</b></span>` +
-      `<span>净值 <b>${perf.navDate || '—'}</b></span>` +
-      `</small>`;
-  }
-
-  function applyPerfStrip(accountName) {
-    const data = perfStripCache.account === accountName ? perfStripCache.data : null;
-    if (!data || !data.performance) return;
-    root.querySelectorAll('.fund-row').forEach(row => {
-      const code = String(row.dataset.code || '');
-      const info = row.querySelector('.fund-info');
-      if (!info || info.querySelector('.fund-perf-line')) return;
-      const perf = data.performance[code];
-      if (!perf) return;
-      info.insertAdjacentHTML('beforeend', perfStripHtml(perf));
-    });
-  }
-
-  async function queuePerfStrip(accountName) {
-    if (!accountName) return;
-    const now = Date.now();
-    const fresh = perfStripCache.account === accountName && perfStripCache.data && (now - perfStripCache.ts) < 10 * 60 * 1000;
-    if (fresh) { applyPerfStrip(accountName); return; }
-    try {
-      const res = await providerApi(
-        `/api/portfolio/performance?account=${encodeURIComponent(accountName)}`,
-        { timeout: 20000 }
-      );
-      if (res && res.success && res.performance) {
-        perfStripCache.account = accountName;
-        perfStripCache.data = res;
-        perfStripCache.ts = Date.now();
-        applyPerfStrip(accountName);
-      }
-    } catch (e) {
-      // 性能数据不可用（未登录/旧后端/超时）→ 静默跳过，不影响持仓页原有功能
-      console.warn('[PERF] performance endpoint unavailable:', e && e.message);
-    }
-  }
-
   function portfolio(){
     console.log('[PORTFOLIO] init activeAccountId=' + s.getActive());
     title.textContent = s.getActive();
@@ -755,8 +702,6 @@
         </div>
       </section>
     `;
-    // 数据精简改造：异步补入 近1月/3月/6月/1年、最大回撤、趋势、净值日期（服务端预格式化百分比）
-    queuePerfStrip(a.name);
   }
   function analysis(){
     title.textContent = '';
