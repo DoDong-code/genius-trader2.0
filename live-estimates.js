@@ -397,9 +397,12 @@
       if (!hasTodayConfirmedNav(code) && stale.indexOf(code) === -1) stale.push(code);
     });
     if (stale.length === 0) {
+      // 观测日志：控制台可见「补检已发生且已收敛」，用于区分“没检查”与“检查后零请求”两种情况
+      console.log('[TodayNav] 补检完成：当前账户最新交易日净值均已确认，零请求');
       markEstimatesRefreshed();
       return Promise.resolve();
     }
+    console.log('[TodayNav] 补检：' + stale.length + ' 只基金待补（' + stale.slice(0, 8).join(', ') + (stale.length > 8 ? ' …' : '') + '）');
     var currentSource = preferredEstimateSource();
     var queue = stale.slice();
     var batchSize = MAX_CONCURRENT;
