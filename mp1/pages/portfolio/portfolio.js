@@ -3,6 +3,8 @@ import { shanghaiDate, officialNavChange, expectedNavDateFor, inferDataStatusFro
 import { assetClassOf, sectorNameOf } from '../../utils/fundSectors.js';
 import { pct, money } from '../../utils/format.js';
 const app = getApp();
+// 周末净值补检守卫（纯函数，node --test 可测，见 server/tests/navSyncGuard.test.js）
+const navSyncGuard = require('../../utils/navSyncGuard.js');
 
 function syncFundAcrossAccounts(code, updates) {
   const accounts = app.globalData.accounts || {};
@@ -194,6 +196,29 @@ Page({
     }
     this.setData({ authUser: (app.globalData.auth && app.globalData.auth.user) || null });
     this.refreshData();
+    // 非交易日净值补检（2026-10-17）：周末/节假日本地与库里存的净值可能落后最近交易日，
+    // 而 onShow 原本从不发起净值请求（交易日冻结规则不变）→ 展示的一直是旧净值。
+    // 非交易日最近交易日净值已定档、无盘中污染风险。判定逻辑见 utils/navSyncGuard.js：
+    //   - _nonTradingNavSyncing 防同实例并发；仅「全部基金取到净值」才置 _nonTradingNavSynced（会话级去重）；
+    //   - 失败/部分失败不标记成功，下次 onShow 自动重试（today-nav 幂等且服务端缓存优先，
+    //     已确认基金零请求，重试收敛、无高频请求风险）；syncTodayNav 单只失败被静默 catch，
+    //     故以返回值 updated/total 差值识别失败，不依赖 Promise reject。
+    if (navSyncGuard.shouldStartNonTradingSync({
+      synced: this._nonTradingNavSynced,
+      syncing: this._nonTradingNavSyncing,
+      isTrading: isTradingDay(new Date())
+    })) {
+      this._nonTradingNavSyncing = true;
+      Promise.resolve(this.syncTodayNav())
+        .then(res => {
+          if (navSyncGuard.judgeNonTradingSyncResult(res).success) {
+            this._nonTradingNavSynced = true;
+          }
+          this.refreshData(); // 全部/部分成功都要立刻重算徽章与今日收益
+        })
+        .catch(() => { /* 网络异常/超时：不标记成功，下次 onShow 重试 */ })
+        .finally(() => { this._nonTradingNavSyncing = false; });
+    }
     this.updateClock();
   },
 
@@ -367,12 +392,20 @@ Page({
     const acc = app.getActiveAccount();
     const f = ((acc && acc.funds) || []).find(x => String(x.code) === String(code));
     if (f) {
+      const prevNav = f.latest_nav || null;
       f.navUpdatedAt = navDate;
-      f.latest_nav = Object.assign({}, f.latest_nav || {}, {
+      f.latest_nav = Object.assign({}, prevNav || {}, {
         date: navDate,
-        nav: Number.isFinite(Number(navValue)) ? Number(navValue) : (f.latest_nav ? f.latest_nav.nav : null),
-        changePercent: Number.isFinite(Number(officialChange)) ? Number(officialChange)
-          : (f.latest_nav ? f.latest_nav.changePercent : null)
+        nav: Number.isFinite(Number(navValue)) ? Number(navValue) : (prevNav ? prevNav.nav : null),
+        // P2（2026-10-17）：净值日期前进且暂无新涨跌幅 → 置 null（今日收益显示「—」），
+        // 禁止把旧日期涨跌幅冒充新日期涨跌幅；_refreshNavDatesIfNeeded 会因
+        // officialChange 非有限数回源 ?fast=1 回填正确值（裁决逻辑见 utils/navSyncGuard.js）
+        changePercent: navSyncGuard.resolveAppliedChangePercent({
+          prevDate: prevNav ? prevNav.date : null,
+          prevChangePercent: prevNav ? prevNav.changePercent : null,
+          navDate,
+          officialChange
+        })
       });
     }
   },

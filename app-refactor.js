@@ -485,9 +485,13 @@
       if (typeof window.refreshTodayNav !== 'function') return;
       const res = await fetch('/api/market/status');
       const data = await res.json();
-      if (!data || !data.success || !data.trading_day) return;
+      if (!data || !data.success) return;
       const timeStr = data.time || '';
-      if (timeStr >= '06:00' && timeStr < '18:00') return; // 净值发布前不打扰
+      // 交易日：净值发布前（06:00–18:00）不打扰；
+      // 非交易日（周末/节假日）：最近交易日净值已定档，必须照常检查——否则周末展示的
+      // 一直是库里/缓存里的旧净值，从不校验最近交易日是否有更新的净值（2026-10-17 修复）。
+      // 幂等收敛：已确认 expected 净值的基金被 hasTodayConfirmedNav 跳过，全部确认后零请求。
+      if (data.trading_day && timeStr >= '06:00' && timeStr < '18:00') return;
       const now = Date.now();
       if (now - todayNavLastCheckAt < minIntervalMs) return;
       todayNavLastCheckAt = now;
