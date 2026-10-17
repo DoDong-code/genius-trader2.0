@@ -212,13 +212,16 @@
     return isTradingDay(new Date(today + 'T00:00:00')) ? today : getLatestTradingDay(today);
   }
 
-  // 冻结三态（2026-08-25 最终规则，Web 与 mp1 完全一致）：
-  //   交易日 + 今日正式 NAV 已确认        → { type: 'CONFIRMED_NAV', date }（蓝色今日日期）
-  //   非交易日 + 最近正式 NAV 已确认      → { type: 'CONFIRMED_NAV', date }（蓝色最近净值日期）
+  // 冻结三态（2026-08-25 最终规则，Web 与 mp1 完全一致；2026-10-17 修订蓝色/估值条件）：
+  //   交易日 + 今日正式 NAV 已确认（nav.date === expected）→ { type: 'CONFIRMED_NAV', date }（蓝色今日日期）
+  //   非交易日 + 最近正式 NAV 已确认（nav.date === expected）→ { type: 'CONFIRMED_NAV', date }（蓝色最近净值日期）
   //   交易日 + 今日 NAV 未发布 + 有估值   → { type: 'TODAY_ESTIMATE' }（灰色「估值」）
   //   其他                               → { type: 'NO_DATA' }（UI 留空）
-  // 三态只由「今天是否为交易日 + 今日正式净值是否存在」决定；
-  // 禁止「昨日净值蓝标」：交易日今日 NAV 未发布时，latest NAV=昨日也绝不显示蓝色。
+  // 2026-10-17 修订：蓝色唯一条件 = nav.date === expected（交易日/非交易日统一）。
+  // 旧实现 `!trading ||` 短路让非交易日任意旧确认净值都标蓝（周六库缺 10-13 起净值时
+  // 显示蓝色 10-09），违反「非交易日 + 最近 NAV 未确认 → 留空」的本意。expected 已按
+  // A股/港股/QDII 口径取最近应披露日，缓存缺该日就诚实留空，待补检回填后再变蓝。
+  // 灰「估值」仅限交易日：非交易日的估值是上一交易日的陈旧值，显示同样误导。
   function getNavDisplayState(cacheEntry, accountFund) {
     if (!cacheEntry) return { type: 'NO_DATA' };
     var today = shanghaiDate();
@@ -233,10 +236,10 @@
       Number.isFinite(Number(nav.value)) && Number(nav.value) > 0;
     var estimateReady = cacheEntry.estimate && cacheEntry.estimate.status === 'READY' &&
       cacheEntry.estimate.value !== null && cacheEntry.estimate.value !== undefined;
-    if (hasConfirmedNav && (!trading || String(nav.date) === expected)) {
+    if (hasConfirmedNav && String(nav.date) === expected) {
       return { type: 'CONFIRMED_NAV', date: String(nav.date) };
     }
-    if (estimateReady) {
+    if (trading && estimateReady) {
       return { type: 'TODAY_ESTIMATE' };
     }
     return { type: 'NO_DATA' };

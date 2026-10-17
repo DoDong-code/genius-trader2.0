@@ -144,9 +144,13 @@ console.log('\n【四】getNavDisplayState 三态（冻结）');
   const s3 = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-24', estimateReady: true, isTradingDayFlag: true, today: '2026-08-25' });
   assert(s2.type === 'CONFIRMED_NAV' && s3.type === 'TODAY_ESTIMATE', '测试3 同日蓝/灰可共存');
 
-  // 测试 4：周六/周日 → 蓝「最近正式 NAV 日期」
-  const s4 = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-25', estimateReady: false, isTradingDayFlag: false, today: '2026-08-26' });
-  assert(s4.type === 'CONFIRMED_NAV' && s4.tone === 'blue' && s4.text === '0825', `测试4 非交易日 → 蓝最近净值(${s4.text})`);
+  // 测试 4：周六 → 蓝「最近正式 NAV 日期」（2026-10-17 修订：日期必须 === expected；
+  // 旧用例 today=08-26 是周三却传 isTradingDayFlag=false，恰好掩盖了 !trading 短路缺陷）
+  const s4 = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-28', estimateReady: false, isTradingDayFlag: false, today: '2026-08-29' });
+  assert(s4.type === 'CONFIRMED_NAV' && s4.tone === 'blue' && s4.text === '0828', `测试4 周六 → 蓝最近净值(${s4 && s4.text})`);
+  // 测试 4b（2026-10-17 修订）：周六 + 陈旧确认净值（08-25，最近交易日是 08-28）→ 不标蓝
+  const s4b = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-25', estimateReady: false, isTradingDayFlag: false, today: '2026-08-29' });
+  assert(s4b === null, '测试4b 周六陈旧净值(08-25) → 留空，不标蓝');
 
   // 测试 5：8/18 登录后 6 天未登录，8/25 打开：旧 NAV(08/18) 不得当蓝色今日；后台补到 08/25 后 → 蓝 0825
   const s5a = getNavDisplayState({ navConfirmed: true, navDate: '2026-08-18', estimateReady: true, isTradingDayFlag: true, today: '2026-08-25' });
@@ -175,8 +179,9 @@ console.log('\n【四】getNavDisplayState 三态（冻结）');
   const s10 = getNavDisplayState({ navConfirmed: true, navDate: null, estimateReady: true, isTradingDayFlag: true, today: '2026-08-25' });
   assert(s10 !== null && s10.type !== 'CONFIRMED_NAV' && s10.tone === 'gray', 'confirmed=true 缺 navDate → 不蓝');
 
-  // 补充：默认参数（不传 isTradingDayFlag/today）按当前真实日期判定，兼容旧调用
-  const s11 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: true });
+  // 补充：默认参数（不传 isTradingDayFlag/today）按当前真实日期判定，兼容旧调用。
+  // 2026-10-17 修订：灰「估值」仅限交易日，显式传 isTradingDayFlag 保证用例确定性
+  const s11 = getNavDisplayState({ navConfirmed: false, navDate: null, estimateReady: true, isTradingDayFlag: true });
   assert(s11.type === 'TODAY_ESTIMATE' && s11.tone === 'gray', '默认参数：有估值 → 灰估值');
 
   // QDII 白名单（isQdiiFund 独立于徽章三态，仍保留回归）

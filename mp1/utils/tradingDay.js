@@ -141,12 +141,17 @@ export function formatMMDD(dateStr) {
 }
 
 // 冻结三态净值显示（与网页端 live-estimates.js 的 getNavDisplayState 完全一致）：
-//   交易日 + 基金「今日」正式 NAV 已确认     → 蓝「MMDD」（CONFIRMED_NAV）
-//   非交易日 + 最近正式 NAV 已确认           → 蓝「最近 MMDD」（CONFIRMED_NAV）
+//   交易日 + 基金「今日」正式 NAV 已确认（navDate === expected）→ 蓝「MMDD」（CONFIRMED_NAV）
+//   非交易日 + 最近正式 NAV 已确认（navDate === expected）      → 蓝「最近 MMDD」（CONFIRMED_NAV）
 //   交易日 + 今日 NAV 未发布 + 有估值        → 灰「估值」（TODAY_ESTIMATE）
 //   其他                                    → null（UI 留空，禁止显示「暂无数据」）
 // 市场规则：A股/港股（恒生科技）= 当日；QDII/美股/全球 = 实际 NAV 披露日期（T+1）。
 // 禁止「昨日净值蓝标」：交易日今日 NAV 未发布时，latest NAV=昨日也绝不显示蓝色。
+// 2026-10-17 修订：蓝色唯一条件 = navDate === expected（交易日/非交易日统一）。
+// 旧实现 `!trading ||` 短路让非交易日任意旧确认净值都标蓝（周六库缺 10-13 起净值时
+// 显示蓝色 10-09），违反「非交易日 + 最近 NAV 未确认 → 留空」的本意；expected 已按
+// A股/港股/QDII 口径取最近应披露日，缓存缺该日就诚实留空，待补检回填后再变蓝。
+// 灰「估值」仅限交易日：非交易日的估值是上一交易日的陈旧值，显示同样误导。
 // @param {{navConfirmed?:boolean, navDate?:string|null, estimateReady?:boolean,
 //          isTradingDayFlag?:boolean|null, today?:string|null, fund?:object|null}} params
 // @returns {{type:string, tone:'blue'|'gray', text:string}}
@@ -159,16 +164,19 @@ export function getNavDisplayState({
   fund = null
 } = {}) {
   const todayStr = today || shanghaiDate();
+  // 2026-10-17 修订：trading 与 expected 必须同源——都基于 todayStr 判定。
+  // 旧实现 trading 用真实时钟（isTradingDay(new Date())）、expected 用传入 today，
+  // 两者在跨天/测试注入场景下会互相矛盾（周六跑旧测试用例即暴露）。
   const trading = isTradingDayFlag === null
-    ? (isHkFund(fund) ? isHkTradingDay(new Date(`${todayStr}T00:00:00`)) : isTradingDay(new Date()))
+    ? (isHkFund(fund)
+        ? isHkTradingDay(new Date(`${todayStr}T00:00:00`))
+        : isTradingDay(new Date(`${todayStr}T00:00:00`)))
     : Boolean(isTradingDayFlag);
   const expected = expectedNavDateFor(fund, todayStr);
-  if (navConfirmed && navDate) {
-    if (!trading || String(navDate) === expected) {
-      return { type: 'CONFIRMED_NAV', tone: 'blue', text: formatMMDD(navDate).replace('-', '') };
-    }
+  if (navConfirmed && navDate && String(navDate) === expected) {
+    return { type: 'CONFIRMED_NAV', tone: 'blue', text: formatMMDD(navDate).replace('-', '') };
   }
-  if (estimateReady) {
+  if (trading && estimateReady) {
     return { type: 'TODAY_ESTIMATE', tone: 'gray', text: '估值' };
   }
   return null; // 没有数据：保持空白，不显示任何标签，禁止显示「暂无数据」
