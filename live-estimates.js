@@ -415,7 +415,10 @@
             var c = String(code);
             var navValue = res && res.nav !== undefined && res.nav !== null ? Number(res.nav) : NaN;
             if (res && res.success && res.date && Number.isFinite(navValue) && navValue > 0) {
-              applyTodayNav(c, res.date, navValue);
+              // 2026-10-17：today-nav 响应现附带 changePercent（服务端用 provider 连续序列 /
+              // fund_nav 前一行推导，与 latest_nav.changePercent 同口径）。显式传入，避免本地
+              // _history 有缺口（如 10-13~10-15 缺行）时把多日累计涨跌幅冒充单日今日收益。
+              applyTodayNav(c, res.date, navValue, res.changePercent);
               return { code: c, nav: true };
             }
             // 今日正式 NAV 尚未发布：保留旧 NAV；navOnly 模式下记录待兜底，不拉估值

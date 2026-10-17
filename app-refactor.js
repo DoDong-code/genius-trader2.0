@@ -479,6 +479,7 @@
   // 今日已确认净值的基金会被 hasTodayConfirmedNav 跳过，全部确认后零请求、自动收敛。
   let todayNavTimer = null;
   let todayNavLastCheckAt = 0;
+  let todayNavLastCheckAccount = null;
   async function checkTodayNavOnce(minIntervalMs) {
     try {
       if (!window.auth || !window.auth.state || !window.auth.state.token) return;
@@ -493,8 +494,15 @@
       // 幂等收敛：已确认 expected 净值的基金被 hasTodayConfirmedNav 跳过，全部确认后零请求。
       if (data.trading_day && timeStr >= '06:00' && timeStr < '18:00') return;
       const now = Date.now();
-      if (now - todayNavLastCheckAt < minIntervalMs) return;
+      // 冷启动补检只覆盖当时的活跃账户；切换账户后新账户的持仓从未被检查过（2026-10-17 修复：
+      // 周六切到「养基宝-债」净值一直停在 10-12）。活跃账户变化时绕过 minIntervalMs 节流，
+      // 同一账户的重复检查仍按原节流间隔收敛（refreshTodayNav 幂等 + 服务端 today-nav 缓存优先）。
+      const activeAccount = window.portfolioState && typeof window.portfolioState.getActive === 'function'
+        ? window.portfolioState.getActive() : null;
+      const accountChanged = Boolean(activeAccount) && activeAccount !== todayNavLastCheckAccount;
+      if (now - todayNavLastCheckAt < minIntervalMs && !accountChanged) return;
       todayNavLastCheckAt = now;
+      todayNavLastCheckAccount = activeAccount;
       // deep=true：today-nav 取不到的基金兜底走「导入 + 全量快照」取 latest_nav。
       // 每只基金每个页面会话只兜底一次（live-estimates 内 navDeepDone 去重），不会反复打服务端。
       await window.refreshTodayNav({ navOnly: true, deep: true }); // 只拉净值，不回落去强拉估值
@@ -506,6 +514,12 @@
     checkTodayNavOnce(0); // 启动即查一次：解决「晚上打开账户没有真实净值」
     todayNavTimer = setInterval(() => checkTodayNavOnce(20 * 60 * 1000), 60000);
   }
+
+  // 活跃账户变化统一出口：portfolio-tabs / 子账户 tab / 账户行等切换后调用，
+  // 按新账户持仓补拉净值（账户变化绕过节流，见 checkTodayNavOnce；同账户 5 分钟节流）。
+  window.onActiveAccountChanged = function () {
+    checkTodayNavOnce(5 * 60 * 1000);
+  };
 
   window.onAccountTabChange = function (sel) {
     window.__accountTabSelected = sel || 'all';
@@ -3699,6 +3713,7 @@
     if (subAccountCard && !editing) {
       s.setActive(subAccountCard.dataset.subAccount);
       render('portfolio');
+      if (typeof window.onActiveAccountChanged === 'function') window.onActiveAccountChanged();
       return;
     }
 
@@ -3808,6 +3823,7 @@
     if (subTab) {
       s.setActive(subTab.dataset.subTab);
       render('portfolio');
+      if (typeof window.onActiveAccountChanged === 'function') window.onActiveAccountChanged();
       return;
     }
 
@@ -3815,6 +3831,7 @@
     if (parentTab) {
       s.setActive(parentTab.dataset.parentTab);
       render('portfolio');
+      if (typeof window.onActiveAccountChanged === 'function') window.onActiveAccountChanged();
       return;
     }
 
@@ -3822,6 +3839,7 @@
     if(row&&!editing){
       s.setActive(row.dataset.account);
       render('portfolio');
+      if (typeof window.onActiveAccountChanged === 'function') window.onActiveAccountChanged();
     }
   });
   root.addEventListener('change',e=>{

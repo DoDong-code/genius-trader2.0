@@ -23,7 +23,7 @@
     tabs.querySelectorAll('.account-segment').forEach(b=>b.classList.toggle('active',b.dataset.portfolioAccount===highlightKey));
     window.refreshDataStatus?.();
   }
-  root.addEventListener('click',e=>{const tab=e.target.closest('[data-portfolio-account]');if(!tab)return;e.preventDefault();e.stopImmediatePropagation();const name=tab.dataset.portfolioAccount;if(state.accounts[name]){state.setActive(name);document.querySelector('.nav-tab[data-view="portfolio"]')?.click()}},true);
+  root.addEventListener('click',e=>{const tab=e.target.closest('[data-portfolio-account]');if(!tab)return;e.preventDefault();e.stopImmediatePropagation();const name=tab.dataset.portfolioAccount;if(state.accounts[name]){state.setActive(name);document.querySelector('.nav-tab[data-view="portfolio"]')?.click();/* 切账户后按新账户持仓补拉净值（2026-10-17 修复：切账户净值不更新） */ if(typeof window.onActiveAccountChanged==='function')window.onActiveAccountChanged();}},true);
   // The portfolio view is mounted as a direct child of the root. Watching
   // nested changes caused by this enhancer can otherwise create a feedback
   // loop in the in-app preview.

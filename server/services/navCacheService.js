@@ -86,7 +86,17 @@ async function ensureTodayNav(fundCode, options = {}) {
   const cached = await getCachedNav(fundCode, expected);
   if (cached) {
     logHit(fundCode, expected);
-    return { date: expected, nav: Number(cached.nav), source: cached.source || null, fromCache: true, cached: true };
+    // changePercent 与 fundService latest_nav 同口径：相对前一交易日（fund_nav 前一行）的比例。
+    // 正常取数路径会把 provider 连续 5 行一并写库，因此这里的「前一行」即上一交易日（2026-10-17）。
+    let changePercent = null;
+    const prevRow = await dbAsync.get(
+      'SELECT nav FROM fund_nav WHERE fund_code = ? AND date < ? ORDER BY date DESC LIMIT 1',
+      [fundCode, expected]
+    );
+    if (prevRow && Number(prevRow.nav) > 0 && Number(cached.nav) > 0) {
+      changePercent = Number(cached.nav) / Number(prevRow.nav) - 1;
+    }
+    return { date: expected, nav: Number(cached.nav), source: cached.source || null, changePercent, fromCache: true, cached: true };
   }
   logMiss(fundCode, expected);
 
@@ -142,7 +152,13 @@ async function ensureTodayNav(fundCode, options = {}) {
                 [fundCode, date, nav, nav, 'yahoo']
               );
               if (date === expected) {
-                expectedResult = { nav, date, source: 'yahoo' };
+                // changePercent 直接用 Yahoo 相邻交易日 close 推导（provider 序列无缺口，
+                // 即使 fund_nav 有历史缺口也不会把多日累计涨跌幅冒充单日——2026-10-17）
+                const prevClose = i > 0 ? Number(closes[i - 1]) : NaN;
+                expectedResult = {
+                  nav, date, source: 'yahoo',
+                  changePercent: Number.isFinite(prevClose) && prevClose > 0 ? nav / prevClose - 1 : null
+                };
               }
             }
           }
@@ -181,7 +197,14 @@ async function ensureTodayNav(fundCode, options = {}) {
                 [fundCode, date, nav, accNav, 'eastmoney']
               );
               if (date === expected) {
-                expectedResult = { nav, date, accNav, source: 'eastmoney' };
+                // history 按日期升序：item[i] 的前一交易日 = history[i-1]（provider 序列无缺口，
+                // 即使 fund_nav 有历史缺口也不会把多日累计涨跌幅冒充单日——2026-10-17）
+                const prevItem = i > 0 ? history[i - 1] : null;
+                const prevNav = prevItem ? Number(prevItem.nav) : NaN;
+                expectedResult = {
+                  nav, date, accNav, source: 'eastmoney',
+                  changePercent: Number.isFinite(prevNav) && prevNav > 0 ? nav / prevNav - 1 : null
+                };
               }
             }
           }
@@ -236,7 +259,11 @@ async function ensureTodayNav(fundCode, options = {}) {
         [fundCode, expected, result.nav, accNav, result.source]
       );
       logSaved(fundCode, expected);
-      return { date: expected, nav: result.nav, source: result.source, fromCache: false, cached: true };
+      return {
+        date: expected, nav: result.nav, source: result.source,
+        changePercent: Number.isFinite(Number(result.changePercent)) ? Number(result.changePercent) : null,
+        fromCache: false, cached: true
+      };
     }
 
     return { date: expected, nav: null, source: null, fromCache: false, cached: false, reason: 'provider-unavailable' };

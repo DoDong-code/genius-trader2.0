@@ -29,6 +29,17 @@ const fakeDbAsync = {
   async get(sql, params = []) {
     if (/FROM fund\s+WHERE/i.test(sql)) return DB.funds[params[0]] || null;
     if (/FROM fund_nav/i.test(sql)) {
+      if (/date < \?/i.test(sql)) {
+        // 缓存命中路径的「前一行」查询：date < expected 的最新一行
+        let best = null;
+        [...DB.nav.keys()].forEach((key) => {
+          const [code, date] = key.split('|');
+          if (code === params[0] && date < params[1]) {
+            if (!best || date > best.date) best = { date, nav: DB.nav.get(key).nav };
+          }
+        });
+        return best;
+      }
       const row = DB.nav.get(`${params[0]}|${params[1]}`);
       return row ? { ...row } : null;
     }
@@ -53,26 +64,44 @@ const fakeEstimateStatus = {
 const fakeMarketService = {
   // 固定为周六：expected(周五) !== today(周六) → before-close 守卫天然放行（确定性，不依赖真实时钟）
   shanghaiDateString: () => SATURDAY,
-  // F1/F2 返回历史（不含 expected 日，见各用例）；F3 无数据
+  // F1/F2 返回连续 provider 序列（日期升序，与真实 fetchTiantianHistory 排序一致）；F3 无数据
   fetchHistory: async (code) => {
     providerCalls.eastmoney += 1;
     if (code === 'F3') return { history: [] };
-    // F1：只有周四（yahoo 将赢得周五）；F2：只有周四（QDII expected=周四，eastmoney 赢）
+    // F1：周三~周五不返回（yahoo 将赢得周五）；F2（QDII expected=周四）：升序三行，
+    // 周四的前一交易日=周三 → 验证 eastmoney 路径 changePercent 推导
+    if (code === 'F2') {
+      return { history: [
+        { date: '2026-10-14', nav: 1.46, accNav: 1.46 },
+        { date: THURSDAY, nav: 1.47, accNav: 1.47 },
+        { date: FRIDAY, nav: 1.48, accNav: 1.48 }
+      ] };
+    }
     return { history: [{ date: THURSDAY, nav: 1.47, accNav: 1.47 }] };
   }
 };
 
-// Yahoo 返回周五 close=1.5（F1/F2），F3 返回 404
+// Yahoo 仅对 F1 返回周四+周五 close（验证 yahoo 路径 changePercent）；F2 只返回周五（让 eastmoney 胜出）；F3 返回 404
 const fakeHttpClient = {
   fetchWithTimeout: async (url) => {
     providerCalls.yahoo += 1;
     if (/\/F3\.OF\?/.test(url)) return { ok: false };
-    // 2026-10-16T06:00Z = 上海时间周五 14:00
-    const ts = Date.UTC(2026, 9, 16, 6, 0, 0) / 1000;
+    if (/\/F1\.OF\?/.test(url)) {
+      // 2026-10-15/16T06:00Z = 上海时间周四/周五 14:00（相邻交易日，升序）
+      const tsThu = Date.UTC(2026, 9, 15, 6, 0, 0) / 1000;
+      const tsFri = Date.UTC(2026, 9, 16, 6, 0, 0) / 1000;
+      return {
+        ok: true,
+        json: async () => ({
+          chart: { result: [{ timestamp: [tsThu, tsFri], indicators: { quote: [{ close: [1.47, 1.5] }] } }] }
+        })
+      };
+    }
+    const tsFri = Date.UTC(2026, 9, 16, 6, 0, 0) / 1000;
     return {
       ok: true,
       json: async () => ({
-        chart: { result: [{ timestamp: [ts], indicators: { quote: [{ close: [1.5] }] } }] }
+        chart: { result: [{ timestamp: [tsFri], indicators: { quote: [{ close: [1.5] }] } }] }
       })
     };
   }
@@ -100,6 +129,11 @@ test('场景1 周末补齐：库仅周四净值，周六调用补齐周五并写
   assert.strictEqual(res.cached, true, '成功获取应标记 cached=true');
   assert.strictEqual(res.nav, 1.5);
   assert.strictEqual(res.source, 'yahoo');
+  // changePercent：Yahoo 相邻交易日 close 推导（1.5/1.47 - 1），DB 缺口也不会算成多日累计
+  assert.ok(
+    Math.abs(res.changePercent - (1.5 / 1.47 - 1)) < 1e-12,
+    'changePercent 应为周五相对周四的单日涨跌幅'
+  );
 
   // 已写库：周五行存在
   const saved = DB.nav.get(`F1|${FRIDAY}`);
@@ -110,11 +144,16 @@ test('场景1 周末补齐：库仅周四净值，周六调用补齐周五并写
   assert.strictEqual(Number(DB.nav.get(`F1|${THURSDAY}`).nav), 1.47);
 });
 
-test('场景1b 缓存命中：第二次调用直接读缓存，零 provider 请求', async () => {
+test('场景1b 缓存命中：第二次调用直接读缓存，零 provider 请求，changePercent 从库前一行推导', async () => {
   const before = { ...providerCalls };
   const res = await ensureTodayNav('F1');
   assert.strictEqual(res.fromCache, true);
   assert.strictEqual(res.date, FRIDAY);
+  // 缓存命中路径：fund_nav 前一行（周四 1.47）→ 单日涨跌幅
+  assert.ok(
+    Math.abs(res.changePercent - (1.5 / 1.47 - 1)) < 1e-12,
+    '缓存命中也应返回相对前一交易日的 changePercent'
+  );
   assert.strictEqual(providerCalls.yahoo, before.yahoo, '不应再请求 yahoo');
   assert.strictEqual(providerCalls.eastmoney, before.eastmoney, '不应再请求 eastmoney');
 });
@@ -126,6 +165,11 @@ test('场景2 QDII 周末 expected=前一交易日（周四）：eastmoney 补�
   assert.strictEqual(res.cached, true);
   assert.strictEqual(res.nav, 1.47);
   assert.strictEqual(res.source, 'eastmoney');
+  // eastmoney 路径：周四相对周三（1.47/1.46 - 1）
+  assert.ok(
+    Math.abs(res.changePercent - (1.47 / 1.46 - 1)) < 1e-12,
+    'QDII 周四 changePercent 应为相对周三的单日涨跌幅'
+  );
   assert.ok(DB.nav.get(`F2|${THURSDAY}`), '周四净值应已写库');
 });
 

@@ -359,8 +359,14 @@ Page({
             if (missing.indexOf(code) === -1) missing.push(code);
             return 0;
           }
-          // 缓存已就绪：更新 navDateMap，让当前页面徽章立即变蓝（不等下次快照）
-          this._applyNavDate(code, res.date, res.source || 'xiaobeiyangji', null, Number(res.nav));
+          // 缓存已就绪：更新 navDateMap，让当前页面徽章立即变蓝（不等下次快照）。
+          // 2026-10-17：today-nav 响应附带 changePercent（服务端 provider 连续序列推导），
+          // 显式传入 _applyNavDate，今日收益立即正确，不再依赖 fast=1 回源回填。
+          this._applyNavDate(
+            code, res.date, res.source || 'xiaobeiyangji',
+            Number.isFinite(Number(res.changePercent)) ? Number(res.changePercent) : null,
+            Number(res.nav)
+          );
           return 1;
         })
         .catch(() => {
