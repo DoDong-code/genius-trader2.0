@@ -346,8 +346,9 @@ Page({
     // Today's advice summary (cached AI result for the active account)
     let todayAdviceSummary = '';
     try {
-      const cached = wx.getStorageSync('LAST_AI_ANALYSIS_' + activeAccountName) ||
-                     wx.getStorageSync('LAST_AI_ANALYSIS');
+      // 2026-10-19：删除 `|| LAST_AI_ANALYSIS` 全局键回退（与 MIG-002 一致）——
+      // 历史遗留的全局键会把某个账户的诊断总结串显到其他账户的首页操作建议
+      const cached = wx.getStorageSync('LAST_AI_ANALYSIS_' + activeAccountName);
       if (cached && typeof cached === 'object' && cached.summary) {
         todayAdviceSummary = cached.summary;
       }

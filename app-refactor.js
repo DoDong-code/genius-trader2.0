@@ -160,7 +160,11 @@
 
   function loadCachedAiResult(a) {
     const accountName = a.name || '默认账户';
-    const str = localStorage.getItem('LAST_AI_ANALYSIS_' + accountName) || localStorage.getItem('LAST_AI_ANALYSIS');
+    // 2026-10-19 修复：删除 `|| LAST_AI_ANALYSIS` 全局键回退（对齐 mp1 MIG-002）。
+    // 旧实现：账户没有自己的 AI 诊断缓存时回退读全局键 → 最后一个跑诊断的账户的
+    // 总结被所有账户共享（权益账户显示「数据严重缺失」的账户的建议，一模一样）。
+    // 账户未跑过诊断 → 诚实显示空态，引导用户去分析页跑该账户自己的 AI 诊断。
+    const str = localStorage.getItem('LAST_AI_ANALYSIS_' + accountName);
     if (!str) return null;
     try { return JSON.parse(str); } catch (e) { return null; }
   }
@@ -2455,7 +2459,8 @@
         window.lastAIAnalysisResult = resData.analysis;
         const activeAccountName = a.name || '默认账户';
         const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-        localStorage.setItem('LAST_AI_ANALYSIS', JSON.stringify(resData.analysis));
+        // 2026-10-19：不再写全局键 LAST_AI_ANALYSIS（对齐 mp1 MIG-002）——
+        // 全局键会把本账户的诊断结果串显到其他账户的「今日操作建议」。仅写账户隔离键。
         localStorage.setItem('LAST_AI_ANALYSIS_' + activeAccountName, JSON.stringify(resData.analysis));
         localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
         localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
