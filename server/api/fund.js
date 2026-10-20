@@ -355,9 +355,17 @@ async function handleFundApi(request, response, url) {
       const payload = await runInRequestScope(async () => {
         const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings } = require('../services/portfolioAnalysisService');
         const { requestMemo } = require('../utils/requestScope');
+        // 2026-10-20 实测（用户截图 HTTP 500 "Analysis timeout after 20000ms"）：
+        // 重账户的 buildAnalysisPortfolio 会超过全局默认 20s 软超时（Neon 远程逐查询延迟 +
+        // 基准/净值历史首次回填各有一次 8s 等待），导致完整导出必然失败。
+        // 仅本端点放宽到 90s：仍低于 Render 代理 ~100s 上限，也低于前端 120s 预算；
+        // 全局默认 ANALYSIS_TIMEOUT_MS 与 AI analyze / external 路径不受影响。
         const portfolio = await buildAnalysisPortfolio(
           userId,
-          accountName ? { account: accountName } : { useActive: true }
+          Object.assign(
+            accountName ? { account: accountName } : { useActive: true },
+            { timeoutMs: 90000 }
+          )
         );
         if (!portfolio || !portfolio.account) {
           return null;

@@ -2912,7 +2912,9 @@
           try {
             const exportRes = await providerApi(
               `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}`,
-              { timeout: 45000 }
+              // 2026-10-20 实测确认服务端重账户计算超 20s（已放宽本端点服务端护栏到 90s），
+              // 前端预算对齐 AI analyze 的 120s，避免服务端仍在计算时前端先 abort。
+              { timeout: 120000 }
             );
             if (exportRes && exportRes.success && exportRes.export) {
               const jsonText = JSON.stringify(exportRes.export, null, 2);
