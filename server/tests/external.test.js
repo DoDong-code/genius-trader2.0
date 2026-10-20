@@ -235,6 +235,25 @@ test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 A
   assert.equal(typeof h.todayChange, 'number');
   assert.ok(Array.isArray(h.history));
 
+  // 数据增强字段（2026-10-20）：键必须存在；本用例数据稀疏 → 值可为 null（如实，禁止编造）
+  assert.ok('performance' in h, 'performance 键必须存在');
+  assert.ok('benchmark' in h, 'benchmark 键必须存在');
+  assert.ok('allocation' in h, 'allocation 键必须存在');
+  assert.ok('topHoldings' in h, 'topHoldings 键必须存在');
+  assert.ok('overlapDetail' in h, 'overlapDetail 键必须存在');
+  assert.ok(h.performance === null || typeof h.performance === 'object');
+  assert.ok(h.benchmark === null || typeof h.benchmark === 'object');
+  assert.ok(h.topHoldings === null || typeof h.topHoldings === 'string');
+  assert.ok(h.overlapDetail === null || typeof h.overlapDetail === 'string');
+
+  // 账户级：结构化策略摘要 + 数据校验警告（与 analysis-export 同源）
+  assert.ok('portfolioSummary' in acc, 'portfolioSummary 键必须存在');
+  assert.ok(Array.isArray(acc.dataWarnings), 'dataWarnings 必须为数组');
+  if (h.performance) {
+    // 有真实历史时 performance 应为完整对象（含新增 6m/1y 由 benchmark 对象携带）
+    assert.ok('return1m' in h.performance);
+  }
+
   await revokeTokens(15);
 });
 

@@ -116,7 +116,7 @@ async function handleExternalApi(request, response, url) {
     return true;
   }
   if (url.pathname === '/api/external/analysis/ai' && request.method === 'GET') {
-    const { loadUserAccounts, buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+    const { loadUserAccounts, buildAnalysisPortfolio, buildDataWarnings } = require('../services/portfolioAnalysisService');
     const accountsList = await loadUserAccounts(userId);
     let totalAssets = 0;
     const processedAccounts = [];
@@ -144,8 +144,10 @@ async function handleExternalApi(request, response, url) {
             cost = Number(h.amount) - Number(h.profit);
           }
 
+          // 近 15 个交易日净值（对齐设置页文案「15 个交易日历史净值」与 analysis-export 口径；
+          // history 为纯数组，消费方仅外部 AI，无长度 10 依赖，兼容性已确认）
           const compactHistory = Array.isArray(h.history)
-            ? h.history.slice(-10).map(r => ({ date: r.date, nav: r.nav }))
+            ? h.history.slice(-15).map(r => ({ date: r.date, nav: r.nav }))
             : [];
 
           enrichedHoldings.push({
@@ -158,7 +160,14 @@ async function handleExternalApi(request, response, url) {
             todayEstimate: h.todayEstimate || 0,
             todayChange: Number((h.today_change || 0).toFixed(2)),
             type: h.type,
-            history: compactHistory
+            history: compactHistory,
+            // 数据增强字段（2026-10-20）：buildAnalysisPortfolio 已计算，直接透传不重复计算。
+            // 缺数据时为 null（enrichFund 保证键存在，undefined 兜底 null），禁止编造或用 0 冒充。
+            performance: h.performance === undefined ? null : h.performance,
+            benchmark: h.benchmark === undefined ? null : h.benchmark,
+            allocation: h.allocation === undefined ? null : h.allocation,
+            topHoldings: h.topHoldings === undefined ? null : h.topHoldings,
+            overlapDetail: h.overlapDetail === undefined ? null : h.overlapDetail
           });
         }
       }
@@ -167,6 +176,9 @@ async function handleExternalApi(request, response, url) {
         accountName: acc.name,
         totalValue: accountValue,
         strategies: port.strategies || [],
+        // 结构化策略摘要与数据校验警告（与 analysis-export 同源，缺失如实 null/空数组）
+        portfolioSummary: port.portfolioSummary || null,
+        dataWarnings: buildDataWarnings(port) || [],
         holdings: enrichedHoldings
       });
     }

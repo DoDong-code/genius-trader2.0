@@ -393,7 +393,8 @@ async function handleFundApi(request, response, url) {
             profit: Number((Number(h.profit) || 0).toFixed(2)),
             // 盈亏率与 AI 同源（buildAnalysisPortfolio.enrichFund）：成本口径 profit/cost，
             // 与 Web / 小程序持仓页 holdingRate 一致；cost 无效时 null，禁止 0 冒充。
-            profitRate: Number.isFinite(Number(h.profitRate))
+            // 注意必须先排除 null/undefined：Number(null)===0 会把「无盈亏率」冒充成 0（2026-10-20 审计修复）。
+            profitRate: (h.profitRate !== null && h.profitRate !== undefined && Number.isFinite(Number(h.profitRate)))
               ? Number(Number(h.profitRate).toFixed(4))
               : null,
             todayChange: Number((Number(h.todayEstimate) || 0).toFixed(4)),
@@ -405,7 +406,10 @@ async function handleFundApi(request, response, url) {
             topHoldings,
             performance: h.performance || null,
             benchmark: h.benchmark || null,
-            allocation: h.allocation || null
+            allocation: h.allocation || null,
+            // 基金间重仓股重叠明细（computeOverlapMap 共用遍历产出，enrichFund 已挂 h）；
+            // 无数据/单只基金时为 null，禁止冒充「无重合」。
+            overlapDetail: h.overlapDetail === undefined ? null : h.overlapDetail
           });
         }
         return {
