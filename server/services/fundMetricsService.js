@@ -153,9 +153,12 @@ function calendarReturn(series, months) {
 
 /**
  * 近一年最大回撤与当前距高点跌幅。
- * 覆盖要求（fundProfileConfig.oneYear）：窗口最早记录 <= latest-365d 且窗口记录数 >= 180，
- * 否则返回 null（绝不用 1 个月数据冒充 1 年回撤）。
- * 最大回撤 = min( 当日净值 / 此前历史最高净值 - 1 )，逐日滚动，非只比较起终点。
+ * 覆盖口径（与 calendarReturn / return1y 完全统一）：完整序列在 cutoff（latest-12 个自然月）
+ * 当天或之前存在有效净值点（valueOnOrBefore 命中）即视为覆盖 1 年，且
+ * 一年窗口（date >= cutoff）内有效记录数 >= oneYear.minRecords；
+ * 任一不满足 → null（历史不足一年 / 窗口内有效点不足，绝不冒充）。
+ * 非法日期与越界净值由 normalizeSeries 上游丢弃（净值异常不产生错误指标）。
+ * 最大回撤 = min( 当日净值 / 此前窗口内最高净值 - 1 )，逐日滚动，非只比较起终点。
  */
 function drawdown1y(series, oneYearCfg = profileConfig.oneYear) {
   if (!Array.isArray(series) || series.length < 2) {
@@ -164,7 +167,10 @@ function drawdown1y(series, oneYearCfg = profileConfig.oneYear) {
   const latest = series[series.length - 1];
   const cutoff = subtractMonths(latest.date, 12);
   const window = series.filter(p => p.date >= cutoff);
-  const spansOneYear = window.length > 0 && window[0].date <= subtractMonths(latest.date, 12);
+  // 覆盖判定与 return1y（calendarReturn 基期存在性）同口径：序列在 cutoff 当天或之前有有效点。
+  // 旧实现误写为 window[0].date <= cutoff —— 窗口按 date>=cutoff 过滤后恒有 window[0].date>=cutoff，
+  // 等价于要求「恰有净值落在 cutoff 同一天」：A 股周一净值（cutoff=周日无记录）恒判不覆盖 → 回撤错判 null。
+  const spansOneYear = !!valueOnOrBefore(series, cutoff);
   const enough = spansOneYear && window.length >= oneYearCfg.minRecords;
   if (!enough) {
     return { maxDrawdown1y: null, drawdownFromHigh1y: null, windowDays: window.length };
@@ -624,6 +630,10 @@ async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDat
     const b = round6(benchRet);
     return (aligned && f !== null && b !== null) ? Number((f - b).toFixed(6)) : null;
   };
+  // 已配置基准但历史不足 1 年（r1y=null：序列在 cutoff 前无有效净值点）→ 明确标注原因，
+  // 与「未配置基准」（kind=null、reason=null）和「窗口错位」区分；return1y/relativeReturn1y 保持 null。
+  // 优先级：1y 历史短板 > 窗口错位（结构性缺失优先暴露）。
+  const oneYearShort = r1y === null;
   return {
     name: bench.name || null,
     return1m: round6(r1m),
@@ -636,7 +646,9 @@ async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDat
     dataAsOf: benchAsOf,
     kind: bench.kind || 'auxiliary',
     source: bench.source || null,
-    unavailableReason: aligned ? null : (gap === null ? 'fund_data_asof_missing' : 'window_misaligned')
+    unavailableReason: oneYearShort
+      ? 'benchmark_history_insufficient_for_1y'
+      : (aligned ? null : (gap === null ? 'fund_data_asof_missing' : 'window_misaligned'))
   };
 }
 

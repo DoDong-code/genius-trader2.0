@@ -124,8 +124,52 @@ test('formatOverlapDetail：空/缺失 → null；多条 → 「；」分隔且�
     { stockCode: '600519', stockName: '贵州茅台', minePct: 5.2, otherCode: '013309', otherPct: 3.1 },
     { stockCode: '300750', stockName: '宁德时代', minePct: 3.0, otherCode: '013309', otherPct: 6.0 }
   ]);
-  assert.equal(s, '贵州茅台:本5.2%/彼013309 3.1%；宁德时代:本3%/彼013309 6%');
+  assert.equal(s, '贵州茅台:本5.20%/彼013309 3.10%；宁德时代:本3.00%/彼013309 6.00%');
   assert.ok(!s.includes('|'));
+});
+
+test('formatOverlapDetail/topHoldingsSummary：浮点噪声统一两位小数（0.0585→5.85% 等）；空数据按原约定', () => {
+  // 复现生产 JSON 噪声：normalizeHoldingRows 的 0.0585×100 = 5.8500000000000005
+  const noiseMine = 0.0585 * 100;
+  const noiseOther = 0.1006 * 100;
+  assert.notEqual(String(noiseMine), '5.85'); // 确认噪声真实存在，被格式化层消除
+  const s = portfolioAnalysisService.formatOverlapDetail([
+    { stockCode: '601899', stockName: '中金黄金', minePct: noiseMine, otherCode: '002207', otherPct: noiseOther },
+    { stockCode: '603993', stockName: '洛阳钼业', minePct: 0.074 * 100, otherCode: '014002', otherPct: 0.0739999999 * 100 }
+  ]);
+  assert.equal(s, '中金黄金:本5.85%/彼002207 10.06%；洛阳钼业:本7.40%/彼014002 7.40%');
+  const top = portfolioAnalysisService.topHoldingsSummary([
+    { stockCode: '601899', stockName: '中金黄金', weightPct: 0.0585 * 100 },
+    { stockCode: '300750', stockName: '宁德时代', weightPct: 0.074 * 100 }
+  ]);
+  assert.equal(top, '中金黄金 5.85%、宁德时代 7.40%');
+  // 空数据按原约定返回 null
+  assert.equal(portfolioAnalysisService.topHoldingsSummary([]), null);
+  assert.equal(portfolioAnalysisService.topHoldingsSummary(null), null);
+  assert.equal(portfolioAnalysisService.formatOverlapDetail(null), null);
+});
+
+test('buildDataWarnings：1 年收益可算但回撤缺失、基准 1y 历史不足 各自成条；正常数据不误报', () => {
+  const w = portfolioAnalysisService.buildDataWarnings({
+    strategies: ['x'],
+    holdings: [
+      { code: '010827', name: '大成产业趋势C', profitRate: -0.1, performance: { return1y: -0.02, maxDrawdown1y: null, dataAsOf: '2026-10-19' }, benchmark: { kind: null } },
+      { code: '007339', name: '沪深300联接C', profitRate: -0.1, performance: { return1y: -0.05, maxDrawdown1y: -0.2, dataAsOf: '2026-10-19' }, benchmark: { kind: 'auxiliary', return1y: null, unavailableReason: 'benchmark_history_insufficient_for_1y' } }
+    ]
+  });
+  assert.equal(w.length, 2);
+  assert.ok(w[0].includes('010827') && w[0].includes('回撤不可用'), w[0]);
+  assert.ok(w[1].includes('007339') && w[1].includes('基准历史不足一年'), w[1]);
+  // 1y 不足走专用文案，不再触发通用「基准数据不可用」→ 同一基金不重复堆叠
+  assert.equal(w.filter(x => x.includes('007339')).length, 1);
+  // 正常完整数据 → 不误报
+  const clean = portfolioAnalysisService.buildDataWarnings({
+    strategies: ['x'],
+    holdings: [
+      { code: '013309', name: '恒生科技C', profitRate: -0.3, performance: { return1y: -0.35, maxDrawdown1y: -0.36, dataAsOf: '2026-10-19' }, benchmark: { kind: 'auxiliary', return1y: -0.36, unavailableReason: null } }
+    ]
+  });
+  assert.equal(clean.length, 0);
 });
 
 test('buildDataWarnings：profitRate null / 基准不可用 / 策略缺失 如实报告', () => {
@@ -227,15 +271,15 @@ test('buildAnalysisPortfolio：前十大重仓摘要与重合明细从 fund_hold
     const portfolio = await portfolioAnalysisService.buildAnalysisPortfolio(1, { accountId: '手动账户', timeoutMs: 8000 });
     const h0 = portfolio.holdings.find(x => x.code === '019633');
     const h1 = portfolio.holdings.find(x => x.code === '013309');
-    // 前十大摘要（weight<1 自动 ×100，降序）
-    assert.equal(h0.topHoldings, '贵州茅台 5.2%、平安银行 3.1%');
+    // 前十大摘要（weight<1 自动 ×100；权重统一两位小数）
+    assert.equal(h0.topHoldings, '贵州茅台 5.20%、平安银行 3.10%');
     // 重合明细：贵州茅台双方均 ≥3% → 一条明细
-    assert.equal(h0.overlapDetail, '贵州茅台:本5.2%/彼013309 4.8%');
-    assert.equal(h1.overlapDetail, '贵州茅台:本4.8%/彼019633 5.2%');
+    assert.equal(h0.overlapDetail, '贵州茅台:本5.20%/彼013309 4.80%');
+    assert.equal(h1.overlapDetail, '贵州茅台:本4.80%/彼019633 5.20%');
     // 紧凑表新列承载（rel6m=15 / rel1y=16 / topHoldings=18 / overlapDetail=19）
     const row0 = portfolio.analysisTable.funds.find(r => r[0] === '019633');
-    assert.equal(row0[18], '贵州茅台 5.2%、平安银行 3.1%');
-    assert.equal(row0[19], '贵州茅台:本5.2%/彼013309 4.8%');
+    assert.equal(row0[18], '贵州茅台 5.20%、平安银行 3.10%');
+    assert.equal(row0[19], '贵州茅台:本5.20%/彼013309 4.80%');
     // 历史绩效仍存在（performance/historySummary 不被新字段挤掉）
     assert.ok(h0.performance && 'return1m' in h0.performance);
     assert.ok(typeof h0.historySummary === 'string');

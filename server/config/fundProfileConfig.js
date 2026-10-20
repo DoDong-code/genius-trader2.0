@@ -90,16 +90,15 @@ module.exports = {
         source: '辅助分析基准：沪深300ETF(510300) 跟踪指数代理'
       }
     },
+    // 018147 建信新兴市场混合(QDII)C：前十大重仓为台积电/英伟达/SK海力士/博通等海外科技股，
+    // Web（app-refactor.js）与 mp1（fundSectors.js）板块映射均为「全球科技」。
+    // 2026-10-20 修正：此前误配「A股宽基 + 沪深300 基准」与真实持仓和前端分类冲突。
+    // 现有 ETF 代理（510300/513180/515000 等）均不能可靠代表新兴市场科技 → benchmark null，如实缺失。
     '018147': {
       role: null,
-      sector: 'A股宽基',
+      sector: '全球科技',
       maxAmount: null,
-      benchmark: {
-        name: '沪深300指数',
-        kind: 'auxiliary',
-        stockCode: '510300',
-        source: '辅助分析基准：沪深300ETF(510300) 跟踪指数代理'
-      }
+      benchmark: null
     },
     '016665': {
       role: null,

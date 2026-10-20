@@ -178,6 +178,67 @@ test('drawdown1y：数据不足 1 年（或记录数不足）→ null', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 4b) 回撤覆盖判定回归：spansOneYear 与 calendarReturn（return1y）口径统一
+// ---------------------------------------------------------------------------
+
+test('drawdown1y：最新净值周一、cutoff 为周日（无当日记录）→ 覆盖判定通过，回撤可算（2026-10-20 修复回归）', () => {
+  // 旧实现要求「恰有净值落在 cutoff 同一天」：cutoff=周日必然无记录 → 恒 null
+  // （生产 7 只 A 股基金回撤错判 null 的根因）。真实日历：2026-10-19 周一 / 2025-10-19 周日。
+  const rows = dailySeries('2025-09-20', 395, i => (i <= 200 ? 1 + i * 0.0005 : 1.1 - (i - 200) * 0.0008));
+  const series = metrics.normalizeSeries(rows.filter(r => r.date !== '2025-10-19')); // 周日无净值（模拟真实交易日）
+  const latest = series[series.length - 1];
+  assert.equal(latest.date, '2026-10-19');
+  assert.equal(metrics.subtractMonths(latest.date, 12), '2025-10-19');
+  // 同一覆盖口径下 return1y 可算 → 回撤也必须可算，不得自相矛盾
+  assert.ok(metrics.calendarReturn(series, 12) !== null, 'return1y 应可算（覆盖 ≥1 年）');
+  const dd = metrics.drawdown1y(series);
+  assert.ok(dd.maxDrawdown1y !== null, `maxDrawdown1y=${dd.maxDrawdown1y}`);
+  assert.ok(dd.drawdownFromHigh1y !== null);
+  // 与「补上周日净值」的完整序列结果一致（该日在峰值之前，不影响窗口回撤）
+  const ddFull = metrics.drawdown1y(metrics.normalizeSeries(rows));
+  assert.equal(dd.maxDrawdown1y, ddFull.maxDrawdown1y);
+  assert.equal(dd.drawdownFromHigh1y, ddFull.drawdownFromHigh1y);
+});
+
+test('drawdown1y：最新净值周五、cutoff 为周四且恰有记录 → 照常可算（兼容回归，旧逻辑可用场景不破坏）', () => {
+  // 真实日历：2026-10-16 周五 / 2025-10-16 周四；序列含 cutoff 当天记录（QDII 生产分布）
+  const rows = dailySeries('2025-09-20', 392, i => (i <= 200 ? 1 + i * 0.0005 : 1.1 - (i - 200) * 0.0008));
+  const series = metrics.normalizeSeries(rows);
+  const latest = series[series.length - 1];
+  assert.equal(latest.date, '2026-10-16');
+  assert.equal(metrics.subtractMonths(latest.date, 12), '2025-10-16');
+  assert.ok(series.some(p => p.date === '2025-10-16'), '序列应含 cutoff 当天记录');
+  const dd = metrics.drawdown1y(series);
+  assert.ok(dd.maxDrawdown1y !== null);
+  assert.equal(dd.windowDays, 366); // 窗口含 cutoff 当天（2025-10-16 → 2026-10-16）
+});
+
+test('drawdown1y：历史起点晚于 cutoff（不足 1 年）→ null，即使窗口记录数 ≥ 180', () => {
+  // 300 条、起点 2026-01-01：cutoff=2025-10-27 前无任何记录 → 覆盖不足（记录数多不等于覆盖足）
+  const rows = dailySeries('2026-01-01', 300, i => 1 + i * 0.001);
+  const series = metrics.normalizeSeries(rows);
+  assert.ok(series.length >= 180);
+  const dd = metrics.drawdown1y(series);
+  assert.equal(dd.maxDrawdown1y, null);
+  assert.equal(dd.drawdownFromHigh1y, null);
+});
+
+test('drawdown1y：脏数据（重复日期/越界净值）与边界日期（恰在 cutoff 当天）→ 指标稳定且与干净序列一致', () => {
+  const base = dailySeries('2025-09-20', 392, i => (i <= 200 ? 1 + i * 0.0005 : 1.1 - (i - 200) * 0.0008));
+  const dirty = base.concat([
+    { date: '2026-05-01', nav: 3735971251 }, // 越界异常值 → normalizeSeries 丢弃
+    { date: '2026-05-01', nav: 999999 },     // 同日越界重复 → 丢弃
+    { date: '2026-05-01', nav: 1.075 },      // 同日合法值 → 后写优先保留
+    { date: '2025-10-16', nav: 1.05 }        // 重复 cutoff 当天记录（后写优先取 1.05；处于爬升段不改写回撤）
+  ]);
+  const dd = metrics.drawdown1y(metrics.normalizeSeries(dirty));
+  const clean = metrics.drawdown1y(metrics.normalizeSeries(base));
+  assert.ok(dd.maxDrawdown1y !== null);
+  assert.equal(dd.maxDrawdown1y, clean.maxDrawdown1y);
+  assert.equal(dd.drawdownFromHigh1y, clean.drawdownFromHigh1y);
+});
+
+// ---------------------------------------------------------------------------
 // 5) 波动率 / 趋势
 // ---------------------------------------------------------------------------
 
@@ -416,6 +477,35 @@ test('getBenchmarkMetrics：6m/1y 基准收益与相对收益（380 天序列覆
   const noFund = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-06-15');
   assert.equal(noFund.relativeReturn6m, null);
   assert.equal(noFund.relativeReturn1y, null);
+});
+
+test('getBenchmarkMetrics：已配置基准但历史不足 1 年 → return1y/relativeReturn1y=null + 明确 unavailableReason', async () => {
+  const db = getDatabase();
+  // 518880 仅 ~3.5 个月行情（2026-03-01 起 100 天）：1m/3m 可算，6m/1y 窗口不足
+  const rows = dailySeries('2026-03-01', 100, i => 3 + i * 0.001);
+  const insert = db.prepare('INSERT OR REPLACE INTO stock_price (stock_code, date, price, change_percent, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)');
+  for (const r of rows) insert.run('518880', r.date, r.nav, 0);
+  // 预置节流 marker：本测试不触发真实基准同步（与回填节流契约一致，纯离线）
+  const { setSyncMarker } = require('../database/dbAsync');
+  await setSyncMarker('bench_history:518880', Date.now());
+  const latestDate = rows[rows.length - 1].date;
+  const b = await metrics.getBenchmarkMetrics('004253', -0.05, 0.02, latestDate, null, null);
+  assert.equal(b.name, '国内黄金现货（代理）');
+  assert.equal(b.kind, 'auxiliary');
+  assert.ok(b.return1m !== null && b.return3m !== null);
+  assert.equal(b.return6m, null);
+  assert.equal(b.return1y, null, '基准历史不足 1 年 → return1y=null');
+  assert.equal(b.relativeReturn1y, null, '相对收益依赖基准 1y → null');
+  assert.equal(b.unavailableReason, 'benchmark_history_insufficient_for_1y');
+  // 「未配置基准」与「配置了但历史不足」不得混淆：未配置 → kind=null 且 reason=null
+  const notConfigured = await metrics.getBenchmarkMetrics('999888', -0.05, 0.02, latestDate);
+  assert.equal(notConfigured.kind, null);
+  assert.equal(notConfigured.return1y, null);
+  assert.equal(notConfigured.unavailableReason, null);
+  // 完整数据（510300 已有 380 天覆盖 1 年）→ reason=null，不误报
+  const full = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-06-15', 0.10, 0.20);
+  assert.ok(full.return1y !== null);
+  assert.equal(full.unavailableReason, null);
 });
 
 test('computeOverlapMap：detailOut 输出重合明细（股票名+双方权重，降序最多 3 条）', () => {

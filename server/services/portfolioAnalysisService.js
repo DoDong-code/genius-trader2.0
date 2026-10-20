@@ -238,12 +238,18 @@ function buildDataWarnings(portfolio) {
       warnings.push(`${h.code || ''} ${h.name || ''}: 持仓成本无效，盈亏率不可用（profitRate=null）`);
     }
     const bench = h.benchmark;
-    if (bench && bench.unavailableReason) {
+    if (bench && bench.unavailableReason === 'benchmark_history_insufficient_for_1y') {
+      warnings.push(`${h.code || ''} ${h.name || ''}: 已配置基准但基准历史不足一年，return1y/relativeReturn1y 不可用`);
+    } else if (bench && bench.unavailableReason) {
       warnings.push(`${h.code || ''} ${h.name || ''}: 基准数据不可用（${bench.unavailableReason}），基准字段已置 null`);
     }
     const perf = h.performance || {};
     if (perf.dataAsOf == null && (perf.return1m != null || perf.return3m != null)) {
       warnings.push(`${h.code || ''} ${h.name || ''}: 收益率缺少对应净值日期（dataAsOf=null），请勿当作最新数据`);
+    }
+    // 1 年收益可算但 1 年最大回撤不可用 → 一年窗口校验未通过（窗口内有效记录数不足），提示而非静默
+    if (perf.return1y != null && perf.maxDrawdown1y == null) {
+      warnings.push(`${h.code || ''} ${h.name || ''}: 近一年最大回撤不可用（一年窗口数据校验未通过），maxDrawdown1y/drawdownFromHigh1y=null`);
     }
   }
   if (!portfolio || !Array.isArray(portfolio.strategies) || portfolio.strategies.length === 0) {
@@ -319,9 +325,8 @@ async function computeAccountOverlap(accountFunds) {
     for (const [code, fundRows] of byFund.entries()) {
       const maxReport = latestReport.get(code);
       normalized.set(code, fundMetrics.normalizeHoldingRows(fundRows.filter(r => String(r.report_date) === maxReport)));
-      // 前十大重仓摘要（normalizeHoldingRows 已降序截取 topN，保留股票名）
-      const top = normalized.get(code);
-      topHoldingsMap.set(code, top.length ? top.map(r => `${r.stockName || r.stockCode} ${r.weightPct}%`).join('、') : null);
+      // 前十大重仓摘要（normalizeHoldingRows 已降序截取 topN；权重经 topHoldingsSummary 统一两位小数）
+      topHoldingsMap.set(code, topHoldingsSummary(normalized.get(code)));
     }
     // 重合明细与判定共用同一次遍历（computeOverlapMap 第三参数输出容器；第二参缺省用项目默认阈值）
     const computed = fundMetrics.computeOverlapMap(normalized, undefined, detailMap);
@@ -332,11 +337,23 @@ async function computeAccountOverlap(accountFunds) {
   return { overlapMap, detailMap, topHoldingsMap };
 }
 
+/** 权重百分比统一两位小数（仅展示格式化，不改底层数值；消除 0.0585×100=5.8500000000000005% 浮点噪声） */
+function pct2(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n.toFixed(2) : String(v);
+}
+
+/** 前十大重仓摘要串（「名称 权重%」降序）：与 formatOverlapDetail 同一格式化口径。空数据返回 null */
+function topHoldingsSummary(normalizedRows) {
+  const top = Array.isArray(normalizedRows) ? normalizedRows : [];
+  return top.length ? top.map(r => `${r.stockName || r.stockCode} ${pct2(r.weightPct)}%`).join('、') : null;
+}
+
 /** 重合明细 → 紧凑串（AI 输入/表格单元格用；避免出现表格分隔符 |）。无数据返回 null。 */
 function formatOverlapDetail(detail) {
   if (!Array.isArray(detail) || detail.length === 0) return null;
   return detail
-    .map(d => `${d.stockName || d.stockCode}:本${d.minePct}%/彼${d.otherCode} ${d.otherPct}%`)
+    .map(d => `${d.stockName || d.stockCode}:本${pct2(d.minePct)}%/彼${d.otherCode} ${pct2(d.otherPct)}%`)
     .join('；');
 }
 
@@ -522,5 +539,6 @@ module.exports = {
   buildAnalysisTable,
   buildDataWarnings,
   formatPctCell,
-  formatOverlapDetail
+  formatOverlapDetail,
+  topHoldingsSummary
 };
