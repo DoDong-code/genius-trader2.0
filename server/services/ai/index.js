@@ -95,7 +95,7 @@ function buildAnalysisPrompt(data) {
   const benchmarkBlock = holdings.length ? holdings.map((h) => {
     const b = h.benchmark;
     if (!b || !b.name) return `${h.code || ""} ${h.name || ""}：无可用业绩基准（未提供，不要自行假设基准）`;
-    return `${h.code || ""} ${h.name || ""}：基准「${b.name}」（${b.kind === "official" ? "官方业绩基准" : "辅助分析基准"}）基准近1月 ${fmtPct(b.return1m)} / 近3月 ${fmtPct(b.return3m)}；相对基准近1月超额 ${fmtPct(b.relativeReturn1m)}；基准数据截至 ${b.dataAsOf || "未提供"}`;
+    return `${h.code || ""} ${h.name || ""}：基准「${b.name}」（${b.kind === "official" ? "官方业绩基准" : "辅助分析基准"}）基准近1月 ${fmtPct(b.return1m)} / 近3月 ${fmtPct(b.return3m)} / 近6月 ${fmtPct(b.return6m)} / 近1年 ${fmtPct(b.return1y)}；相对基准超额 近1月 ${fmtPct(b.relativeReturn1m)} / 近6月 ${fmtPct(b.relativeReturn6m)} / 近1年 ${fmtPct(b.relativeReturn1y)}；基准数据截至 ${b.dataAsOf || "未提供"}`;
   }).join("\n") : "（无）";
   const allocationBlock = holdings.length ? holdings.map((h) => {
     const a = h.allocation;
@@ -113,9 +113,14 @@ function buildAnalysisPrompt(data) {
   ].join("\n") : "未提供";
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || "未提供";
+  const holdingsDetailBlock = holdings.length ? holdings.map((h) => {
+    const th = h.topHoldings === null || h.topHoldings === void 0 ? "前十大重仓：无数据（未获取到该基金持仓，不要编造）" : `前十大重仓：${h.topHoldings}`;
+    const od = h.overlapDetail === null || h.overlapDetail === void 0 ? "重合明细：无数据" : `重合明细：${h.overlapDetail}`;
+    return `${h.code || ""} ${h.name || ""}：${th}；${od}`;
+  }).join("\n") : "（无）";
   const analysisTable = data.analysisTable && Array.isArray(data.analysisTable.funds) && data.analysisTable.funds.length > 0 ? data.analysisTable : null;
   const tableBlock = analysisTable ? [
-    "列说明：amount/cost/profit=金额(元)；profitPct=盈亏率(成本口径=盈亏/成本)；todayPct=今日估算涨跌；1m/3m/6m/1y=近1/3/6/12月收益率；mdd=近1年最大回撤；ddHigh=距近1年高点回撤；trend=趋势(up/sideways/down/unknown)；rel1m=近1月相对基准超额；navDate=计算所用净值日期。百分比已格式化为字符串，「—」= 数据缺失，严禁编造或重复换算。",
+    '列说明：amount/cost/profit=金额(元)；profitPct=盈亏率(成本口径=盈亏/成本)；todayPct=今日估算涨跌；1m/3m/6m/1y=近1/3/6/12月收益率；mdd=近1年最大回撤；ddHigh=距近1年高点回撤；trend=趋势(up/sideways/down/unknown)；rel1m/rel6m/rel1y=近1/6/12月相对基准超额；navDate=计算所用净值日期；topHoldings=前十大重仓摘要(最新报告期，"无数据"=未获取到，不要编造)；overlapDetail=与其他持仓基金的重仓重合明细(股票:本x%/彼基金代码 y%，最多3条，"无数据"=未判定或未获取)。百分比已格式化为字符串，「—」= 数据缺失，严禁编造或重复换算。',
     analysisTable.columns.join(" | "),
     ...analysisTable.funds.map((row) => row.join(" | "))
   ].join("\n") : null;
@@ -150,7 +155,10 @@ ${allocationBlock}
 ${narrative}
 ${tableBlock ? "" : `
 历史净值表现（每只）：
-${historyBlock}`}
+${historyBlock}
+
+【前十大重仓与重合明细（真实报告期数据；"无数据"=未获取到，严禁编造）】
+${holdingsDetailBlock}`}
 【组合关系（不要孤立分析一只基金）】
 ${combination}
 
@@ -167,7 +175,7 @@ ${combination}
    ② 中期趋势走弱（近3月/近1年收益显著为负、回撤持续扩大）→ 控制新增仓位；
    ③ 大幅回撤后出现企稳信号但未确认反转 → 观察，不急抄底；
    ④ 基金表现显著弱于其业绩基准 → 说明相对弱势及可能原因；
-   ⑤ 基金与其他持仓存在真实风险集中（overlapWarning）→ 作为组合风险提示，说明集中度，不直接等于卖出；
+   ⑤ 基金与其他持仓存在真实风险集中（overlapWarning）→ 作为组合风险提示，说明集中度，不直接等于卖出；若提供 overlapDetail（重合明细），须引用具体重合股票与双方权重说明集中程度，无明细时不得编造具体股票；
    ⑥ 数据不足（historyDays 少、基准未提供、回撤未提供）→ 明确列出缺失项及其影响，可给「观察」结论，不得强行下判断。
 5. 基金之间的持仓重合度只能作为组合风险的一项参考，绝不能仅凭「沪深300与某基金存在个别重仓股票重合」就建议减仓沪深300等核心宽基。
 6. 核心宽基定位与目标上限是有效策略输入：若 allocation 中某基金 role=核心宽基且设有 maxAmount，任何针对它的减仓建议必须论证「为什么需要调整核心配置本身」（如超过上限、组合暴露失衡），不得以持仓重合为理由。

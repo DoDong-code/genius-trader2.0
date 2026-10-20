@@ -338,53 +338,72 @@ function parsePortfolioSummary(strategyList, holdings) {
 
 /**
  * 依据真实前十大持仓判定基金间重合。
- * @param {Map<string, Array<{stockCode:string, weightPct:number}>>} holdingsByFund
+ * @param {Map<string, Array<{stockCode:string, stockName?:string|null, weightPct:number}>>} holdingsByFund
  *   每只基金最新报告期的前十大持仓（weightPct 为归一化百分数，5 = 5%）
+ * @param {object} [overlapCfg] 重合阈值配置
+ * @param {Map<string, Array<{stockCode:string, stockName:string|null, minePct:number, otherCode:string, otherPct:number}>>} [detailOut]
+ *   可选输出容器：传入 Map 时，把每只基金的真实重合明细（按本方权重降序，最多 3 条）写入该 Map。
+ *   与重合判定共用同一次遍历，不重复计算；未传入时行为与旧版完全一致。
  * @returns {Map<string, boolean|null>} code → true(存在真实重合) / false(有数据且无重合) / null(数据不足)
  * 规则：同一股票在两只基金中占比均 >= overlap.minWeightPct 才算真实重合；
  * 持仓数据齐全的基金少于 2 只时一律 null（无法判定，绝不默认「无重合」）。
  */
-function computeOverlapMap(holdingsByFund, overlapCfg = profileConfig.overlap) {
+function computeOverlapMap(holdingsByFund, overlapCfg = profileConfig.overlap, detailOut = null) {
   const result = new Map();
   const withData = [...holdingsByFund.keys()].filter(code => {
     const rows = holdingsByFund.get(code);
     return Array.isArray(rows) && rows.length > 0;
   });
   for (const code of holdingsByFund.keys()) result.set(code, null);
+  if (detailOut) for (const code of holdingsByFund.keys()) detailOut.set(code, null);
   if (withData.length < 2) return result;
 
-  // stock → [{code, pct}]
+  // stock → [{code, pct, name}]
   const byStock = new Map();
   for (const code of withData) {
     for (const row of holdingsByFund.get(code)) {
       if (!row || !row.stockCode) continue;
       if (!byStock.has(row.stockCode)) byStock.set(row.stockCode, []);
-      byStock.get(row.stockCode).push({ code, pct: row.weightPct });
+      byStock.get(row.stockCode).push({ code, pct: row.weightPct, name: row.stockName || null });
     }
   }
 
   for (const code of withData) {
-    let overlap = false;
+    const matches = [];
     for (const [stockCode, holders] of byStock.entries()) {
       if (holders.length < 2) continue;
       const mine = holders.find(h => h.code === code);
       if (!mine || mine.pct < overlapCfg.minWeightPct) continue;
       const others = holders.filter(h => h.code !== code && h.pct >= overlapCfg.minWeightPct);
-      if (others.length > 0) { overlap = true; break; }
+      if (others.length === 0) continue;
+      // 取对方权重最高的一只作为明细代表（明细展示用；判定只看是否存在）
+      const topOther = others.reduce((a, b) => (b.pct > a.pct ? b : a));
+      matches.push({
+        stockCode,
+        stockName: mine.name || topOther.name || stockCode,
+        minePct: mine.pct,
+        otherCode: topOther.code,
+        otherPct: topOther.pct
+      });
     }
-    result.set(code, overlap);
+    result.set(code, matches.length > 0);
+    if (detailOut) {
+      matches.sort((a, b) => b.minePct - a.minePct);
+      detailOut.set(code, matches.slice(0, 3));
+    }
   }
   return result;
 }
 
-/** fund_holdings 行 → 归一化前十大数据（weight<1 视为小数自动 ×100，与前端导出规则一致） */
+/** fund_holdings 行 → 归一化前十大数据（weight<1 视为小数自动 ×100，与前端导出规则一致；保留股票名供重合明细输出） */
 function normalizeHoldingRows(rows, topN = profileConfig.overlap.topN) {
   if (!Array.isArray(rows)) return [];
   return rows
     .map(r => {
       const w = Number(r.weight);
       const pct = Number.isFinite(w) ? (w < 1 ? w * 100 : w) : null;
-      return { stockCode: String(r.stock_code || r.stockCode || ''), weightPct: pct };
+      const name = String(r.stock_name || r.stockName || '') || null;
+      return { stockCode: String(r.stock_code || r.stockCode || ''), stockName: name, weightPct: pct };
     })
     .filter(r => r.stockCode && r.weightPct !== null)
     .sort((a, b) => b.weightPct - a.weightPct)
@@ -545,10 +564,13 @@ async function ensureBenchmarkHistory(stockCode, syncer = defaultSyncBenchmarkHi
  * @param {number|null} fundReturn1m 基金近1月收益（算 relativeReturn 用）
  * @param {number|null} fundReturn3m
  * @param {string|null} fundDataAsOf 基金净值日期（相对收益窗口对齐校验用）
+ * @param {number|null} [fundReturn6m] 基金近6月收益（算 relativeReturn6m 用）
+ * @param {number|null} [fundReturn1y] 基金近1年收益（算 relativeReturn1y 用）
  */
-async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDataAsOf) {
+async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDataAsOf, fundReturn6m, fundReturn1y) {
   const empty = {
-    name: null, return1m: null, return3m: null, relativeReturn1m: null,
+    name: null, return1m: null, return3m: null, return6m: null, return1y: null,
+    relativeReturn1m: null, relativeReturn6m: null, relativeReturn1y: null,
     dataAsOf: null, kind: null, source: null, unavailableReason: null
   };
   const profile = profileConfig.fundProfiles[String(fundCode)];
@@ -561,8 +583,8 @@ async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDat
   );
 
   let norm = await readNorm();
-  // 基准行情不足 3 个月窗口（< 45 条）时按需补齐（带节流，失败不影响返回）
-  if (norm.length < 45) {
+  // 基准行情不足 3 个月窗口（< 45 条）或未覆盖 1 年窗口（6m/1y 收益需要）时按需补齐（带节流，失败不影响返回）
+  if (norm.length < 45 || !coversOneYear(norm)) {
     try {
       const timeout = new Promise(resolve => setTimeout(() => resolve('timeout'), BACKFILL_WAIT_MS));
       await Promise.race([ensureBenchmarkHistory(bench.stockCode), timeout]);
@@ -591,17 +613,26 @@ async function getBenchmarkMetrics(fundCode, fundReturn1m, fundReturn3m, fundDat
 
   const r1m = calendarReturn(norm, 1);
   const r3m = calendarReturn(norm, 3);
+  const r6m = calendarReturn(norm, 6);
+  const r1y = calendarReturn(norm, 12);
   const benchAsOf = norm[norm.length - 1].date;
   // 相对收益只在基金与基准数据日期对齐（±7 天）时计算，禁止跨窗口错配比较
   const gap = (fundDataAsOf && benchAsOf) ? Math.abs(dayDiff(fundDataAsOf, benchAsOf)) : null;
   const aligned = gap !== null && gap <= BENCH_ALIGN_TOLERANCE_DAYS;
+  const relReturn = (fundRet, benchRet) => {
+    const f = round6(fundRet);
+    const b = round6(benchRet);
+    return (aligned && f !== null && b !== null) ? Number((f - b).toFixed(6)) : null;
+  };
   return {
     name: bench.name || null,
     return1m: round6(r1m),
     return3m: round6(r3m),
-    relativeReturn1m: (aligned && round6(r1m) !== null && round6(fundReturn1m) !== null)
-      ? Number((round6(fundReturn1m) - round6(r1m)).toFixed(6))
-      : null,
+    return6m: round6(r6m),
+    return1y: round6(r1y),
+    relativeReturn1m: relReturn(fundReturn1m, r1m),
+    relativeReturn6m: relReturn(fundReturn6m, r6m),
+    relativeReturn1y: relReturn(fundReturn1y, r1y),
     dataAsOf: benchAsOf,
     kind: bench.kind || 'auxiliary',
     source: bench.source || null,

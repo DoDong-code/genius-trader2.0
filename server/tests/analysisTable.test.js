@@ -78,7 +78,8 @@ test('buildAnalysisTable：列数一致、行严格对齐 columns、空值 —',
   const table = portfolioAnalysisService.buildAnalysisTable(holdings);
   assert.deepEqual(table.columns, [
     'code', 'name', 'amount', 'cost', 'profit', 'profitPct', 'todayPct',
-    '1m', '3m', '6m', '1y', 'mdd', 'ddHigh', 'trend', 'rel1m', 'navDate'
+    '1m', '3m', '6m', '1y', 'mdd', 'ddHigh', 'trend', 'rel1m', 'rel6m', 'rel1y',
+    'navDate', 'topHoldings', 'overlapDetail'
   ]);
   assert.equal(table.funds.length, 2);
   for (const row of table.funds) assert.equal(row.length, table.columns.length);
@@ -88,12 +89,43 @@ test('buildAnalysisTable：列数一致、行严格对齐 columns、空值 —',
   assert.equal(r0[6], '+0.97%');    // todayPct
   assert.equal(r0[7], '-5.73%');    // 1m
   assert.equal(r0[14], '-3.21%');   // rel1m
-  assert.equal(r0[15], '2026-10-15'); // navDate
+  assert.equal(r0[15], '—');        // rel6m（stub 未提供 → —）
+  assert.equal(r0[16], '—');        // rel1y
+  assert.equal(r0[17], '2026-10-15'); // navDate
+  assert.equal(r0[18], '无数据');   // topHoldings 缺失 → 明确标注，不冒充
+  assert.equal(r0[19], '无数据');   // overlapDetail 缺失 → 明确标注
   const r1 = table.funds[1];
   assert.equal(r1[5], '—');   // profitRate=null → —，禁止 0.00% 冒充
   assert.equal(r1[7], '—');
   assert.equal(r1[13], 'unknown');
-  assert.equal(r1[15], '');
+  assert.equal(r1[17], '');
+});
+
+test('buildAnalysisTable：topHoldings/overlapDetail 有数据时原样透传（不重复格式化）', () => {
+  const holdings = [{
+    code: '007339', name: '易方达沪深300ETF联接C', amount: 100, cost: 100, profit: 0,
+    performance: {}, benchmark: { relativeReturn6m: 0.031 },
+    topHoldings: '贵州茅台 5.2%、宁德时代 3.1%',
+    overlapDetail: '贵州茅台:本5.2%/彼013309 3.1%'
+  }];
+  const table = portfolioAnalysisService.buildAnalysisTable(holdings);
+  const row = table.funds[0];
+  assert.equal(row[15], '+3.10%');  // rel6m 数值 → 格式化为百分数
+  assert.equal(row[18], '贵州茅台 5.2%、宁德时代 3.1%'); // 摘要串原样透传
+  assert.equal(row[19], '贵州茅台:本5.2%/彼013309 3.1%'); // 明细串原样透传（服务端已保证无 | 分隔符）
+});
+
+test('formatOverlapDetail：空/缺失 → null；多条 → 「；」分隔且不含表格分隔符', () => {
+  const f = portfolioAnalysisService.formatOverlapDetail;
+  assert.equal(f(null), null);
+  assert.equal(f(undefined), null);
+  assert.equal(f([]), null);
+  const s = f([
+    { stockCode: '600519', stockName: '贵州茅台', minePct: 5.2, otherCode: '013309', otherPct: 3.1 },
+    { stockCode: '300750', stockName: '宁德时代', minePct: 3.0, otherCode: '013309', otherPct: 6.0 }
+  ]);
+  assert.equal(s, '贵州茅台:本5.2%/彼013309 3.1%；宁德时代:本3%/彼013309 6%');
+  assert.ok(!s.includes('|'));
 });
 
 test('buildDataWarnings：profitRate null / 基准不可用 / 策略缺失 如实报告', () => {
@@ -162,6 +194,63 @@ test('buildAnalysisPortfolio：profitRate 成本口径 profit/cost（同源 AI �
   const row0 = portfolio.analysisTable.funds[0];
   assert.equal(row0[0], '019633');
   assert.equal(row0[5], '-71.13%');
+});
+
+test('buildAnalysisPortfolio：前十大重仓摘要与重合明细从 fund_holdings 传入 AI 输入', async () => {
+  syncAccounts = [];
+  savedState = {
+    active: '手动账户',
+    accounts: {
+      '手动账户': {
+        accountType: 'local', name: '手动账户', strategy: ['x'],
+        funds: [
+          { code: '019633', amount: 1000, cost: 1000, holdingProfit: 0, today: 0 },
+          { code: '013309', amount: 1000, cost: 1000, holdingProfit: 0, today: 0 }
+        ]
+      }
+    }
+  };
+  // 临时接管 dbAsync.all：返回真实形状的 fund_holdings 行（019633 与 013309 在贵州茅台重合）
+  const realAll = dbAsync.all;
+  dbAsync.all = async (sql, params) => {
+    if (/FROM fund_holdings/i.test(sql)) {
+      assert.deepEqual([...params].sort(), ['013309', '019633']);
+      return [
+        { fund_code: '019633', stock_code: '600519', stock_name: '贵州茅台', weight: 0.052, report_date: '2026-09-30' },
+        { fund_code: '019633', stock_code: '000001', stock_name: '平安银行', weight: 0.031, report_date: '2026-09-30' },
+        { fund_code: '013309', stock_code: '600519', stock_name: '贵州茅台', weight: 0.048, report_date: '2026-09-30' }
+      ];
+    }
+    return [];
+  };
+  try {
+    const portfolio = await portfolioAnalysisService.buildAnalysisPortfolio(1, { accountId: '手动账户', timeoutMs: 8000 });
+    const h0 = portfolio.holdings.find(x => x.code === '019633');
+    const h1 = portfolio.holdings.find(x => x.code === '013309');
+    // 前十大摘要（weight<1 自动 ×100，降序）
+    assert.equal(h0.topHoldings, '贵州茅台 5.2%、平安银行 3.1%');
+    // 重合明细：贵州茅台双方均 ≥3% → 一条明细
+    assert.equal(h0.overlapDetail, '贵州茅台:本5.2%/彼013309 4.8%');
+    assert.equal(h1.overlapDetail, '贵州茅台:本4.8%/彼019633 5.2%');
+    // 紧凑表新列承载（rel6m=15 / rel1y=16 / topHoldings=18 / overlapDetail=19）
+    const row0 = portfolio.analysisTable.funds.find(r => r[0] === '019633');
+    assert.equal(row0[18], '贵州茅台 5.2%、平安银行 3.1%');
+    assert.equal(row0[19], '贵州茅台:本5.2%/彼013309 4.8%');
+    // 历史绩效仍存在（performance/historySummary 不被新字段挤掉）
+    assert.ok(h0.performance && 'return1m' in h0.performance);
+    assert.ok(typeof h0.historySummary === 'string');
+  } finally {
+    dbAsync.all = realAll;
+  }
+  // 无持仓数据（db 返回空）→ topHoldings/overlapDetail 如实 null，不冒充
+  dbAsync.all = async () => [];
+  const emptyPortfolio = await portfolioAnalysisService.buildAnalysisPortfolio(1, { accountId: '手动账户', timeoutMs: 8000 });
+  const eh0 = emptyPortfolio.holdings.find(x => x.code === '019633');
+  assert.equal(eh0.topHoldings, null);
+  assert.equal(eh0.overlapDetail, null);
+  const emptyRow = emptyPortfolio.analysisTable.funds.find(r => r[0] === '019633');
+  assert.equal(emptyRow[18], '无数据');
+  assert.equal(emptyRow[19], '无数据');
 });
 
 // ---------------------------------------------------------------------------

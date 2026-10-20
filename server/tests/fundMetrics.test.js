@@ -397,6 +397,89 @@ test('getBenchmarkMetrics：配置基准（007339→510300）→ 从 stock_price
   assert.equal(misaligned.relativeReturn1m, null);
 });
 
+test('getBenchmarkMetrics：6m/1y 基准收益与相对收益（380 天序列覆盖 1 年窗口）', async () => {
+  const db = getDatabase();
+  const rows = dailySeries('2025-06-01', 380, i => 3.8 + i * 0.002);
+  const insert = db.prepare('INSERT OR REPLACE INTO stock_price (stock_code, date, price, change_percent, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)');
+  for (const r of rows) insert.run('510300', r.date, r.nav, 0);
+  // 对齐日：基准 6m/1y + 基金 6m/1y 同窗口 → 相对收益 = 基金 - 基准
+  const b = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-06-15', 0.10, 0.20);
+  assert.ok(b.return6m !== null && b.return1y !== null, `6m=${b.return6m} 1y=${b.return1y}`);
+  assert.ok(Math.abs(b.relativeReturn6m - (0.10 - b.return6m)) < 1e-6);
+  assert.ok(Math.abs(b.relativeReturn1y - (0.20 - b.return1y)) < 1e-6);
+  // QDII 净值滞后（错位）→ 相对收益如实 null，基准自身 6m/1y 照常
+  const misaligned = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-01-10', 0.10, 0.20);
+  assert.equal(misaligned.relativeReturn6m, null);
+  assert.equal(misaligned.relativeReturn1y, null);
+  assert.ok(misaligned.return6m !== null && misaligned.return1y !== null);
+  // 基金未提供 6m/1y 收益（undefined）→ 相对收益 null，不编造
+  const noFund = await metrics.getBenchmarkMetrics('007339', 0.02, 0.05, '2026-06-15');
+  assert.equal(noFund.relativeReturn6m, null);
+  assert.equal(noFund.relativeReturn1y, null);
+});
+
+test('computeOverlapMap：detailOut 输出重合明细（股票名+双方权重，降序最多 3 条）', () => {
+  const byFund = new Map([
+    // 111111 与 222222 在 600519/000001/300750 三只股票重合；另加 600036 重合验证 top3 截取
+    ['111111', [
+      { stockCode: '600519', stockName: '贵州茅台', weightPct: 8 },
+      { stockCode: '000001', stockName: '平安银行', weightPct: 5 },
+      { stockCode: '300750', stockName: '宁德时代', weightPct: 4 },
+      { stockCode: '601318', stockName: '中国平安', weightPct: 2 } // 双方 <3% → 不算
+    ]],
+    ['222222', [
+      { stockCode: '600519', stockName: '贵州茅台', weightPct: 5 },
+      { stockCode: '000001', stockName: '平安银行', weightPct: 6 },
+      { stockCode: '300750', stockName: '宁德时代', weightPct: 3.5 }
+    ]]
+  ]);
+  const detailOut = new Map();
+  const m = metrics.computeOverlapMap(byFund, undefined, detailOut);
+  assert.equal(m.get('111111'), true);
+  assert.equal(m.get('222222'), true);
+  const d = detailOut.get('111111');
+  assert.ok(Array.isArray(d) && d.length === 3, `应为 3 条明细，实际 ${d && d.length}`);
+  assert.equal(d[0].stockCode, '600519');       // 按本方权重降序
+  assert.equal(d[0].stockName, '贵州茅台');
+  assert.equal(d[0].minePct, 8);
+  assert.equal(d[0].otherCode, '222222');
+  assert.equal(d[0].otherPct, 5);
+  assert.equal(d[1].stockCode, '000001');
+  assert.equal(d[2].minePct, 4);                // 601318(2%) 低于阈值被排除
+  // 无重合的基金 → 明细为空数组（有数据无重合），不是 null
+  const low = new Map([
+    ['111111', [{ stockCode: '600519', stockName: '贵州茅台', weightPct: 2 }]],
+    ['222222', [{ stockCode: '600519', stockName: '贵州茅台', weightPct: 1.5 }]]
+  ]);
+  const detailOut2 = new Map();
+  metrics.computeOverlapMap(low, undefined, detailOut2);
+  assert.deepEqual(detailOut2.get('111111'), []);
+  // 数据不足（仅 1 只有数据）→ 明细 null
+  const one = new Map([
+    ['111111', [{ stockCode: '600519', stockName: '贵州茅台', weightPct: 8 }]],
+    ['222222', []]
+  ]);
+  const detailOut3 = new Map();
+  metrics.computeOverlapMap(one, undefined, detailOut3);
+  assert.equal(detailOut3.get('111111'), null);
+});
+
+test('normalizeHoldingRows：保留 stock_name 供重合明细；旧字段形状兼容', () => {
+  const rows = [
+    { stock_code: '600519', stock_name: '贵州茅台', weight: 0.052 },
+    { stock_code: '300750', stock_name: '宁德时代', weight: 3.1 }
+  ];
+  const norm = metrics.normalizeHoldingRows(rows);
+  assert.equal(norm.length, 2);
+  assert.equal(norm[0].stockCode, '600519');
+  assert.equal(norm[0].stockName, '贵州茅台');  // weight<1 小数 ×100 → 5.2%，降序在前
+  assert.equal(norm[0].weightPct, 5.2);
+  assert.equal(norm[1].weightPct, 3.1);
+  // 无名称行 → stockName null（不编造）
+  const noName = metrics.normalizeHoldingRows([{ stock_code: '600000', weight: 2 }]);
+  assert.equal(noName[0].stockName, null);
+});
+
 // ---------------------------------------------------------------------------
 // 10) 端到端：performance 输出小数形式契约（-0.12 = -12%）
 // ---------------------------------------------------------------------------
