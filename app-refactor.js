@@ -2888,34 +2888,71 @@
         const NAV_HISTORY_DAYS = 15;
 
         // 优先走服务端统一导出端点：与 AI 分析同源，包含 performance / benchmark /
-        // allocation / portfolioSummary 数据增强字段。端点不可用时回退本地构建（旧逻辑）。
-        try {
-          const exportRes = await providerApi(
-            `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}`,
-            { timeout: 45000 }
-          );
-          if (exportRes && exportRes.success && exportRes.export) {
-            const jsonText = JSON.stringify(exportRes.export, null, 2);
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              await navigator.clipboard.writeText(jsonText);
-              showToast(`已复制当前账户「${activeName}」的分析 JSON`);
-            } else {
-              const tempInput = document.createElement('textarea');
-              tempInput.value = jsonText;
-              tempInput.style.position = 'fixed';
-              tempInput.style.opacity = '0';
-              document.body.appendChild(tempInput);
-              tempInput.select();
-              document.execCommand('copy');
-              document.body.removeChild(tempInput);
-              showToast(`已复制当前账户「${activeName}」的分析 JSON`);
-            }
-            return;
+        // allocation / portfolioSummary 数据增强字段。
+        // 2026-10-20：失败不再静默回退——结构化记录失败原因（状态码/耗时/错误类型，
+        // 不含任何 token/cookie），提示「完整数据导出失败」并允许重试；仅当用户明确
+        // 选择旧格式时才回退本地构建，且回退结果明确标注为基础数据。
+        const describeExportFailure = (f) => {
+          if (!f) return '未知原因';
+          if (f.kind === 'timeout') return `导出请求超时（${Math.round((f.elapsedMs || 0) / 1000)}秒内服务端未完成计算）`;
+          if (f.kind === 'http') {
+            if (f.status === 401 || f.status === 403) return `登录状态失效（HTTP ${f.status}），请重新登录后再试`;
+            if (f.status === 404) return '服务端暂无该导出接口（后端版本过旧，HTTP 404）';
+            if (f.status >= 500) return `服务端导出错误（HTTP ${f.status}）：${f.message || ''}`;
+            return `导出接口返回 HTTP ${f.status}：${f.message || ''}`;
           }
-        } catch (exportErr) {
-          // 服务端导出不可用（未登录/旧版本后端/超时）→ 静默回退本地构建
-          console.warn('analysis-export endpoint unavailable, fallback to local build:', exportErr && exportErr.message);
+          if (f.kind === 'bad_response') return '服务端响应格式不符合预期（缺少 export 数据）';
+          return `网络请求失败：${f.message || ''}`;
+        };
+
+        let useFallback = false;
+        for (;;) {
+          let failure = null;
+          const exportStartedAt = Date.now();
+          try {
+            const exportRes = await providerApi(
+              `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}`,
+              { timeout: 45000 }
+            );
+            if (exportRes && exportRes.success && exportRes.export) {
+              const jsonText = JSON.stringify(exportRes.export, null, 2);
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(jsonText);
+                showToast(`已复制当前账户「${activeName}」的完整分析 JSON`);
+              } else {
+                const tempInput = document.createElement('textarea');
+                tempInput.value = jsonText;
+                tempInput.style.position = 'fixed';
+                tempInput.style.opacity = '0';
+                document.body.appendChild(tempInput);
+                tempInput.select();
+                document.execCommand('copy');
+                document.body.removeChild(tempInput);
+                showToast(`已复制当前账户「${activeName}」的完整分析 JSON`);
+              }
+              return;
+            }
+            failure = { kind: 'bad_response' };
+          } catch (exportErr) {
+            failure = {
+              kind: exportErr && exportErr.timeout ? 'timeout' : (exportErr && exportErr.status ? 'http' : 'network'),
+              status: (exportErr && exportErr.status) || null,
+              message: (exportErr && exportErr.message) || '未知错误',
+              elapsedMs: Date.now() - exportStartedAt
+            };
+          }
+          // 结构化记录失败原因（仅状态码/耗时/错误类型，绝不含 token/cookie）
+          console.warn('[analysis-export] 完整导出失败:', JSON.stringify(failure));
+          const retry = confirm(`完整数据导出失败：${describeExportFailure(failure)}\n\n点击「确定」重试完整导出，点「取消」选择其他方式。`);
+          if (retry) continue;
+          useFallback = confirm('是否改用旧格式复制？\n\n旧格式仅含基础数据，不含完整分析指标（performance / benchmark / allocation / 重合明细 / 组合汇总 / 数据校验警告）。');
+          break;
         }
+        if (!useFallback) {
+          showToast('已取消复制：完整数据导出未成功', 'error');
+          return;
+        }
+        showToast('正在以旧格式复制：基础数据，不含完整分析指标…');
 
         const funds = effectiveFundsOf(account);
         const totalValue = funds.reduce((sum, f) => sum + (Number(f.amount) || 0), 0);
@@ -3011,7 +3048,7 @@
         const jsonText = JSON.stringify(payload, null, 2);
         if (navigator.clipboard && navigator.clipboard.writeText) {
           navigator.clipboard.writeText(jsonText)
-            .then(() => showToast(`已复制当前账户「${activeName}」的分析 JSON`))
+            .then(() => showToast(`已复制基础数据 JSON（不含完整分析指标）`))
             .catch(() => showToast('复制失败，请手动选择复制', 'error'));
         } else {
           const tempInput = document.createElement('textarea');
@@ -3022,7 +3059,7 @@
           tempInput.select();
           try {
             document.execCommand('copy');
-            showToast(`已复制当前账户「${activeName}」的分析 JSON`);
+            showToast(`已复制基础数据 JSON（不含完整分析指标）`);
           } catch (err) {
             showToast('复制失败，请手动选择复制', 'error');
           }
