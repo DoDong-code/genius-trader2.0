@@ -559,20 +559,25 @@ async function handleFundApi(request, response, url) {
         const userId = user ? Number(user.id) : 0;
         const { getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
         let portfolio;
+        let dataNotice = null; // additive：构建失败原因随响应暴露（不破坏前端契约），杜绝静默回退伪装成「AI 数据缺失」
         try {
           // 修复账户错配：优先采用前端当前选中的账户名（body.portfolio.account），
           // 避免「前端选中默认账户(5万+)，AI 却分析了另一只账户」的错配。
           // 后端 state.active 与前端的 s.getActive() 解析可能不一致，不再信任 useActive 单点。
+          // timeoutMs=90000：生产构建（历史回填/估值链）常超默认 20s（与 analysis-export 同根因），
+          // 超时抛错会触发前端兜底数据（仅 5 个基础字段），AI 将报「成本/业绩/重仓均未提供」。
           const reqAccount = (body && body.portfolio && body.portfolio.account) || null;
-          let entry = await getOrBuildAnalysisData(userId, reqAccount ? { account: reqAccount } : { useActive: true });
+          let entry = await getOrBuildAnalysisData(userId, reqAccount ? { account: reqAccount, timeoutMs: 90000 } : { useActive: true, timeoutMs: 90000 });
           portfolio = entry.portfolio;
           // 显式账户未匹配到（name 不一致等边缘情况）时回退 useActive，保证分析不中断
           if (reqAccount && (!portfolio || !portfolio.account)) {
-            entry = await getOrBuildAnalysisData(userId, { useActive: true });
+            entry = await getOrBuildAnalysisData(userId, { useActive: true, timeoutMs: 90000 });
             portfolio = entry.portfolio;
           }
         } catch (err) {
-          // 兜底：使用客户端提供的结构，不破坏现有功能
+          // 兜底：使用客户端提供的结构，不破坏现有功能；失败原因必须可见（日志 + dataNotice）
+          console.error('[ai/analyze] 服务端分析数据构建失败，回退前端基础数据:', err && err.message);
+          dataNotice = `服务端完整数据构建失败（${(err && err.message) || '未知错误'}），本次诊断基于前端基础数据（无成本/业绩/回撤/重仓明细）`;
           portfolio = body.portfolio;
         }
         if (body && body.userQuery) {
@@ -623,7 +628,7 @@ async function handleFundApi(request, response, url) {
             fs.appendFileSync(path.join(__dirname, '..', 'ai-trace.log'),
               `[${new Date().toISOString()}] AI 成功. keys=${Object.keys(analysis).join(',')} suggestions=${Array.isArray(analysis.suggestions) ? analysis.suggestions.length : 'N/A'} firstCode=${analysis.suggestions && analysis.suggestions[0] && analysis.suggestions[0].code}\n`);
           } catch (e) {}
-          sendJson(response, 200, { success: true, analysis });
+          sendJson(response, 200, dataNotice ? { success: true, analysis, dataNotice } : { success: true, analysis });
         } catch (err) {
           try {
             fs.appendFileSync(path.join(__dirname, '..', 'ai-trace.log'),

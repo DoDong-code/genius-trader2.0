@@ -114,7 +114,7 @@ async function handleExternalApi(request, response, url) {
     const accountId = url.searchParams.get('accountId') || undefined;
     const accountName = url.searchParams.get('account') || undefined;
     const { getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
-    const entry = await getOrBuildAnalysisData(userId, { accountId, account: accountName });
+    const entry = await getOrBuildAnalysisData(userId, { accountId, account: accountName, timeoutMs: 90000 });
     sendJson(response, 200, { success: true, ...entry.portfolio });
     return true;
   }
@@ -128,7 +128,7 @@ async function handleExternalApi(request, response, url) {
     const processedAccounts = [];
 
     for (const acc of accountsList) {
-      const entry = await getOrBuildAnalysisData(userId, { account: acc.name });
+      const entry = await getOrBuildAnalysisData(userId, { account: acc.name, timeoutMs: 90000 });
       const port = entry.portfolio;
       const accountValue = port.account ? port.account.totalValue : 0;
       totalAssets += accountValue;
@@ -172,7 +172,7 @@ async function handleExternalApi(request, response, url) {
     const processedAccounts = [];
 
     for (const acc of accountsList) {
-      const entry = await getOrBuildAnalysisData(userId, { account: acc.name });
+      const entry = await getOrBuildAnalysisData(userId, { account: acc.name, timeoutMs: 90000 });
       const port = entry.portfolio;
       const accountValue = port.account ? port.account.totalValue : 0;
       totalAssets += accountValue;
