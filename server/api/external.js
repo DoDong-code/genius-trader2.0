@@ -23,7 +23,7 @@ const {
   hashToken,
   rateLimitAllowed
 } = require('../services/externalTokenService');
-const { buildAnalysisPortfolio, listAnalysisAccounts } = require('../services/portfolioAnalysisService');
+const { listAnalysisAccounts } = require('../services/portfolioAnalysisService');
 const { getFund } = require('../services/fundService');
 const { getHistory } = require('../services/navService');
 const { fetchProviderEstimate } = require('../services/providerEstimate');
@@ -108,78 +108,50 @@ async function handleExternalApi(request, response, url) {
   // 同时把 userId 写入 scope.meta，供 P0-4 账号生命周期竞态防护在写入前校验身份。
   return runInRequestScope(async () => {
   if (url.pathname === '/api/external/analysis/portfolio' && request.method === 'GET') {
-    // accountId 优先于 account；两者都必须是 Token 所属用户自己的真实账户
+    // accountId 优先于 account；两者都必须是 Token 所属用户自己的真实账户。
+    // 2026-10-21：改走 getOrBuildAnalysisData 统一入口（与内部 AI / analysis/ai 同一
+    // 构建入口 + 5 分钟跨请求共享缓存）；返回值仍为 buildAnalysisPortfolio 原始完整契约。
     const accountId = url.searchParams.get('accountId') || undefined;
     const accountName = url.searchParams.get('account') || undefined;
-    const data = await buildAnalysisPortfolio(userId, { accountId, account: accountName });
-    sendJson(response, 200, { success: true, ...data });
+    const { getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
+    const entry = await getOrBuildAnalysisData(userId, { accountId, account: accountName });
+    sendJson(response, 200, { success: true, ...entry.portfolio });
     return true;
   }
   if (url.pathname === '/api/external/analysis/ai' && request.method === 'GET') {
-    const { loadUserAccounts, buildAnalysisPortfolio, buildDataWarnings } = require('../services/portfolioAnalysisService');
+    // 2026-10-21：改为复用统一标准 JSON（getOrBuildAnalysisData），删除原先逐基金
+    // 重新拼接 enrichedHoldings / 重复推导 cost / 重复保留 15 日历史净值的冗余装配。
+    // 内部 AI 与外部 AI 对同一账户、同一数据版本读取同一份标准 JSON（5 分钟共享缓存）。
+    const { loadUserAccounts, getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
     const accountsList = await loadUserAccounts(userId);
     let totalAssets = 0;
     const processedAccounts = [];
 
     for (const acc of accountsList) {
-      const port = await buildAnalysisPortfolio(userId, { accountId: acc.name });
+      const entry = await getOrBuildAnalysisData(userId, { account: acc.name });
+      const port = entry.portfolio;
       const accountValue = port.account ? port.account.totalValue : 0;
       totalAssets += accountValue;
-
-      const enrichedHoldings = [];
-      if (port.holdings) {
-        for (const h of port.holdings) {
-          const rawFund = acc.funds ? acc.funds.find(f => String(f.code) === String(h.code)) : null;
-          
-          let cost = 0;
-          if (rawFund) {
-            if (Number.isFinite(Number(rawFund.cost)) && Number(rawFund.cost) > 0) {
-              cost = Number(rawFund.cost);
-            } else if (Number.isFinite(Number(rawFund.costBasis)) && Number(rawFund.costBasis) > 0) {
-              cost = Number(rawFund.costBasis);
-            } else {
-              cost = Number(h.amount) - Number(h.profit);
-            }
-          } else {
-            cost = Number(h.amount) - Number(h.profit);
-          }
-
-          // 近 15 个交易日净值（对齐设置页文案「15 个交易日历史净值」与 analysis-export 口径；
-          // history 为纯数组，消费方仅外部 AI，无长度 10 依赖，兼容性已确认）
-          const compactHistory = Array.isArray(h.history)
-            ? h.history.slice(-15).map(r => ({ date: r.date, nav: r.nav }))
-            : [];
-
-          enrichedHoldings.push({
-            code: h.code,
-            name: h.name,
-            amount: h.amount,
-            cost,
-            profit: h.profit,
-            profitRate: Number((h.profitRate || 0).toFixed(4)),
-            todayEstimate: h.todayEstimate || 0,
-            todayChange: Number((h.today_change || 0).toFixed(2)),
-            type: h.type,
-            history: compactHistory,
-            // 数据增强字段（2026-10-20）：buildAnalysisPortfolio 已计算，直接透传不重复计算。
-            // 缺数据时为 null（enrichFund 保证键存在，undefined 兜底 null），禁止编造或用 0 冒充。
-            performance: h.performance === undefined ? null : h.performance,
-            benchmark: h.benchmark === undefined ? null : h.benchmark,
-            allocation: h.allocation === undefined ? null : h.allocation,
-            topHoldings: h.topHoldings === undefined ? null : h.topHoldings,
-            overlapDetail: h.overlapDetail === undefined ? null : h.overlapDetail
-          });
-        }
-      }
 
       processedAccounts.push({
         accountName: acc.name,
         totalValue: accountValue,
-        strategies: port.strategies || [],
-        // 结构化策略摘要与数据校验警告（与 analysis-export 同源，缺失如实 null/空数组）
-        portfolioSummary: port.portfolioSummary || null,
-        dataWarnings: buildDataWarnings(port) || [],
-        holdings: enrichedHoldings
+        // —— 统一标准紧凑 JSON（与内部 AI 同一构建入口；schemaVersion=1）——
+        // holdingColumns[i] 对应 holdingRows[j][i]；百分比已格式化（'—'=缺失）；账户=[名称,基金数上限,总资产]
+        schemaVersion: entry.json.schemaVersion,
+        account: entry.json.account,
+        holdingColumns: entry.json.holdingColumns,
+        holdingRows: entry.json.holdingRows,
+        strategies: entry.json.strategies,
+        portfolioSummary: entry.json.portfolioSummary,
+        dataWarnings: entry.json.dataWarnings,
+        combinationSummary: entry.json.combinationSummary,
+        closedPositions: entry.json.closedPositions,
+        // —— 边界兼容：Web 设置页「测试 API」仅读取 holdings[].code（app-refactor.js）——
+        // 只保留轻量 {code, name} 视图，不再重复输出 cost/profitRate/history/performance 等
+        // 已由 holdingColumns/holdingRows 承载的数据
+        holdings: (Array.isArray(port.holdings) ? port.holdings : [])
+          .map(h => ({ code: h.code, name: h.name }))
       });
     }
 
@@ -191,13 +163,17 @@ async function handleExternalApi(request, response, url) {
     return true;
   }
   if (url.pathname === '/api/external/analysis' && request.method === 'GET') {
-    const { loadUserAccounts, buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+    // 2026-10-21：改走 getOrBuildAnalysisData 统一入口（复用 5 分钟共享缓存，命中时不再重复
+    // 构建）；本端点专属的业务数据（交易记录/份额/成本/strategyAnalysis）在边界照常叠加，
+    // 响应契约不变。
+    const { loadUserAccounts, getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
     const accountsList = await loadUserAccounts(userId);
     let totalAssets = 0;
     const processedAccounts = [];
 
     for (const acc of accountsList) {
-      const port = await buildAnalysisPortfolio(userId, { accountId: acc.name });
+      const entry = await getOrBuildAnalysisData(userId, { account: acc.name });
+      const port = entry.portfolio;
       const accountValue = port.account ? port.account.totalValue : 0;
       totalAssets += accountValue;
 

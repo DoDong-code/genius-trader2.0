@@ -14,6 +14,7 @@ const { getHistory, getLatestPair } = require('./navService');
 const { fetchProviderEstimate } = require('./providerEstimate');
 const { calculateFundEstimate } = require('./estimateEngine');
 const { requestMemo } = require('../utils/requestScope');
+const crypto = require('crypto');
 const config = require('../config/estimateConfig');
 const dbAsync = require('../database/dbAsync');
 const fundMetrics = require('./fundMetricsService');
@@ -300,6 +301,201 @@ function buildCompactExport(payload) {
   return out;
 }
 
+// ─────────────────────────────────────────────
+// 统一标准紧凑 JSON（内部 AI / 外部 AI 共用）+ 5 分钟跨请求共享缓存
+// ─────────────────────────────────────────────
+
+/** 标准 JSON 结构版本（仅随结构变更递增；参与缓存键，不作随意变化的字段） */
+const STANDARD_ANALYSIS_JSON_SCHEMA_VERSION = 1;
+/** 标准 JSON 跨请求复用窗口（默认 5 分钟）。构建成本 = 今日估值链 + 净值历史 + 基准 + 重合查询 */
+const ANALYSIS_JSON_TTL_MS = Number(process.env.ANALYSIS_JSON_TTL_MS || 300000);
+/** 单进程共享缓存：key → { expiresAt, value:{portfolio,json} }（已构建）或 { promise }（构建中） */
+const analysisDataCache = new Map();
+const ANALYSIS_DATA_CACHE_MAX_ENTRIES = 200;
+
+/**
+ * 统一标准紧凑 JSON（唯一构建入口，2026-10-21）：
+ * - 字段映射集中复用 buildAnalysisTable（列声明唯一来源）+ buildDataWarnings，内部 AI 与
+ *   外部 AI 不再各自维护字段白名单或重复拼装；
+ * - holdingColumns[i] 对应 holdingRows[j][i]，行长度恒等于 columns.length（buildAnalysisTable 保证）；
+ * - 百分比沿用服务端唯一格式化点 formatPctCell（-1.05%；舍入为 0 一律 '0.00%'，无 -0.00%/+0.00%）；
+ *   缺失一律 '—'（与 AI 表格列说明同一既有约定），金额缺失 '—'，绝不把缺失伪装成 0；
+ * - 不输出 history 大数组：以 navDate + 1m/3m/6m/1y 区间收益列呈现（复用现有精简口径，
+ *   不为本次修改恢复大段历史净值）；
+ * - account = [账户名, 最大基金数上限, 总资产]（结构示例经用户确认）。
+ */
+function buildAnalysisCompactJson(portfolio) {
+  const port = portfolio || {};
+  const table = buildAnalysisTable(port.holdings);
+  const acc = port.account || null;
+  return {
+    schemaVersion: STANDARD_ANALYSIS_JSON_SCHEMA_VERSION,
+    account: acc
+      ? [
+          String(acc.name || ''),
+          Number.isFinite(Number(acc.maxFunds)) ? Number(acc.maxFunds) : null,
+          Number(acc.totalValue) || 0
+        ]
+      : null,
+    holdingColumns: table.columns,
+    holdingRows: table.funds,
+    strategies: Array.isArray(port.strategies) ? port.strategies.slice() : [],
+    portfolioSummary: port.portfolioSummary || null,
+    dataWarnings: buildDataWarnings(port) || [],
+    combinationSummary: port.combinationSummary || null,
+    closedPositions: Array.isArray(port.closedPositions) ? port.closedPositions.slice() : []
+  };
+}
+
+/** 缓存对象只读约定：冻结顶层与数组容器（行内仅标量），调用方原地修改不会污染共享缓存 */
+function freezeAnalysisJson(json) {
+  if (!json || typeof json !== 'object') return json;
+  Object.freeze(json);
+  [json.holdingColumns, json.holdingRows, json.strategies, json.dataWarnings, json.closedPositions]
+    .forEach(a => { if (Array.isArray(a)) Object.freeze(a); });
+  if (Array.isArray(json.holdingRows)) json.holdingRows.forEach(r => { if (Array.isArray(r)) Object.freeze(r); });
+  return json;
+}
+
+/**
+ * 账户选择（_buildAnalysisPortfolio 与缓存键共用的唯一选择逻辑）：
+ * accountId 优先于 account；useActive 用当前活动账户（未命中回退第一个）；
+ * 未指定任何选项时返回 null，由调用方走严格模式（单账户直取 / 多账户 needsAccount）。
+ */
+async function selectAnalysisTarget(userId, options, accounts) {
+  if (options.accountId) {
+    return accounts.find(a => String(a.name) === String(options.accountId)) || null;
+  }
+  if (options.account) {
+    return accounts.find(a => a.name === options.account) || null;
+  }
+  if (options.useActive) {
+    const state = await getUserState(userId);
+    const activeName = state && state.active;
+    return accounts.find(a => a.name === activeName) || accounts[0] || null;
+  }
+  return null;
+}
+
+/**
+ * 跨请求缓存键（命中正确性的核心，键变化即失效）：
+ * - 用户 ID + 账户名（本系统的账户标识即 name）+ schemaVersion —— 不同用户/账户绝不共享；
+ * - 账户配置指纹的 SHA-1：持仓 code/amount/cost/costBasis/盈亏、策略、清仓记录、
+ *   回本目标、基金数上限 —— 持仓增删/金额变化/策略修改/清仓编辑 → 立即换键；
+ * - 数据版本 = 账户内基金的最大净值日期 + 最大重仓报告日期 —— 净值同步/重仓数据刷新 → 立即换键；
+ * - 版本查询失败时退化为一次性随机版本（宁可放弃缓存，绝不返回可能过期的结果）；
+ * - 不含时间戳/随机数等每次变化字段（否则永不命中），也不含实时估值
+ *   （provider 今日估算属 5 分钟复用窗口语义，命中期间最多滞后 ≤5 分钟）。
+ */
+async function analysisDataCacheKey(userId, target) {
+  const funds = Array.isArray(target.funds) ? target.funds : [];
+  const fingerprint = JSON.stringify([
+    funds.map(f => f ? [f.code, f.amount, f.cost, f.costBasis, f.holdingProfit, f.profit] : null),
+    Array.isArray(target.strategy) ? target.strategy : [],
+    Array.isArray(target.closedPositions) ? target.closedPositions : [],
+    Number(target.targetRecovery) || 0,
+    Number(target.maxFunds) || 0
+  ]);
+  const codes = funds
+    .map(f => f && f.code)
+    .filter(c => /^\d{6}$/.test(String(c)));
+  let dataVersion = 'no-funds';
+  if (codes.length) {
+    const placeholders = codes.map(() => '?').join(',');
+    try {
+      const navRow = await dbAsync.get(
+        `SELECT MAX(date) AS d FROM fund_nav WHERE fund_code IN (${placeholders})`, codes);
+      const holdRow = await dbAsync.get(
+        `SELECT MAX(report_date) AS d FROM fund_holdings WHERE fund_code IN (${placeholders})`, codes);
+      dataVersion = `${(navRow && navRow.d) || ''}|${(holdRow && holdRow.d) || ''}`;
+    } catch (e) {
+      dataVersion = `err-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    }
+  }
+  const cfgHash = crypto.createHash('sha1').update(fingerprint).digest('hex');
+  return `v${STANDARD_ANALYSIS_JSON_SCHEMA_VERSION}|u${userId}|a${String(target.name)}|${cfgHash}|${dataVersion}`;
+}
+
+/**
+ * 统一构建入口 + 5 分钟跨请求共享缓存（内部 AI / 外部 AI / 外部数据接口共用）：
+ * - 命中：不重复获取基金分析数据、不重复构建标准 JSON、不重复字段映射与序列化；
+ * - single-flight：同键并发请求共用同一份构建中的 Promise，只触发一次实际构建；
+ * - 构建失败不缓存错误（清理失败 Promise，后续请求可立即重试）；
+ * - 缓存对象冻结（freezeAnalysisJson），调用方原地修改不会污染共享缓存；
+ * - 无法定位账户（needsAccount / 无账户 / 键计算异常）时绕过缓存直接构建，绝不跨账户缓存。
+ * 返回 { portfolio, json, cacheState }；cacheState: hit（命中）| shared（并发共用）| miss（新构建）| bypass（绕过）。
+ */
+async function getOrBuildAnalysisData(userId, options = {}) {
+  const accounts = await loadUserAccounts(userId);
+  const target = await selectAnalysisTarget(userId, options, accounts);
+  let cacheKey = null;
+  if (target) {
+    try {
+      cacheKey = await analysisDataCacheKey(userId, target);
+    } catch (e) {
+      cacheKey = null; // 键计算异常：绕过缓存，行为与旧实现一致
+    }
+  }
+  if (!cacheKey) {
+    const portfolio = await buildAnalysisPortfolio(userId, options);
+    return { portfolio, json: buildAnalysisCompactJson(portfolio), cacheState: 'bypass' };
+  }
+  const now = Date.now();
+  const hit = analysisDataCache.get(cacheKey);
+  if (hit && hit.value && hit.expiresAt > now) {
+    return { portfolio: hit.value.portfolio, json: hit.value.json, cacheState: 'hit' };
+  }
+  if (hit && hit.promise) {
+    // single-flight：并发/连续请求共用同一份构建中的 Promise
+    const v = await hit.promise;
+    return { portfolio: v.portfolio, json: v.json, cacheState: 'shared' };
+  }
+  const promise = (async () => {
+    const portfolio = await buildAnalysisPortfolio(userId, options);
+    const json = buildAnalysisCompactJson(portfolio);
+    if (portfolio && portfolio.account) {
+      if (analysisDataCache.size >= ANALYSIS_DATA_CACHE_MAX_ENTRIES) {
+        const oldest = analysisDataCache.keys().next().value;
+        if (oldest !== undefined) analysisDataCache.delete(oldest);
+      }
+      freezeAnalysisJson(json);
+      analysisDataCache.set(cacheKey, {
+        expiresAt: Date.now() + ANALYSIS_JSON_TTL_MS,
+        value: { portfolio, json }
+      });
+    }
+    return { portfolio, json };
+  })();
+  analysisDataCache.set(cacheKey, { promise });
+  try {
+    const v = await promise;
+    return { portfolio: v.portfolio, json: v.json, cacheState: 'miss' };
+  } catch (err) {
+    // 失败不得污染缓存：清理失败的 Promise，允许后续请求重试
+    const cur = analysisDataCache.get(cacheKey);
+    if (cur && cur.promise === promise) analysisDataCache.delete(cacheKey);
+    throw err;
+  }
+}
+
+/**
+ * 主动失效（当前键版本机制已覆盖持仓/策略/净值/重仓变化；此函数供未来数据变更路径按需调用）。
+ * 不传参数 = 清空全部；仅传 userId = 该用户全部账户；再传 accountName = 精确账户。
+ */
+function invalidateAnalysisDataCache(userId, accountName) {
+  if (userId == null && accountName == null) {
+    analysisDataCache.clear();
+    return;
+  }
+  const userTag = `|u${userId}|`;
+  const accountTag = accountName == null ? null : `|a${String(accountName)}|`;
+  for (const key of Array.from(analysisDataCache.keys())) {
+    if (!key.includes(userTag)) continue;
+    if (accountTag && !key.includes(accountTag)) continue;
+    analysisDataCache.delete(key);
+  }
+}
+
 function buildDataWarnings(portfolio) {
   const warnings = [];
   const holdings = (portfolio && Array.isArray(portfolio.holdings)) ? portfolio.holdings : [];
@@ -448,16 +644,8 @@ async function listAnalysisAccounts(userId) {
  */
 async function _buildAnalysisPortfolio(userId, options = {}) {
   const accounts = await loadUserAccounts(userId);
-  let target = null;
-  if (options.accountId) {
-    target = accounts.find(a => String(a.name) === String(options.accountId));
-  } else if (options.account) {
-    target = accounts.find(a => a.name === options.account);
-  } else if (options.useActive) {
-    const state = await getUserState(userId);
-    const activeName = state && state.active;
-    target = accounts.find(a => a.name === activeName) || accounts[0] || null;
-  }
+  // 账户选择逻辑与 getOrBuildAnalysisData 缓存键共用同一 selectAnalysisTarget，避免两处实现漂移
+  let target = await selectAnalysisTarget(userId, options, accounts);
   if (!target && !options.useActive) {
     // 严格模式：单账户直接返回；多账户需明确指定，不自动猜测
     if (accounts.length === 1) {
@@ -617,5 +805,10 @@ module.exports = {
   formatPctCell,
   formatOverlapDetail,
   topHoldingsSummary,
-  buildCompactExport
+  buildCompactExport,
+  // 统一标准 JSON + 5 分钟跨请求共享缓存（内部 AI / 外部 AI 共用入口）
+  STANDARD_ANALYSIS_JSON_SCHEMA_VERSION,
+  buildAnalysisCompactJson,
+  getOrBuildAnalysisData,
+  invalidateAnalysisDataCache
 };

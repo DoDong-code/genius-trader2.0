@@ -552,28 +552,32 @@ async function handleFundApi(request, response, url) {
         } catch (e) {}
 
         // 统一数据源：与持仓页面、外部分析 API 一致（服务端按当前登录用户构建）
+        // 2026-10-21：内部 AI 改走 getOrBuildAnalysisData 统一构建入口——与外部 AI
+        // 共用同一份标准 JSON 与 5 分钟跨请求共享缓存（命中时不再重复估值链/历史/基准计算）。
         const { userFromRequest } = require('../services/authService');
         const user = await userFromRequest(request);
         const userId = user ? Number(user.id) : 0;
-        const { buildAnalysisPortfolio } = require('../services/portfolioAnalysisService');
+        const { getOrBuildAnalysisData } = require('../services/portfolioAnalysisService');
         let portfolio;
         try {
           // 修复账户错配：优先采用前端当前选中的账户名（body.portfolio.account），
           // 避免「前端选中默认账户(5万+)，AI 却分析了另一只账户」的错配。
           // 后端 state.active 与前端的 s.getActive() 解析可能不一致，不再信任 useActive 单点。
           const reqAccount = (body && body.portfolio && body.portfolio.account) || null;
-          portfolio = await buildAnalysisPortfolio(userId, reqAccount ? { account: reqAccount } : { useActive: true });
+          let entry = await getOrBuildAnalysisData(userId, reqAccount ? { account: reqAccount } : { useActive: true });
+          portfolio = entry.portfolio;
           // 显式账户未匹配到（name 不一致等边缘情况）时回退 useActive，保证分析不中断
           if (reqAccount && (!portfolio || !portfolio.account)) {
-            portfolio = await buildAnalysisPortfolio(userId, { useActive: true });
+            entry = await getOrBuildAnalysisData(userId, { useActive: true });
+            portfolio = entry.portfolio;
           }
         } catch (err) {
           // 兜底：使用客户端提供的结构，不破坏现有功能
           portfolio = body.portfolio;
         }
         if (body && body.userQuery) {
-          portfolio = portfolio || {};
-          portfolio.userQuery = body.userQuery;
+          // 浅拷贝挂载 userQuery：共享缓存对象一律只读，禁止原地修改（否则污染其他调用方）
+          portfolio = portfolio ? { ...portfolio, userQuery: body.userQuery } : { userQuery: body.userQuery };
         }
 
         const ai = loadAiBundle();

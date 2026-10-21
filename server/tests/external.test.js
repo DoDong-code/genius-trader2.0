@@ -196,7 +196,7 @@ test('只读 Token：GET /api/external/analysis 统一接口返回完整的真�
   await revokeTokens(10);
 });
 
-test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 AI 分析数据', async () => {
+test('只读 Token：GET /api/external/analysis/ai 返回统一标准紧凑 JSON（与内部 AI 同源）', async () => {
   await saveUserState(15, {
     accounts: {
       '核心AI账户': { name: '核心AI账户', accountType: 'local', syncSource: null, funds: [{ code: '000001', name: '测试基金A', amount: 3000, today: 0.01, profit: 300, category: '混合', transactions: [] }], strategy: ['纪律：不追高'], closedPositions: [] }
@@ -211,7 +211,7 @@ test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 A
   await handleExternalApi(req, res, apiUrl('/api/external/analysis/ai'));
   assert.equal(res.statusCode, 200);
   const data = json(res);
-  
+
   assert.equal(data.success, true);
   assert.equal(data.totalAssets, 3000);
   assert.equal(data.accounts.length, 1);
@@ -220,39 +220,35 @@ test('只读 Token：GET /api/external/analysis/ai 精简接口返回精简的 A
   assert.equal(acc.accountName, '核心AI账户');
   assert.equal(acc.totalValue, 3000);
   assert.deepEqual(acc.strategies, ['纪律：不追高']);
-  assert.equal(acc.holdings.length, 1);
-  
-  const h = acc.holdings[0];
-  assert.equal(h.code, '000001');
-  assert.equal(h.name, '测试基金A');
-  assert.equal(h.amount, 3000);
-  assert.equal(h.cost, 2700);
-  assert.equal(h.profit, 300);
-  // 盈亏率统一成本口径 profit/cost = 300/2700 ≈ 0.1111（与 Web/mp1 持仓页 holdingRate 一致；
-  // 旧市值口径 profit/amount=0.1 会把深度亏损账户放大成 -246% 之类的假数值）
-  assert.ok(Math.abs(h.profitRate - 300 / 2700) < 1e-4);
-  assert.equal(typeof h.todayEstimate, 'number');
-  assert.equal(typeof h.todayChange, 'number');
-  assert.ok(Array.isArray(h.history));
 
-  // 数据增强字段（2026-10-20）：键必须存在；本用例数据稀疏 → 值可为 null（如实，禁止编造）
-  assert.ok('performance' in h, 'performance 键必须存在');
-  assert.ok('benchmark' in h, 'benchmark 键必须存在');
-  assert.ok('allocation' in h, 'allocation 键必须存在');
-  assert.ok('topHoldings' in h, 'topHoldings 键必须存在');
-  assert.ok('overlapDetail' in h, 'overlapDetail 键必须存在');
-  assert.ok(h.performance === null || typeof h.performance === 'object');
-  assert.ok(h.benchmark === null || typeof h.benchmark === 'object');
-  assert.ok(h.topHoldings === null || typeof h.topHoldings === 'string');
-  assert.ok(h.overlapDetail === null || typeof h.overlapDetail === 'string');
-
-  // 账户级：结构化策略摘要 + 数据校验警告（与 analysis-export 同源）
-  assert.ok('portfolioSummary' in acc, 'portfolioSummary 键必须存在');
+  // —— 统一标准紧凑 JSON（2026-10-21）：与内部 AI 同一构建入口 + 同一份 schema ——
+  assert.equal(acc.schemaVersion, 1);
+  assert.deepEqual(acc.account, ['核心AI账户', 1, 3000]);
+  assert.ok(Array.isArray(acc.holdingColumns));
+  assert.ok(Array.isArray(acc.holdingRows));
+  assert.ok(acc.holdingRows.length === 1);
+  // columns 与每行列数严格一致
+  assert.equal(acc.holdingRows[0].length, acc.holdingColumns.length);
+  // 关键列存在（字段映射唯一来源 = buildAnalysisTable）
+  ['code', 'name', 'amount', 'cost', 'profit', 'profitPct', 'todayPct', 'mdd', 'trend', 'navDate', 'topHoldings', 'overlapDetail']
+    .forEach(c => assert.ok(acc.holdingColumns.includes(c), `holdingColumns 应包含 ${c}`));
+  const idx = c => acc.holdingColumns.indexOf(c);
+  assert.equal(acc.holdingRows[0][idx('code')], '000001');
+  assert.equal(acc.holdingRows[0][idx('name')], '测试基金A');
+  // 盈亏率成本口径 profit/cost = 300/2700 ≈ +11.11%（服务端唯一格式化点）
+  assert.equal(acc.holdingRows[0][idx('profitPct')], '+11.11%');
+  // 账户级：数据校验警告 + 策略摘要（与 analysis-export 同源）
   assert.ok(Array.isArray(acc.dataWarnings), 'dataWarnings 必须为数组');
-  if (h.performance) {
-    // 有真实历史时 performance 应为完整对象（含新增 6m/1y 由 benchmark 对象携带）
-    assert.ok('return1m' in h.performance);
-  }
+  assert.ok('portfolioSummary' in acc, 'portfolioSummary 键必须存在');
+
+  // 边界兼容：Web 测试按钮仅读取 holdings[].code/name；重复字段（history/performance/cost）
+  // 已由 holdingColumns/holdingRows 承载，不再重复输出
+  assert.ok(Array.isArray(acc.holdings));
+  assert.equal(acc.holdings.length, 1);
+  assert.equal(acc.holdings[0].code, '000001');
+  assert.equal(acc.holdings[0].name, '测试基金A');
+  assert.ok(!('history' in acc.holdings[0]), 'holdings 兼容视图不得再携带 history 大数组');
+  assert.ok(!('performance' in acc.holdings[0]), 'holdings 兼容视图不得再重复 performance');
 
   await revokeTokens(15);
 });
