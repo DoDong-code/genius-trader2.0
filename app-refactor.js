@@ -1115,6 +1115,88 @@
   }
 
   // ─────────────────────────────────────────────
+  // 剪贴板健壮写入 + 分析导出缓存（120 分钟内复制即时完成）
+  // ─────────────────────────────────────────────
+  // writeText 要求页面处于前台焦点：等待服务端计算期间窗口失焦会抛 "Document is not focused"。
+  // 策略：失败 → window.focus() 重试一次 → 仍失败退回 textarea + execCommand('copy')。
+  function copyTextToClipboard(text) {
+    return (async () => {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (clipErr) {
+          console.warn('[clipboard] writeText 失败，聚焦后重试:', clipErr && clipErr.message);
+        }
+        try { window.focus(); } catch (focusErr) { /* 忽略 */ }
+        await new Promise(r => setTimeout(r, 80));
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch (clipErr2) {
+          console.warn('[clipboard] 聚焦重试仍失败，退回 execCommand:', clipErr2 && clipErr2.message);
+        }
+      }
+      try {
+        const tempInput = document.createElement('textarea');
+        tempInput.value = text;
+        tempInput.style.position = 'fixed';
+        tempInput.style.opacity = '0';
+        document.body.appendChild(tempInput);
+        tempInput.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(tempInput);
+        return !!ok;
+      } catch (execErr) {
+        console.warn('[clipboard] execCommand 兜底也失败:', execErr && execErr.message);
+        return false;
+      }
+    })();
+  }
+
+  // 分析导出 JSON 结果缓存：同一账户 120 分钟内重复「复制」直接复用，不再触发服务端 90s 级重算。
+  // 缓存绑定账户名；超期/解析失败/字段缺失一律视为无缓存（绝不复制过期或错误数据）。
+  const ANALYSIS_EXPORT_CACHE_KEY = 'genius_analysis_export_cache_v1';
+  const ANALYSIS_EXPORT_CACHE_TTL_MS = 120 * 60 * 1000; // 120 分钟
+  function readAnalysisExportCache(accountName) {
+    try {
+      const raw = localStorage.getItem(ANALYSIS_EXPORT_CACHE_KEY);
+      if (!raw) return null;
+      const cached = JSON.parse(raw);
+      if (!cached || !cached.account || !cached.jsonText || !Number.isFinite(cached.ts)) return null;
+      if (cached.account !== accountName) return null;
+      if (Date.now() - cached.ts > ANALYSIS_EXPORT_CACHE_TTL_MS) return null;
+      return cached;
+    } catch (cacheErr) {
+      return null;
+    }
+  }
+  function writeAnalysisExportCache(accountName, jsonText) {
+    try {
+      localStorage.setItem(ANALYSIS_EXPORT_CACHE_KEY, JSON.stringify({ account: accountName, jsonText, ts: Date.now() }));
+    } catch (cacheErr) {
+      console.warn('[analysis-export] 缓存写入失败（不影响本次复制）:', cacheErr && cacheErr.message);
+    }
+  }
+  // 后台预热：静默触发一次完整导出并写入缓存，使后续「复制JSON」即时完成。
+  // 失败静默（复制时仍会正常走端点请求），不打扰用户、不阻塞「生成」按钮。
+  function prewarmAnalysisExportCache(accountName) {
+    if (!accountName) return;
+    providerApi(
+      `/api/portfolio/analysis-export?account=${encodeURIComponent(accountName)}`,
+      { timeout: 120000 }
+    ).then(res => {
+      if (res && res.success && res.export) {
+        writeAnalysisExportCache(accountName, JSON.stringify(res.export, null, 2));
+        console.log(`[analysis-export] 缓存已预热（账户「${accountName}」），120 分钟内复制将即时完成`);
+        showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
+      }
+    }).catch(prewarmErr => {
+      console.warn('[analysis-export] 后台预热失败（复制时将正常请求）:', prewarmErr && prewarmErr.message);
+    });
+  }
+
+  // ─────────────────────────────────────────────
   // Apple 风格提示 / 弹窗
   // ─────────────────────────────────────────────
   function showToast(message, type = 'success') {
@@ -2828,6 +2910,11 @@
             localStorage.setItem('genius_external_token_created_at', String(Date.now()));
             applyExternalStatus();
             showToast('只读 Token 已生成并应用到 API 地址');
+            // 2026-10-21：顺带后台预热分析导出缓存——「生成」完成后服务端在后台算好一次完整导出，
+            // 之后 120 分钟内「复制JSON」直接命中缓存即时复制，不再显示「复制中」等 90s。
+            const st0 = window.portfolioState;
+            const activeName0 = st0 && typeof st0.getActive === 'function' ? st0.getActive() : null;
+            if (activeName0) prewarmAnalysisExportCache(activeName0);
           }
         })
         .catch(() => showToast('生成失败，请先登录账号', 'error'))
@@ -2905,6 +2992,26 @@
           return `网络请求失败：${f.message || ''}`;
         };
 
+        // 剪贴板写入走模块级 copyTextToClipboard()：writeText 失焦自动聚焦重试 + execCommand 兜底。
+        // 2026-10-21 修复：剪贴板失败不再被误判为「导出失败」（此前与端点调用共用同一 try，
+        // 会导致已成功获取的完整数据被丢弃并误报，旧版更会借此静默回退旧格式）。
+
+        // 2026-10-21：120 分钟内同一账户已成功导出过 → 直接复用缓存立即复制，
+        // 不再触发服务端 90s 级重算（点「生成」会后台刷新缓存）。
+        const cachedExport = readAnalysisExportCache(activeName);
+        if (cachedExport) {
+          const cacheAgeMin = Math.max(0, Math.round((Date.now() - cachedExport.ts) / 60000));
+          for (;;) {
+            const copied = await copyTextToClipboard(cachedExport.jsonText);
+            if (copied) {
+              showToast(`已复制「${activeName}」的分析 JSON（缓存，${cacheAgeMin} 分钟前生成；点「生成」可刷新）`);
+              return;
+            }
+            const retryCopy = confirm('缓存数据已在手，但复制到剪贴板失败（常见原因：浏览器窗口/标签页失去焦点）。\n\n请保持本页面在前台，点「确定」重试复制；点「取消」放弃并改走完整导出。');
+            if (!retryCopy) break;
+          }
+        }
+
         let useFallback = false;
         for (;;) {
           let failure = null;
@@ -2918,21 +3025,22 @@
             );
             if (exportRes && exportRes.success && exportRes.export) {
               const jsonText = JSON.stringify(exportRes.export, null, 2);
-              if (navigator.clipboard && navigator.clipboard.writeText) {
-                await navigator.clipboard.writeText(jsonText);
-                showToast(`已复制当前账户「${activeName}」的完整分析 JSON`);
-              } else {
-                const tempInput = document.createElement('textarea');
-                tempInput.value = jsonText;
-                tempInput.style.position = 'fixed';
-                tempInput.style.opacity = '0';
-                document.body.appendChild(tempInput);
-                tempInput.select();
-                document.execCommand('copy');
-                document.body.removeChild(tempInput);
-                showToast(`已复制当前账户「${activeName}」的完整分析 JSON`);
+              // 成功即写缓存：120 分钟内同一账户再次「复制JSON」将即时完成，不再重算
+              writeAnalysisExportCache(activeName, jsonText);
+              // 剪贴板是导出成功后的独立一步：复制失败 ≠ 导出失败，
+              // 在此循环内仅重试复制，不重新请求端点（数据已在手）。
+              for (;;) {
+                const copied = await copyTextToClipboard(jsonText);
+                if (copied) {
+                  showToast(`已复制当前账户「${activeName}」的完整分析 JSON`);
+                  return;
+                }
+                const retryCopy = confirm('完整数据已获取，但复制到剪贴板失败（常见原因：浏览器窗口/标签页失去焦点）。\n\n请保持本页面在前台，点「确定」重试复制；点「取消」放弃本次复制。');
+                if (!retryCopy) {
+                  showToast('已取消复制：完整数据已获取但未写入剪贴板', 'error');
+                  return;
+                }
               }
-              return;
             }
             failure = { kind: 'bad_response' };
           } catch (exportErr) {
@@ -3048,24 +3156,11 @@
         };
 
         const jsonText = JSON.stringify(payload, null, 2);
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(jsonText)
-            .then(() => showToast(`已复制基础数据 JSON（不含完整分析指标）`))
-            .catch(() => showToast('复制失败，请手动选择复制', 'error'));
+        const copied = await copyTextToClipboard(jsonText);
+        if (copied) {
+          showToast(`已复制基础数据 JSON（不含完整分析指标）`);
         } else {
-          const tempInput = document.createElement('textarea');
-          tempInput.value = jsonText;
-          tempInput.style.position = 'fixed';
-          tempInput.style.opacity = '0';
-          document.body.appendChild(tempInput);
-          tempInput.select();
-          try {
-            document.execCommand('copy');
-            showToast(`已复制基础数据 JSON（不含完整分析指标）`);
-          } catch (err) {
-            showToast('复制失败，请手动选择复制', 'error');
-          }
-          document.body.removeChild(tempInput);
+          showToast('复制失败，请手动选择复制', 'error');
         }
       })().finally(() => {
         _copyJsonBtn.disabled = false;
