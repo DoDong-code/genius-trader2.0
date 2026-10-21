@@ -1178,22 +1178,30 @@
       console.warn('[analysis-export] 缓存写入失败（不影响本次复制）:', cacheErr && cacheErr.message);
     }
   }
-  // 后台预热：静默触发一次完整导出并写入缓存，使后续「复制JSON」即时完成。
-  // 失败静默（复制时仍会正常走端点请求），不打扰用户、不阻塞「生成」按钮。
+  // 预热：触发一次完整导出并写入缓存，返回 Promise<boolean>（true=缓存已就绪）。
+  // 「生成」按钮会 await 它——按钮保持「生成中…」直到数据真正算好，之后 120 分钟内复制即时完成。
+  // 进行中的预热 Promise 会被复制入口复用（用户在预热期间点复制不会触发双重计算）。
+  let analysisExportPrewarmPromise = null;
   function prewarmAnalysisExportCache(accountName) {
-    if (!accountName) return;
-    providerApi(
+    if (!accountName) return Promise.resolve(false);
+    const p = providerApi(
       `/api/portfolio/analysis-export?account=${encodeURIComponent(accountName)}`,
       { timeout: 120000 }
     ).then(res => {
+      if (analysisExportPrewarmPromise === p) analysisExportPrewarmPromise = null;
       if (res && res.success && res.export) {
         writeAnalysisExportCache(accountName, JSON.stringify(res.export, null, 2));
         console.log(`[analysis-export] 缓存已预热（账户「${accountName}」），120 分钟内复制将即时完成`);
-        showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
+        return true;
       }
+      return false;
     }).catch(prewarmErr => {
-      console.warn('[analysis-export] 后台预热失败（复制时将正常请求）:', prewarmErr && prewarmErr.message);
+      if (analysisExportPrewarmPromise === p) analysisExportPrewarmPromise = null;
+      console.warn('[analysis-export] 预热失败（复制时将正常请求）:', prewarmErr && prewarmErr.message);
+      return false;
     });
+    analysisExportPrewarmPromise = p;
+    return p;
   }
 
   // ─────────────────────────────────────────────
@@ -2903,27 +2911,39 @@
       externalGenBtn.style.opacity = '0.6';
       externalGenBtn.style.pointerEvents = 'none';
       externalGenBtn.textContent = '生成中…';
-      providerApi('/api/external/token', { method: 'POST' })
-        .then(data => {
+      // 2026-10-21（二次修正）：「生成」= Token 生成 + 分析数据预热**全部完成**才恢复按钮。
+      // 上一版预热是后台 fire-and-forget，按钮提前恢复，用户点复制时缓存还没算好 → 仍走完整 90s 重算。
+      // 现在按钮保持「生成中…」直到缓存就绪，之后 120 分钟内「复制JSON」即时完成。
+      (async () => {
+        try {
+          const data = await providerApi('/api/external/token', { method: 'POST' });
           if (data && data.token) {
             localStorage.setItem('genius_external_token', data.token);
             localStorage.setItem('genius_external_token_created_at', String(Date.now()));
             applyExternalStatus();
-            showToast('只读 Token 已生成并应用到 API 地址');
-            // 2026-10-21：顺带后台预热分析导出缓存——「生成」完成后服务端在后台算好一次完整导出，
-            // 之后 120 分钟内「复制JSON」直接命中缓存即时复制，不再显示「复制中」等 90s。
+            showToast('只读 Token 已生成，正在准备分析数据…', 'warning');
             const st0 = window.portfolioState;
             const activeName0 = st0 && typeof st0.getActive === 'function' ? st0.getActive() : null;
-            if (activeName0) prewarmAnalysisExportCache(activeName0);
+            if (activeName0 && !readAnalysisExportCache(activeName0)) {
+              const warmed = await prewarmAnalysisExportCache(activeName0);
+              if (warmed) showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
+              else showToast('Token 已生成，但分析数据准备未完成，复制时将重新计算', 'warning');
+            } else if (activeName0) {
+              showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
+            } else {
+              showToast('只读 Token 已生成并应用到 API 地址');
+            }
+          } else {
+            showToast('生成失败，请先登录账号', 'error');
           }
-        })
-        .catch(() => showToast('生成失败，请先登录账号', 'error'))
-        .finally(() => {
-          externalGenBtn.disabled = false;
-          externalGenBtn.style.opacity = '';
-          externalGenBtn.style.pointerEvents = '';
-          externalGenBtn.textContent = '生成';
-        });
+        } catch (genErr) {
+          showToast('生成失败，请先登录账号', 'error');
+        }
+        externalGenBtn.disabled = false;
+        externalGenBtn.style.opacity = '';
+        externalGenBtn.style.pointerEvents = '';
+        externalGenBtn.textContent = '生成';
+      })();
       return;
     }
 
@@ -3009,6 +3029,24 @@
             }
             const retryCopy = confirm('缓存数据已在手，但复制到剪贴板失败（常见原因：浏览器窗口/标签页失去焦点）。\n\n请保持本页面在前台，点「确定」重试复制；点「取消」放弃并改走完整导出。');
             if (!retryCopy) break;
+          }
+        }
+
+        // 无缓存但「生成」触发的预热正在进行 → 等它完成直接复用，避免双重计算
+        if (!cachedExport && analysisExportPrewarmPromise) {
+          showToast('分析数据正在准备中，完成后将自动复制…', 'warning');
+          const warmed = await analysisExportPrewarmPromise;
+          const fresh = warmed ? readAnalysisExportCache(activeName) : null;
+          if (fresh) {
+            for (;;) {
+              const copied = await copyTextToClipboard(fresh.jsonText);
+              if (copied) {
+                showToast(`已复制「${activeName}」的分析 JSON（刚生成）`);
+                return;
+              }
+              const retryCopy = confirm('数据已生成，但复制到剪贴板失败（常见原因：浏览器窗口/标签页失去焦点）。\n\n请保持本页面在前台，点「确定」重试复制；点「取消」放弃。');
+              if (!retryCopy) break;
+            }
           }
         }
 
