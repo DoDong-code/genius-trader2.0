@@ -30,11 +30,85 @@ __export(analysisPrompt_exports, {
   ACTION_VERBS: () => ACTION_VERBS,
   analyzeWithPrompt: () => analyzeWithPrompt,
   buildAnalysisPrompt: () => buildAnalysisPrompt,
-  normalizeAnalysis: () => normalizeAnalysis
+  buildCompactDataBlocks: () => buildCompactDataBlocks,
+  normalizeAnalysis: () => normalizeAnalysis,
+  toCompactRows: () => toCompactRows
 });
-function fmtPct(v) {
-  if (v === null || v === void 0 || !Number.isFinite(Number(v))) return "未提供";
-  return `${(Number(v) * 100).toFixed(2)}%`;
+function toCompactRows(items, specs) {
+  const columns = specs.map((s) => s.key);
+  const source = Array.isArray(items) ? items : [];
+  const rows = source.map((item) => specs.map((spec) => {
+    const v = spec.value(item);
+    return v === void 0 ? null : v;
+  }));
+  return { columns, rows };
+}
+function pctNum(v) {
+  if (v === null || v === void 0 || !Number.isFinite(Number(v))) return null;
+  return Number((Number(v) * 100).toFixed(2));
+}
+function buildCompactDataBlocks(holdings) {
+  const list = Array.isArray(holdings) ? holdings : [];
+  const holdingsTable = toCompactRows(list, [
+    { key: "code", value: (h) => h.code || null },
+    { key: "name", value: (h) => h.name || null },
+    { key: "amount", value: (h) => Number.isFinite(Number(h.amount)) ? Number(h.amount) : null },
+    { key: "cost", value: (h) => Number.isFinite(Number(h.cost)) ? Number(h.cost) : null },
+    { key: "profit", value: (h) => Number.isFinite(Number(h.profit)) ? Number(h.profit) : null },
+    { key: "profitRatePct", value: (h) => pctNum(h.profitRate) },
+    { key: "todayEstimatePct", value: (h) => pctNum(h.todayEstimate) },
+    { key: "direction", value: (h) => h.direction || h.type || null }
+  ]);
+  const performanceTable = toCompactRows(list, [
+    { key: "code", value: (h) => h.code || null },
+    { key: "return1mPct", value: (h) => pctNum(h.performance?.return1m) },
+    { key: "return3mPct", value: (h) => pctNum(h.performance?.return3m) },
+    { key: "return6mPct", value: (h) => pctNum(h.performance?.return6m) },
+    { key: "return1yPct", value: (h) => pctNum(h.performance?.return1y) },
+    { key: "maxDrawdown1yPct", value: (h) => pctNum(h.performance?.maxDrawdown1y) },
+    { key: "drawdownFromHigh1yPct", value: (h) => pctNum(h.performance?.drawdownFromHigh1y) },
+    { key: "volatility20dPct", value: (h) => pctNum(h.performance?.volatility20d) },
+    { key: "trend", value: (h) => h.performance && h.performance.trend || null },
+    { key: "dataAsOf", value: (h) => h.performance && h.performance.dataAsOf || null },
+    { key: "historyDays", value: (h) => h.performance && h.performance.historyDays !== null && h.performance.historyDays !== void 0 ? h.performance.historyDays : null }
+  ]);
+  const withBench = list.filter((h) => h.benchmark && h.benchmark.name);
+  const benchmarkTable = withBench.length ? toCompactRows(withBench, [
+    { key: "code", value: (h) => h.code || null },
+    { key: "benchName", value: (h) => h.benchmark && h.benchmark.name || null },
+    { key: "benchKind", value: (h) => h.benchmark && h.benchmark.kind || null },
+    { key: "bench1mPct", value: (h) => pctNum(h.benchmark?.return1m) },
+    { key: "bench3mPct", value: (h) => pctNum(h.benchmark?.return3m) },
+    { key: "bench6mPct", value: (h) => pctNum(h.benchmark?.return6m) },
+    { key: "bench1yPct", value: (h) => pctNum(h.benchmark?.return1y) },
+    { key: "rel1mPct", value: (h) => pctNum(h.benchmark?.relativeReturn1m) },
+    { key: "rel6mPct", value: (h) => pctNum(h.benchmark?.relativeReturn6m) },
+    { key: "rel1yPct", value: (h) => pctNum(h.benchmark?.relativeReturn1y) },
+    { key: "benchDataAsOf", value: (h) => h.benchmark && h.benchmark.dataAsOf || null }
+  ]) : null;
+  const allocationTable = toCompactRows(list, [
+    { key: "code", value: (h) => h.code || null },
+    { key: "role", value: (h) => h.allocation && h.allocation.role ? ROLE_LABEL[h.allocation.role] || h.allocation.role : null },
+    { key: "sector", value: (h) => h.allocation && h.allocation.sector || null },
+    { key: "maxAmount", value: (h) => h.allocation && h.allocation.maxAmount !== null && h.allocation.maxAmount !== void 0 ? h.allocation.maxAmount : null },
+    { key: "overlapWarning", value: (h) => h.allocation && h.allocation.overlapWarning !== void 0 ? h.allocation.overlapWarning : null }
+  ]);
+  const holdingsDetailTable = toCompactRows(list, [
+    { key: "code", value: (h) => h.code || null },
+    { key: "topHoldings", value: (h) => h.topHoldings === void 0 ? null : h.topHoldings },
+    { key: "overlapDetail", value: (h) => h.overlapDetail === void 0 ? null : h.overlapDetail }
+  ]);
+  return {
+    holdings: holdingsTable,
+    performance: performanceTable,
+    benchmark: benchmarkTable,
+    allocation: allocationTable,
+    holdingsDetail: holdingsDetailTable
+  };
+}
+function compactBlockText(title, table, extraNote) {
+  return `【${title}】
+${extraNote ? extraNote + "\n" : ""}${JSON.stringify(table)}`;
 }
 function fmtMoney(v) {
   if (v === null || v === void 0 || !Number.isFinite(Number(v))) return "未提供";
@@ -42,16 +116,6 @@ function fmtMoney(v) {
 }
 function money(v) {
   return Number.isFinite(Number(v)) ? Number(v) : 0;
-}
-function fmtEnum(v, map) {
-  if (!v) return "未提供";
-  return map[v] || v;
-}
-function fmtDataAsOf(perf) {
-  const d = perf && perf.dataAsOf ? String(perf.dataAsOf) : "";
-  const days = perf && perf.historyDays !== null && perf.historyDays !== void 0 ? Number(perf.historyDays) : null;
-  if (!d) return "无有效历史净值";
-  return days !== null && Number.isFinite(days) ? `${d}（有效 ${days} 个交易日）` : d;
 }
 function buildPositionNarrative(holdings, closedPositions) {
   const lines = [];
@@ -78,32 +142,37 @@ function buildAnalysisPrompt(data) {
   const account = data.account || {};
   const strategies = Array.isArray(data.strategies) && data.strategies.length > 0 ? data.strategies.map((s, i) => `${i + 1}. ${s}`).join("\n") : "未设置自定义策略。请勿自行编造任何「目标配比」「目标仓位」或「高于/低于目标」等表述；仅基于当前持仓实际构成给出观察类建议。";
   const holdings = Array.isArray(data.holdings) ? data.holdings : [];
-  const holdingsTable = holdings.length ? holdings.map(
-    (h) => `${h.code || ""} | ${h.name || ""} | 金额 ${fmtMoney(h.amount)} | 成本 ${fmtMoney(h.cost)} | 盈亏 ${fmtMoney(h.profit)} | 盈亏率 ${fmtPct(h.profitRate)} | 今日估算 ${fmtPct(h.todayEstimate)} | 角色 ${h.direction || h.type || "未提供"}`
-  ).join("\n") : "（无持仓）";
+  const compact = buildCompactDataBlocks(holdings);
+  const COMPACT_NOTE = "读取规则：columns[i] 对应每行第 i 个值，必须先按表头还原字段含义再分析；带Pct后缀的列=百分数数值（-7.36表示-7.36%）；金额单位=人民币元；null=数据缺失，严禁当作0或编造；禁止将不同列的数值混用。";
+  const holdingsJsonBlock = compactBlockText(
+    "当前持仓明细（columns+rows）",
+    compact.holdings,
+    `${COMPACT_NOTE} profitRatePct=盈亏率（成本口径=盈亏/成本）；todayEstimatePct=今日估算涨跌；direction=持仓方向/分类。`
+  );
+  const performanceJsonBlock = compactBlockText(
+    "量化表现（performance，真实净值按日历窗口计算）",
+    compact.performance,
+    `${COMPACT_NOTE} trend: up=上升趋势/sideways=横盘震荡/down=下降趋势/unknown=数据不足；dataAsOf=计算所用净值日期；historyDays=有效交易日数。`
+  );
+  const benchmarkJsonBlock = compact.benchmark ? compactBlockText(
+    "业绩基准对比（benchmark，仅列出已配置基准的基金；未列出的基金未配置基准，严禁默认与沪深300比较）",
+    compact.benchmark,
+    `${COMPACT_NOTE} bench*=基准同期收益；rel*=相对基准超额（基金-基准）。`
+  ) : "";
+  const allocationJsonBlock = compactBlockText(
+    "基金角色与仓位上限（allocation）",
+    compact.allocation,
+    `${COMPACT_NOTE} maxAmount=null=无单独上限；overlapWarning: true=与其他持仓存在真实重仓重合/false=无显著重仓重合/null=重合数据不足未判定。`
+  );
+  const holdingsDetailJsonBlock = compactBlockText(
+    "前十大重仓与重合明细（真实报告期数据）",
+    compact.holdingsDetail,
+    `${COMPACT_NOTE} topHoldings/overlapDetail=紧凑文本串；null=未获取到或未判定，严禁编造。`
+  );
+  const dataWarningsBlock = Array.isArray(data.dataWarnings) && data.dataWarnings.length > 0 ? `【数据质量警告（以下数据存在可靠性问题，分析时必须考虑，不得忽略）】
+${data.dataWarnings.map((w) => `- ${w}`).join("\n")}
+` : "";
   const historyBlock = holdings.length ? holdings.map((h) => `${h.code || ""} ${h.name || ""}：${h.historySummary || "未提供"}`).join("\n") : "（无）";
-  const performanceBlock = holdings.length ? holdings.map((h) => {
-    const p = h.performance;
-    if (!p) return `${h.code || ""} ${h.name || ""}：未提供`;
-    return [
-      `${h.code || ""} ${h.name || ""}：`,
-      `近1月 ${fmtPct(p.return1m)} / 近3月 ${fmtPct(p.return3m)} / 近6月 ${fmtPct(p.return6m)} / 近1年 ${fmtPct(p.return1y)}`,
-      `近1年最大回撤 ${fmtPct(p.maxDrawdown1y)} / 当前距1年高点 ${fmtPct(p.drawdownFromHigh1y)} / 20日年化波动率 ${fmtPct(p.volatility20d)}`,
-      `趋势 ${fmtEnum(p.trend, TREND_LABEL)}；数据截至 ${fmtDataAsOf(p)}`
-    ].join("；");
-  }).join("\n") : "（无）";
-  const benchmarkBlock = holdings.length ? holdings.map((h) => {
-    const b = h.benchmark;
-    if (!b || !b.name) return `${h.code || ""} ${h.name || ""}：无可用业绩基准（未提供，不要自行假设基准）`;
-    return `${h.code || ""} ${h.name || ""}：基准「${b.name}」（${b.kind === "official" ? "官方业绩基准" : "辅助分析基准"}）基准近1月 ${fmtPct(b.return1m)} / 近3月 ${fmtPct(b.return3m)} / 近6月 ${fmtPct(b.return6m)} / 近1年 ${fmtPct(b.return1y)}；相对基准超额 近1月 ${fmtPct(b.relativeReturn1m)} / 近6月 ${fmtPct(b.relativeReturn6m)} / 近1年 ${fmtPct(b.relativeReturn1y)}；基准数据截至 ${b.dataAsOf || "未提供"}`;
-  }).join("\n") : "（无）";
-  const allocationBlock = holdings.length ? holdings.map((h) => {
-    const a = h.allocation;
-    if (!a) return `${h.code || ""} ${h.name || ""}：未提供`;
-    const cap = a.maxAmount === null || a.maxAmount === void 0 ? "无单独上限" : fmtMoney(a.maxAmount);
-    const overlap = a.overlapWarning === null || a.overlapWarning === void 0 ? "重合数据不足(未判定)" : a.overlapWarning ? "与组合内其他基金存在真实重仓重合" : "无显著重仓重合";
-    return `${h.code || ""} ${h.name || ""}：角色 ${fmtEnum(a.role, ROLE_LABEL)} / 方向 ${a.sector || "未提供"} / 目标上限 ${cap} / ${overlap}`;
-  }).join("\n") : "（无）";
   const ps = data.portfolioSummary;
   const portfolioSummaryBlock = ps ? [
     `权益总持仓目标上限：${ps.equityCap === null || ps.equityCap === void 0 ? "未提供" : fmtMoney(ps.equityCap)}`,
@@ -113,11 +182,6 @@ function buildAnalysisPrompt(data) {
   ].join("\n") : "未提供";
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || "未提供";
-  const holdingsDetailBlock = holdings.length ? holdings.map((h) => {
-    const th = h.topHoldings === null || h.topHoldings === void 0 ? "前十大重仓：无数据（未获取到该基金持仓，不要编造）" : `前十大重仓：${h.topHoldings}`;
-    const od = h.overlapDetail === null || h.overlapDetail === void 0 ? "重合明细：无数据" : `重合明细：${h.overlapDetail}`;
-    return `${h.code || ""} ${h.name || ""}：${th}；${od}`;
-  }).join("\n") : "（无）";
   const analysisTable = data.analysisTable && Array.isArray(data.analysisTable.funds) && data.analysisTable.funds.length > 0 ? data.analysisTable : null;
   const tableBlock = analysisTable ? [
     '列说明：amount/cost/profit=金额(元)；profitPct=盈亏率(成本口径=盈亏/成本)；todayPct=今日估算涨跌；1m/3m/6m/1y=近1/3/6/12月收益率；mdd=近1年最大回撤；ddHigh=距近1年高点回撤；trend=趋势(up/sideways/down/unknown)；rel1m/rel6m/rel1y=近1/6/12月相对基准超额；navDate=计算所用净值日期；topHoldings=前十大重仓摘要(最新报告期，"无数据"=未获取到，不要编造)；overlapDetail=与其他持仓基金的重仓重合明细(股票:本x%/彼基金代码 y%，最多3条，"无数据"=未判定或未获取)。百分比已格式化为字符串，「—」= 数据缺失，严禁编造或重复换算。',
@@ -138,28 +202,21 @@ ${portfolioSummaryBlock}
 注意：若回本目标标注「定义待确认」，不要自行解释为已确认的目标，仅在需要时提示用户确认。
 
 ${tableBlock ? `【持仓数据表（唯一持仓数据源，列顺序严格对应表头；「—」= 缺失）】
-${tableBlock}` : `【当前持仓（金额 / 成本 / 盈亏 / 今日）】
-${holdingsTable}
+${tableBlock}` : `${holdingsJsonBlock}
 
-【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
-${performanceBlock}
+${performanceJsonBlock}
 
-【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
-${benchmarkBlock}`}
+${benchmarkJsonBlock}`}
 
-【基金角色与仓位上限（allocation，人工配置优先；overlap 由真实持仓计算）】
-${allocationBlock}
-
-【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
+${allocationJsonBlock}
+${dataWarningsBlock}【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
 近期交易与清仓推导（已减多少、近期是否加仓）：
 ${narrative}
 ${tableBlock ? "" : `
 历史净值表现（每只）：
 ${historyBlock}
 
-【前十大重仓与重合明细（真实报告期数据；"无数据"=未获取到，严禁编造）】
-${holdingsDetailBlock}`}
-【组合关系（不要孤立分析一只基金）】
+${holdingsDetailJsonBlock}`}【组合关系（不要孤立分析一只基金）】
 ${combination}
 
 【分析纪律（强制）】
@@ -256,7 +313,7 @@ async function analyzeWithPrompt(portfolioData, config, chatImpl) {
     return fallback;
   }
 }
-var ACTION_VERBS, TREND_LABEL, ROLE_LABEL;
+var ACTION_VERBS, ROLE_LABEL;
 var init_analysisPrompt = __esm({
   "src/services/ai/analysisPrompt.ts"() {
     ACTION_VERBS = [
@@ -271,12 +328,6 @@ var init_analysisPrompt = __esm({
       "退出",
       "观察"
     ];
-    TREND_LABEL = {
-      up: "上升趋势",
-      sideways: "横盘震荡",
-      down: "下降趋势",
-      unknown: "数据不足(unknown)"
-    };
     ROLE_LABEL = {
       core: "核心宽基",
       growth: "成长配置",
@@ -292,7 +343,11 @@ var init_analysisPrompt = __esm({
 var index_exports = {};
 __export(index_exports, {
   analyzePortfolio: () => analyzePortfolio6,
-  chat: () => chat6
+  buildAnalysisPrompt: () => buildAnalysisPrompt,
+  buildCompactDataBlocks: () => buildCompactDataBlocks,
+  chat: () => chat6,
+  normalizeAnalysis: () => normalizeAnalysis,
+  toCompactRows: () => toCompactRows
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -356,6 +411,9 @@ async function analyzePortfolio(portfolioData, config) {
     };
   }
 }
+
+// src/services/ai/index.ts
+init_analysisPrompt();
 
 // src/services/ai/deepseek.ts
 async function chat2(message, config) {
@@ -591,5 +649,9 @@ async function analyzePortfolio6(portfolioData, config) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   analyzePortfolio,
-  chat
+  buildAnalysisPrompt,
+  buildCompactDataBlocks,
+  chat,
+  normalizeAnalysis,
+  toCompactRows
 });

@@ -104,6 +104,138 @@ export interface PortfolioInput {
   closedPositions?: Array<{ name?: string; code?: string; closedBefore?: string; amount?: number; reason?: string | string[] }>;
   combinationSummary?: string;
   totalAssets?: number;
+  /** 服务端数据质量警告（真实数据源问题；非空时 prompt 单独渲染，禁止忽略） */
+  dataWarnings?: string[] | null;
+}
+
+// ─────────────────────────────────────────────
+// AI 专用紧凑格式（columns 表头 + rows 行数据）
+// 仅用于发给 AI 的输入适配层；共享原始对象、导出 JSON、外部 API 结构一律不变。
+// ─────────────────────────────────────────────
+
+/** 紧凑表：字段名只在 columns 出现一次；每行 rows[i].length 严格 === columns.length */
+export interface CompactTable {
+  columns: string[];
+  rows: unknown[][];
+}
+
+/** 列取值声明：key=列名（同时固定列顺序），value=取值/换算函数 */
+export interface CompactColumnSpec<T> {
+  key: string;
+  value: (item: T) => unknown;
+}
+
+/**
+ * 同构对象数组 → { columns, rows }（AI 专用转换，不重算任何业务数据）：
+ * - 行值严格按 specs 声明顺序取值，杜绝行列错位；每行长度恒等于 columns.length；
+ * - undefined → null（缺失），null/0/false/'' 原样保留（都是有效值，禁止当缺失删除或混淆）；
+ * - 换算（如小数比率→百分数数值）只能通过显式 value 函数声明，与 Prompt 列说明一一对应。
+ */
+export function toCompactRows<T>(items: T[] | null | undefined, specs: CompactColumnSpec<T>[]): CompactTable {
+  const columns = specs.map(s => s.key);
+  const source = Array.isArray(items) ? items : [];
+  const rows = source.map(item => specs.map(spec => {
+    const v = spec.value(item);
+    return v === undefined ? null : v;
+  }));
+  return { columns, rows };
+}
+
+/** 小数比率 → 百分数数值（-0.0736 → -7.36，表示 -7.36%）；null/非数值 → null（缺失保留，绝不变 0） */
+function pctNum(v: number | null | undefined): number | null {
+  if (v === null || v === undefined || !Number.isFinite(Number(v))) return null;
+  return Number((Number(v) * 100).toFixed(2));
+}
+
+/**
+ * AI 专用紧凑数据块（唯一适配点）：把持仓数组拆成 5 个同构 {columns, rows} 块。
+ * 与旧版逐基金长文本块承载完全相同的信息，仅消除重复字段名；换算只有 pctNum（×100 保留 2 位）。
+ */
+export interface CompactDataBlocks {
+  /** 当前持仓：金额/成本/盈亏/盈亏率/今日估算/方向 */
+  holdings: CompactTable;
+  /** 量化表现：各周期收益/回撤/波动率/趋势/数据日期 */
+  performance: CompactTable;
+  /** 业绩基准对比：仅含已配置基准的基金；全部未配置时为 null（prompt 注明未列出=未配置） */
+  benchmark: CompactTable | null;
+  /** 基金角色与仓位上限 */
+  allocation: CompactTable;
+  /** 前十大重仓摘要 + 重合明细（紧凑文本串，null 如实保留） */
+  holdingsDetail: CompactTable;
+}
+
+export function buildCompactDataBlocks(holdings: AnalysisHolding[]): CompactDataBlocks {
+  const list = Array.isArray(holdings) ? holdings : [];
+
+  const holdingsTable = toCompactRows(list, [
+    { key: 'code', value: h => h.code || null },
+    { key: 'name', value: h => h.name || null },
+    { key: 'amount', value: h => (Number.isFinite(Number(h.amount)) ? Number(h.amount) : null) },
+    { key: 'cost', value: h => (Number.isFinite(Number(h.cost)) ? Number(h.cost) : null) },
+    { key: 'profit', value: h => (Number.isFinite(Number(h.profit)) ? Number(h.profit) : null) },
+    { key: 'profitRatePct', value: h => pctNum(h.profitRate) },
+    { key: 'todayEstimatePct', value: h => pctNum(h.todayEstimate) },
+    { key: 'direction', value: h => h.direction || h.type || null }
+  ]);
+
+  const performanceTable = toCompactRows(list, [
+    { key: 'code', value: h => h.code || null },
+    { key: 'return1mPct', value: h => pctNum(h.performance?.return1m) },
+    { key: 'return3mPct', value: h => pctNum(h.performance?.return3m) },
+    { key: 'return6mPct', value: h => pctNum(h.performance?.return6m) },
+    { key: 'return1yPct', value: h => pctNum(h.performance?.return1y) },
+    { key: 'maxDrawdown1yPct', value: h => pctNum(h.performance?.maxDrawdown1y) },
+    { key: 'drawdownFromHigh1yPct', value: h => pctNum(h.performance?.drawdownFromHigh1y) },
+    { key: 'volatility20dPct', value: h => pctNum(h.performance?.volatility20d) },
+    { key: 'trend', value: h => (h.performance && h.performance.trend) || null },
+    { key: 'dataAsOf', value: h => (h.performance && h.performance.dataAsOf) || null },
+    { key: 'historyDays', value: h => (h.performance && h.performance.historyDays !== null && h.performance.historyDays !== undefined ? h.performance.historyDays : null) }
+  ]);
+
+  const withBench = list.filter(h => h.benchmark && h.benchmark.name);
+  const benchmarkTable: CompactTable | null = withBench.length
+    ? toCompactRows(withBench, [
+        { key: 'code', value: h => h.code || null },
+        { key: 'benchName', value: h => (h.benchmark && h.benchmark.name) || null },
+        { key: 'benchKind', value: h => (h.benchmark && h.benchmark.kind) || null },
+        { key: 'bench1mPct', value: h => pctNum(h.benchmark?.return1m) },
+        { key: 'bench3mPct', value: h => pctNum(h.benchmark?.return3m) },
+        { key: 'bench6mPct', value: h => pctNum(h.benchmark?.return6m) },
+        { key: 'bench1yPct', value: h => pctNum(h.benchmark?.return1y) },
+        { key: 'rel1mPct', value: h => pctNum(h.benchmark?.relativeReturn1m) },
+        { key: 'rel6mPct', value: h => pctNum(h.benchmark?.relativeReturn6m) },
+        { key: 'rel1yPct', value: h => pctNum(h.benchmark?.relativeReturn1y) },
+        { key: 'benchDataAsOf', value: h => (h.benchmark && h.benchmark.dataAsOf) || null }
+      ])
+    : null;
+
+  const allocationTable = toCompactRows(list, [
+    { key: 'code', value: h => h.code || null },
+    { key: 'role', value: h => (h.allocation && h.allocation.role ? (ROLE_LABEL[h.allocation.role] || h.allocation.role) : null) },
+    { key: 'sector', value: h => (h.allocation && h.allocation.sector) || null },
+    { key: 'maxAmount', value: h => (h.allocation && h.allocation.maxAmount !== null && h.allocation.maxAmount !== undefined ? h.allocation.maxAmount : null) },
+    { key: 'overlapWarning', value: h => (h.allocation && h.allocation.overlapWarning !== undefined ? h.allocation.overlapWarning : null) }
+  ]);
+
+  const holdingsDetailTable = toCompactRows(list, [
+    { key: 'code', value: h => h.code || null },
+    { key: 'topHoldings', value: h => (h.topHoldings === undefined ? null : h.topHoldings) },
+    { key: 'overlapDetail', value: h => (h.overlapDetail === undefined ? null : h.overlapDetail) }
+  ]);
+
+  return {
+    holdings: holdingsTable,
+    performance: performanceTable,
+    benchmark: benchmarkTable,
+    allocation: allocationTable,
+    holdingsDetail: holdingsDetailTable
+  };
+}
+
+/** 紧凑块 → prompt 文本段：columns[i] 对应每行第 i 个值（JSON 紧凑序列化，无空白） */
+function compactBlockText(title: string, table: CompactTable, extraNote?: string): string {
+  return `【${title}】
+${extraNote ? extraNote + '\n' : ''}${JSON.stringify(table)}`;
 }
 
 // 标准动作词表（约束 AI 输出，保证前端可直接展示）
@@ -188,50 +320,49 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
     : '未设置自定义策略。请勿自行编造任何「目标配比」「目标仓位」或「高于/低于目标」等表述；仅基于当前持仓实际构成给出观察类建议。';
 
   const holdings = Array.isArray(data.holdings) ? data.holdings : [];
-  const holdingsTable = holdings.length
-    ? holdings.map(h =>
-        `${h.code || ''} | ${h.name || ''} | 金额 ${fmtMoney(h.amount)} | 成本 ${fmtMoney(h.cost)} | 盈亏 ${fmtMoney(h.profit)} | 盈亏率 ${fmtPct(h.profitRate)} | 今日估算 ${fmtPct(h.todayEstimate)} | 角色 ${h.direction || h.type || '未提供'}`
-      ).join('\n')
-    : '（无持仓）';
+  // —— AI 专用紧凑格式（columns+rows）：字段名只在表头出现一次，降低重复文本/Token ——
+  const compact = buildCompactDataBlocks(holdings);
+
+  // 统一读取规则（每个紧凑块前声明一次，块内不再重复）：columns[i] 对应每行第 i 个值；
+  // 带 Pct 后缀的列为百分数数值（-7.36 表示 -7.36%，由小数比率×100 换算）；金额单位人民币元；
+  // null=数据缺失（严禁当作 0、false 或编造）；禁止将不同列的数值混用。
+  const COMPACT_NOTE = '读取规则：columns[i] 对应每行第 i 个值，必须先按表头还原字段含义再分析；带Pct后缀的列=百分数数值（-7.36表示-7.36%）；金额单位=人民币元；null=数据缺失，严禁当作0或编造；禁止将不同列的数值混用。';
+
+  const holdingsJsonBlock = compactBlockText(
+    '当前持仓明细（columns+rows）',
+    compact.holdings,
+    `${COMPACT_NOTE} profitRatePct=盈亏率（成本口径=盈亏/成本）；todayEstimatePct=今日估算涨跌；direction=持仓方向/分类。`
+  );
+  const performanceJsonBlock = compactBlockText(
+    '量化表现（performance，真实净值按日历窗口计算）',
+    compact.performance,
+    `${COMPACT_NOTE} trend: up=上升趋势/sideways=横盘震荡/down=下降趋势/unknown=数据不足；dataAsOf=计算所用净值日期；historyDays=有效交易日数。`
+  );
+  const benchmarkJsonBlock = compact.benchmark
+    ? compactBlockText(
+        '业绩基准对比（benchmark，仅列出已配置基准的基金；未列出的基金未配置基准，严禁默认与沪深300比较）',
+        compact.benchmark,
+        `${COMPACT_NOTE} bench*=基准同期收益；rel*=相对基准超额（基金-基准）。`
+      )
+    : '';
+  const allocationJsonBlock = compactBlockText(
+    '基金角色与仓位上限（allocation）',
+    compact.allocation,
+    `${COMPACT_NOTE} maxAmount=null=无单独上限；overlapWarning: true=与其他持仓存在真实重仓重合/false=无显著重仓重合/null=重合数据不足未判定。`
+  );
+  const holdingsDetailJsonBlock = compactBlockText(
+    '前十大重仓与重合明细（真实报告期数据）',
+    compact.holdingsDetail,
+    `${COMPACT_NOTE} topHoldings/overlapDetail=紧凑文本串；null=未获取到或未判定，严禁编造。`
+  );
+
+  // 数据质量警告（服务端真实数据源问题；非空时必须纳入分析，禁止为省 Token 删除）
+  const dataWarningsBlock = (Array.isArray(data.dataWarnings) && data.dataWarnings.length > 0)
+    ? `【数据质量警告（以下数据存在可靠性问题，分析时必须考虑，不得忽略）】\n${data.dataWarnings.map(w => `- ${w}`).join('\n')}\n`
+    : '';
 
   const historyBlock = holdings.length
     ? holdings.map(h => `${h.code || ''} ${h.name || ''}：${h.historySummary || '未提供'}`).join('\n')
-    : '（无）';
-
-  // —— 数据增强板块：performance（量化表现，后端按日历窗口计算，全部为小数比率） ——
-  const performanceBlock = holdings.length
-    ? holdings.map(h => {
-        const p = h.performance;
-        if (!p) return `${h.code || ''} ${h.name || ''}：未提供`;
-        return [
-          `${h.code || ''} ${h.name || ''}：`,
-          `近1月 ${fmtPct(p.return1m)} / 近3月 ${fmtPct(p.return3m)} / 近6月 ${fmtPct(p.return6m)} / 近1年 ${fmtPct(p.return1y)}`,
-          `近1年最大回撤 ${fmtPct(p.maxDrawdown1y)} / 当前距1年高点 ${fmtPct(p.drawdownFromHigh1y)} / 20日年化波动率 ${fmtPct(p.volatility20d)}`,
-          `趋势 ${fmtEnum(p.trend, TREND_LABEL)}；数据截至 ${fmtDataAsOf(p)}`
-        ].join('；');
-      }).join('\n')
-    : '（无）';
-
-  // —— 数据增强板块：benchmark（业绩基准对比；未配置基准如实标注，严禁默认沪深300） ——
-  const benchmarkBlock = holdings.length
-    ? holdings.map(h => {
-        const b = h.benchmark;
-        if (!b || !b.name) return `${h.code || ''} ${h.name || ''}：无可用业绩基准（未提供，不要自行假设基准）`;
-        return `${h.code || ''} ${h.name || ''}：基准「${b.name}」（${b.kind === 'official' ? '官方业绩基准' : '辅助分析基准'}）基准近1月 ${fmtPct(b.return1m)} / 近3月 ${fmtPct(b.return3m)} / 近6月 ${fmtPct(b.return6m)} / 近1年 ${fmtPct(b.return1y)}；相对基准超额 近1月 ${fmtPct(b.relativeReturn1m)} / 近6月 ${fmtPct(b.relativeReturn6m)} / 近1年 ${fmtPct(b.relativeReturn1y)}；基准数据截至 ${b.dataAsOf || '未提供'}`;
-      }).join('\n')
-    : '（无）';
-
-  // —— 数据增强板块：allocation（基金角色与仓位上限，人工配置优先） ——
-  const allocationBlock = holdings.length
-    ? holdings.map(h => {
-        const a = h.allocation;
-        if (!a) return `${h.code || ''} ${h.name || ''}：未提供`;
-        const cap = (a.maxAmount === null || a.maxAmount === undefined) ? '无单独上限' : fmtMoney(a.maxAmount);
-        const overlap = (a.overlapWarning === null || a.overlapWarning === undefined)
-          ? '重合数据不足(未判定)'
-          : (a.overlapWarning ? '与组合内其他基金存在真实重仓重合' : '无显著重仓重合');
-        return `${h.code || ''} ${h.name || ''}：角色 ${fmtEnum(a.role, ROLE_LABEL)} / 方向 ${a.sector || '未提供'} / 目标上限 ${cap} / ${overlap}`;
-      }).join('\n')
     : '（无）';
 
   const ps = data.portfolioSummary;
@@ -244,19 +375,6 @@ export function buildAnalysisPrompt(data: PortfolioInput): string {
 
   const narrative = buildPositionNarrative(holdings, data.closedPositions);
   const combination = data.combinationSummary || '未提供';
-
-  // —— 数据增强板块：前十大重仓与重合明细（真实报告期数据；仅在无紧凑表路径渲染，有表时由表列承载，避免重复） ——
-  const holdingsDetailBlock = holdings.length
-    ? holdings.map(h => {
-        const th = (h.topHoldings === null || h.topHoldings === undefined)
-          ? '前十大重仓：无数据（未获取到该基金持仓，不要编造）'
-          : `前十大重仓：${h.topHoldings}`;
-        const od = (h.overlapDetail === null || h.overlapDetail === undefined)
-          ? '重合明细：无数据'
-          : `重合明细：${h.overlapDetail}`;
-        return `${h.code || ''} ${h.name || ''}：${th}；${od}`;
-      }).join('\n')
-    : '（无）';
 
   // —— 紧凑数据表路径：服务端（buildAnalysisTable）是百分比唯一格式化点，此处只渲染不换算。
   // 有表时跳过逐基金 holdings/performance/benchmark/history 四个冗长块；无表回退旧结构。 ——
@@ -285,28 +403,21 @@ ${portfolioSummaryBlock}
 ${tableBlock
     ? `【持仓数据表（唯一持仓数据源，列顺序严格对应表头；「—」= 缺失）】
 ${tableBlock}`
-    : `【当前持仓（金额 / 成本 / 盈亏 / 今日）】
-${holdingsTable}
+    : `${holdingsJsonBlock}
 
-【量化表现（performance，真实净值按日历窗口计算；「未提供」= 数据不足，严禁编造）】
-${performanceBlock}
+${performanceJsonBlock}
 
-【业绩基准对比（benchmark；未配置基准的基金严禁默认与沪深300比较）】
-${benchmarkBlock}`}
+${benchmarkJsonBlock}`}
 
-【基金角色与仓位上限（allocation，人工配置优先；overlap 由真实持仓计算）】
-${allocationBlock}
-
-【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
+${allocationJsonBlock}
+${dataWarningsBlock}【历史与调仓摘要（真实数据，严禁编造；无数据写“未提供”）】
 近期交易与清仓推导（已减多少、近期是否加仓）：
 ${narrative}
 ${tableBlock ? '' : `
 历史净值表现（每只）：
 ${historyBlock}
 
-【前十大重仓与重合明细（真实报告期数据；"无数据"=未获取到，严禁编造）】
-${holdingsDetailBlock}`}
-【组合关系（不要孤立分析一只基金）】
+${holdingsDetailJsonBlock}`}【组合关系（不要孤立分析一只基金）】
 ${combination}
 
 【分析纪律（强制）】

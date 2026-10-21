@@ -506,6 +506,12 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     ),
     strategies: Array.isArray(target.strategy) ? target.strategy.slice() : [],
     strategy,
+    // 数据质量警告（与导出 JSON 同一 buildDataWarnings 口径）：随 AI 输入进入 prompt，
+    // 确保影响建议可靠性的数据缺失对模型可见，不为省 Token 静默丢弃
+    dataWarnings: buildDataWarnings({
+      holdings,
+      strategies: Array.isArray(target.strategy) ? target.strategy : []
+    }),
     // 紧凑 AI 数据表（prompt 渲染用；导出 JSON 不含此字段，保持原契约）
     analysisTable: buildAnalysisTable(holdings),
     holdings,

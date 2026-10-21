@@ -1,4 +1,5 @@
 import { AIConfig, PortfolioData, AnalysisResponse } from './openai';
+import { buildAnalysisPrompt, normalizeAnalysis, buildCompactDataBlocks, toCompactRows } from './analysisPrompt';
 import * as openai from './openai';
 import * as deepseek from './deepseek';
 import * as kimi from './kimi';
@@ -6,6 +7,8 @@ import * as gemini from './gemini';
 import * as claude from './claude';
 
 export { AIConfig, PortfolioData, AnalysisResponse };
+// AI 输入适配层导出（紧凑 columns+rows 转换与 prompt 构造，供服务端/测试复用）
+export { buildAnalysisPrompt, normalizeAnalysis, buildCompactDataBlocks, toCompactRows };
 
 export async function chat(message: string, config: AIConfig): Promise<string> {
   const provider = (config.provider || 'OpenAI').toLowerCase();

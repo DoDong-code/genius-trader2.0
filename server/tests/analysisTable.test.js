@@ -346,14 +346,17 @@ test('fetchIndexQuotes：指数价格 fltt=2 直读', async () => {
 // ---------------------------------------------------------------------------
 // AI bundle 双路径（文本级新鲜度检查：防止遗漏 npm run build:ai）
 // ---------------------------------------------------------------------------
-test('AI bundle：含紧凑数据表路径 + 保留无表回退路径', () => {
+test('AI bundle：含紧凑数据表路径 + 无表回退为 columns+rows 紧凑块（2026-10-21 格式改造）', () => {
   const bundle = fs.readFileSync(path.resolve(__dirname, '../services/ai/index.js'), 'utf8');
   assert.ok(bundle.includes('持仓数据表'), 'bundle 应包含紧凑数据表标题');
   assert.ok(bundle.includes('analysisTable'), 'bundle 应读取 analysisTable 字段');
   assert.ok(bundle.includes('profitPct=盈亏率(成本口径=盈亏/成本)'), 'bundle 应包含成本口径列说明');
   assert.ok(bundle.includes('严禁编造或重复换算'), '应禁止 AI 重复换算百分比');
-  // 回退路径（客户端自带 portfolio、无 analysisTable 时仍可用）
-  assert.ok(bundle.includes('【当前持仓（金额 / 成本 / 盈亏 / 今日）】'), '应保留旧结构回退');
-  assert.ok(bundle.includes('【量化表现（performance'), '应保留 performance 回退块');
-  assert.ok(bundle.includes('【业绩基准对比（benchmark'), '应保留 benchmark 回退块');
+  // 回退路径（客户端自带 portfolio、无 analysisTable 时）：旧冗长块已改为 columns+rows 紧凑块
+  assert.ok(bundle.includes('当前持仓明细（columns+rows）'), '应包含 holdings 紧凑块');
+  assert.ok(bundle.includes('量化表现（performance，真实净值按日历窗口计算）'), '应包含 performance 紧凑块');
+  assert.ok(bundle.includes('业绩基准对比（benchmark，仅列出已配置基准的基金'), '应包含 benchmark 紧凑块');
+  assert.ok(bundle.includes('columns[i] 对应每行第 i 个值'), '应包含行列对齐读取规则');
+  assert.ok(bundle.includes('基金角色与仓位上限（allocation）'), 'allocation 紧凑块双路径均渲染');
+  assert.ok(bundle.includes('数据质量警告'), 'dataWarnings 应进入 prompt');
 });
