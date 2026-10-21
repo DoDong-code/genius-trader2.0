@@ -351,9 +351,12 @@ async function handleFundApi(request, response, url) {
     }
     const accountName = url.searchParams.get('account') || undefined;
     try {
+      // 紧凑导出（2026-10-21 用户确认）：?compact=1 时 holdings 改为 {columns, rows} 扁平宽表，
+      // 消除每行重复字段名；不带参数保持原对象数组契约（mp1 / 旧调用方不受影响）。
+      const compact = url.searchParams.get('compact') === '1';
       const { runInRequestScope } = require('../utils/requestScope');
       const payload = await runInRequestScope(async () => {
-        const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings } = require('../services/portfolioAnalysisService');
+        const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings, buildCompactExport } = require('../services/portfolioAnalysisService');
         const { requestMemo } = require('../utils/requestScope');
         // 2026-10-20 实测（用户截图 HTTP 500 "Analysis timeout after 20000ms"）：
         // 重账户的 buildAnalysisPortfolio 会超过全局默认 20s 软超时（Neon 远程逐查询延迟 +
@@ -440,7 +443,7 @@ async function handleFundApi(request, response, url) {
         sendJson(response, 404, { success: false, error: '账户不存在' });
         return true;
       }
-      sendJson(response, 200, { success: true, export: payload });
+      sendJson(response, 200, { success: true, export: compact ? buildCompactExport(payload) : payload });
     } catch (err) {
       sendJson(response, err.statusCode || 500, { success: false, error: err.message || '导出失败' });
     }

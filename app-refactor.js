@@ -1156,7 +1156,7 @@
 
   // 分析导出 JSON 结果缓存：同一账户 120 分钟内重复「复制」直接复用，不再触发服务端 90s 级重算。
   // 缓存绑定账户名；超期/解析失败/字段缺失一律视为无缓存（绝不复制过期或错误数据）。
-  const ANALYSIS_EXPORT_CACHE_KEY = 'genius_analysis_export_cache_v1';
+  const ANALYSIS_EXPORT_CACHE_KEY = 'genius_analysis_export_cache_v2'; // v2：holdings 紧凑 {columns, rows} 结构（2026-10-21）
   const ANALYSIS_EXPORT_CACHE_TTL_MS = 120 * 60 * 1000; // 120 分钟
   function readAnalysisExportCache(accountName) {
     try {
@@ -1185,7 +1185,7 @@
   function prewarmAnalysisExportCache(accountName) {
     if (!accountName) return Promise.resolve(false);
     const p = providerApi(
-      `/api/portfolio/analysis-export?account=${encodeURIComponent(accountName)}`,
+      `/api/portfolio/analysis-export?account=${encodeURIComponent(accountName)}&compact=1`,
       { timeout: 120000 }
     ).then(res => {
       if (analysisExportPrewarmPromise === p) analysisExportPrewarmPromise = null;
@@ -3058,7 +3058,7 @@
           const exportStartedAt = Date.now();
           try {
             const exportRes = await providerApi(
-              `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}`,
+              `/api/portfolio/analysis-export?account=${encodeURIComponent(activeName)}&compact=1`,
               // 2026-10-20 实测确认服务端重账户计算超 20s（已放宽本端点服务端护栏到 90s），
               // 前端预算对齐 AI analyze 的 120s，避免服务端仍在计算时前端先 abort。
               { timeout: 120000 }

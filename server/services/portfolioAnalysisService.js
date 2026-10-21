@@ -230,6 +230,76 @@ function buildAnalysisTable(holdings) {
  * 数据校验警告（导出 JSON 与 AI 输入共用口径说明）：
  * 只报告真实数据源问题，不把口径差异当错误；缺失如实标注，不伪造。
  */
+/**
+ * 「复制JSON」紧凑导出（2026-10-21，用户确认后实施）：
+ * holdings 对象数组 → { columns, rows } 扁平宽表（每基金一行，消除每行重复字段名）。
+ * 仅结构转换：值原样直取（小数比率不换算、字符串不截断），undefined → null；
+ * null / 0 / false / '' 保留原样，不重算任何业务数据。
+ * 行列对齐保证：列顺序由 COMPACT_EXPORT_HOLDING_SPECS 显式声明，行值严格按 specs 取值，
+ * 每行长度恒等于 columns.length；缺失占位 null，绝不删格错位。
+ * 非数组字段（account / strategies / portfolioSummary / dataWarnings）保持普通对象原样。
+ * 端点 ?compact=1 时启用；不带参数保持原对象数组契约（mp1 / 旧调用方不受影响）。
+ */
+const COMPACT_EXPORT_HOLDING_SPECS = [
+  // 顶层持仓字段
+  ['code', h => h.code],
+  ['name', h => h.name],
+  ['category', h => h.category],
+  ['subAccount', h => h.subAccount],
+  ['amount', h => h.amount],
+  ['cost', h => h.cost],
+  ['profit', h => h.profit],
+  ['profitRate', h => h.profitRate],
+  ['todayChange', h => h.todayChange],
+  ['todayProfit', h => h.todayProfit],
+  ['navUpdatedAt', h => h.navUpdatedAt],
+  ['navHistory', h => h.navHistory],
+  ['topHoldings', h => h.topHoldings],
+  ['overlapDetail', h => h.overlapDetail],
+  // performance（原名直取；dataAsOf → perfDataAsOf，与基准日期列区分）
+  ['return1m', h => h.performance ? h.performance.return1m : null],
+  ['return3m', h => h.performance ? h.performance.return3m : null],
+  ['return6m', h => h.performance ? h.performance.return6m : null],
+  ['return1y', h => h.performance ? h.performance.return1y : null],
+  ['maxDrawdown1y', h => h.performance ? h.performance.maxDrawdown1y : null],
+  ['drawdownFromHigh1y', h => h.performance ? h.performance.drawdownFromHigh1y : null],
+  ['volatility20d', h => h.performance ? h.performance.volatility20d : null],
+  ['trend', h => h.performance ? h.performance.trend : null],
+  ['perfDataAsOf', h => h.performance ? h.performance.dataAsOf : null],
+  ['historyDays', h => h.performance ? h.performance.historyDays : null],
+  // benchmark（全部加 bench 前缀，避免与 performance 的 return1m 等列名冲突）
+  ['benchName', h => h.benchmark ? h.benchmark.name : null],
+  ['benchKind', h => h.benchmark ? h.benchmark.kind : null],
+  ['benchReturn1m', h => h.benchmark ? h.benchmark.return1m : null],
+  ['benchReturn3m', h => h.benchmark ? h.benchmark.return3m : null],
+  ['benchReturn6m', h => h.benchmark ? h.benchmark.return6m : null],
+  ['benchReturn1y', h => h.benchmark ? h.benchmark.return1y : null],
+  ['benchRelReturn1m', h => h.benchmark ? h.benchmark.relativeReturn1m : null],
+  ['benchRelReturn6m', h => h.benchmark ? h.benchmark.relativeReturn6m : null],
+  ['benchRelReturn1y', h => h.benchmark ? h.benchmark.relativeReturn1y : null],
+  ['benchDataAsOf', h => h.benchmark ? h.benchmark.dataAsOf : null],
+  ['benchSource', h => h.benchmark ? h.benchmark.source : null],
+  ['benchUnavailableReason', h => h.benchmark ? h.benchmark.unavailableReason : null],
+  // allocation
+  ['role', h => h.allocation ? h.allocation.role : null],
+  ['sector', h => h.allocation ? h.allocation.sector : null],
+  ['maxAmount', h => h.allocation ? h.allocation.maxAmount : null],
+  ['overlapWarning', h => h.allocation ? h.allocation.overlapWarning : null]
+];
+
+function buildCompactExport(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const holdings = Array.isArray(payload.holdings) ? payload.holdings : [];
+  const columns = COMPACT_EXPORT_HOLDING_SPECS.map(s => s[0]);
+  const rows = holdings.map(h => COMPACT_EXPORT_HOLDING_SPECS.map(([, get]) => {
+    const v = get(h);
+    return v === undefined ? null : v;
+  }));
+  const out = Object.assign({}, payload);
+  out.holdings = { columns, rows };
+  return out;
+}
+
 function buildDataWarnings(portfolio) {
   const warnings = [];
   const holdings = (portfolio && Array.isArray(portfolio.holdings)) ? portfolio.holdings : [];
@@ -546,5 +616,6 @@ module.exports = {
   buildDataWarnings,
   formatPctCell,
   formatOverlapDetail,
-  topHoldingsSummary
+  topHoldingsSummary,
+  buildCompactExport
 };
