@@ -116,3 +116,47 @@ test('analysis-export：overlapDetail 进入输出 + 增强字段透传 + null �
   assert.equal(h0.subAccount, '子1');
   assert.equal(h0.category, '混合');
 });
+
+test('analysis-export compact=1：holdings 变 {columns, rows} 宽表，端到端无 ReferenceError', async () => {
+  // 回归背景：2026-10-21 线上 HTTP 500 "buildCompactExport is not defined"——
+  // 解构误放 runInRequestScope 回调内而使用点在回调外；默认路径短路求值掩盖了该错误，
+  // 必须用 compact=1 的端点级测试才能真正执行该分支。
+  const url = new URL('http://localhost/api/portfolio/analysis-export?account=' + encodeURIComponent('导出账户') + '&compact=1');
+  const res = mockResponse();
+  const ok = await handleFundApi(mockRequest('GET'), res, url);
+  assert.equal(ok, true);
+  assert.equal(res.statusCode, 200);
+  const data = JSON.parse(res.body);
+  assert.equal(data.success, true);
+
+  const exp = data.export;
+  // 非数组字段原样
+  assert.equal(exp.account.name, '导出账户');
+  assert.deepEqual(exp.dataWarnings, ['007339 基金B: 测试警告']);
+
+  const { columns, rows } = exp.holdings;
+  assert.ok(!Array.isArray(exp.holdings), 'compact 模式下 holdings 不再是数组');
+  assert.equal(columns.length, 40);
+  assert.equal(rows.length, 2);
+  for (const row of rows) assert.equal(row.length, columns.length);
+
+  const colIdx = (name) => columns.indexOf(name);
+  // 行0（数据齐全基金）：拍平字段与端点序列化值一致
+  const r0 = rows[0];
+  assert.equal(r0[colIdx('code')], '013309');
+  assert.equal(r0[colIdx('profitRate')], 0.1111);
+  assert.equal(r0[colIdx('topHoldings')], '腾讯控股(7.40%)');
+  assert.equal(r0[colIdx('overlapDetail')], '腾讯控股:本7.4%/彼007330 5.1%');
+  assert.equal(r0[colIdx('maxDrawdown1y')], -0.1);
+  assert.equal(r0[colIdx('benchReturn6m')], -0.02);
+  assert.equal(r0[colIdx('role')], 'growth');
+  assert.equal(r0[colIdx('overlapWarning')], true);
+  // 行1（数据不足基金）：整组缺失全 null，0/空串如实保留
+  const r1 = rows[1];
+  assert.equal(r1[colIdx('code')], '007339');
+  assert.equal(r1[colIdx('profitRate')], null);
+  assert.equal(r1[colIdx('maxDrawdown1y')], null);
+  assert.equal(r1[colIdx('benchName')], null);
+  assert.equal(r1[colIdx('todayChange')], 0);
+  assert.equal(r1[colIdx('topHoldings')], '');
+});

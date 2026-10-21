@@ -356,7 +356,7 @@ async function handleFundApi(request, response, url) {
       const compact = url.searchParams.get('compact') === '1';
       const { runInRequestScope } = require('../utils/requestScope');
       const payload = await runInRequestScope(async () => {
-        const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings, buildCompactExport } = require('../services/portfolioAnalysisService');
+        const { buildAnalysisPortfolio, loadUserAccounts, buildDataWarnings } = require('../services/portfolioAnalysisService');
         const { requestMemo } = require('../utils/requestScope');
         // 2026-10-20 实测（用户截图 HTTP 500 "Analysis timeout after 20000ms"）：
         // 重账户的 buildAnalysisPortfolio 会超过全局默认 20s 软超时（Neon 远程逐查询延迟 +
@@ -443,6 +443,11 @@ async function handleFundApi(request, response, url) {
         sendJson(response, 404, { success: false, error: '账户不存在' });
         return true;
       }
+      // buildCompactExport 必须在本层解构（2026-10-21 修复 ReferenceError：
+      // 此前误放入 runInRequestScope 回调内部解构，而使用点在回调外的 sendJson 行，
+      // 块级作用域不可见 → compact=1 时 HTTP 500 "buildCompactExport is not defined"。
+      // 默认路径因短路求值未评估该标识符，本地测试此前未暴露）。
+      const { buildCompactExport } = require('../services/portfolioAnalysisService');
       sendJson(response, 200, { success: true, export: compact ? buildCompactExport(payload) : payload });
     } catch (err) {
       sendJson(response, err.statusCode || 500, { success: false, error: err.message || '导出失败' });
