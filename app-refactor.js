@@ -2924,12 +2924,14 @@
             showToast('只读 Token 已生成，正在准备分析数据…', 'warning');
             const st0 = window.portfolioState;
             const activeName0 = st0 && typeof st0.getActive === 'function' ? st0.getActive() : null;
-            if (activeName0 && !readAnalysisExportCache(activeName0)) {
+            if (activeName0) {
+              // 2026-10-21（三次修正）：「生成」= 强制刷新——上一版有缓存命中短路，
+              // 120 分钟内已有缓存时点「生成」直接提示就绪、跳过重算（用户实测「秒生成」
+              // 实为未刷新，复制拿到旧缓存）。现在总是重新预热并覆盖缓存，按钮保持
+              // 「生成中…」直到新数据算好；只有「复制」才走缓存秒回。
               const warmed = await prewarmAnalysisExportCache(activeName0);
-              if (warmed) showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
-              else showToast('Token 已生成，但分析数据准备未完成，复制时将重新计算', 'warning');
-            } else if (activeName0) {
-              showToast('分析数据已就绪：120 分钟内点「复制JSON」将即时完成');
+              if (warmed) showToast('分析数据已刷新就绪：120 分钟内点「复制JSON」将即时完成');
+              else showToast('Token 已生成，但分析数据刷新未完成（保留上次缓存，复制时可能为旧数据）', 'warning');
             } else {
               showToast('只读 Token 已生成并应用到 API 地址');
             }
