@@ -147,6 +147,10 @@
     <view class="ledger-tab {{activeTab === 'performance' ? 'active' : ''}}" data-tab="performance" catchtap="onTabSelect">历史业绩</view>
     <view class="ledger-tab {{activeTab === 'holdings' ? 'active' : ''}}" data-tab="holdings" catchtap="onTabSelect">前十大持仓</view>
     <view class="ledger-tab {{activeTab === 'transactions' ? 'active' : ''}}" data-tab="transactions" catchtap="onTabSelect">交易记录</view>
+    <!-- P3.19：手动更新按钮 —— 仅历史净值 / 前十大持仓 Tab 显示（与网页端一致） -->
+    <view class="ledger-refresh {{refreshing ? 'refreshing' : ''}}"
+          wx:if="{{activeTab === 'nav' || activeTab === 'holdings'}}"
+          catchtap="onRefreshTab">{{refreshing ? '更新中…' : (activeTab === 'nav' ? '更新净值' : '更新持仓')}}</view>
   </view>
 
   <!-- Tab Content: 历史净值 -->

@@ -449,27 +449,20 @@
   async function loadStockRealtimeDetails(holdings, backdrop) {
     if (!Array.isArray(holdings) || !holdings.length) return;
     const items = [...backdrop.querySelectorAll('.holding-list > div')];
-    
-    await Promise.allSettled(holdings.map(async (item, index) => {
-      const stockCode = item.stock_code ?? item[0];
-      if (!stockCode) return;
-      try {
-        const response = await fetch(`${getApiBase()}/api/stock/${stockCode}`);
-        if (!response.ok) return;
-        const data = await response.json();
-        if (data && data.success && data.quote) {
-          const changePercent = Number(data.quote.change_percent);
-          if (Number.isFinite(changePercent)) {
-            const node = items[index];
-            if (!node) return;
-            const pctText = (changePercent * 100).toFixed(2);
-            const isPos = changePercent > 0;
-            const isNeg = changePercent < 0;
-            const sign = isPos ? '+' : '';
-            
-            const badgeSpan = document.createElement('span');
-            badgeSpan.className = `holding-stock-change ${isPos ? 'positive' : isNeg ? 'negative' : ''}`;
-            badgeSpan.style.cssText = `
+
+    // P3.19：行情缓存挂在 backdrop 上（按股票代码）。持仓 Tab 每次切换都会重渲染 DOM 丢徽标，
+    // 命中缓存直接补显；仅对没取过的代码发 /api/stock/ 请求，避免反复切 Tab 造成请求风暴。
+    const quoteCache = backdrop._quoteCache || (backdrop._quoteCache = new Map());
+
+    const applyBadge = (node, changePercent) => {
+      if (!node) return;
+      const pctText = (changePercent * 100).toFixed(2);
+      const isPos = changePercent > 0;
+      const isNeg = changePercent < 0;
+      const sign = isPos ? '+' : '';
+      const badgeSpan = document.createElement('span');
+      badgeSpan.className = `holding-stock-change ${isPos ? 'positive' : isNeg ? 'negative' : ''}`;
+      badgeSpan.style.cssText = `
               display: inline-block;
               font-size: 11px;
               font-weight: 650;
@@ -480,12 +473,33 @@
               color: ${isPos ? '#ff3b30 !important' : isNeg ? '#34a853 !important' : '#86868b'};
               font-variant-numeric: tabular-nums;
             `;
-            badgeSpan.textContent = `${sign}${pctText}%`;
-            
-            const labelNode = node.querySelector('span');
-            if (labelNode) {
-              labelNode.appendChild(badgeSpan);
-            }
+      badgeSpan.textContent = `${sign}${pctText}%`;
+
+      const labelNode = node.querySelector('span');
+      if (labelNode) {
+        labelNode.appendChild(badgeSpan);
+      }
+    };
+
+    await Promise.allSettled(holdings.map(async (item, index) => {
+      const stockCode = item.stock_code ?? item[0];
+      if (!stockCode) return;
+      const node = items[index];
+      if (!node) return;
+      const cached = quoteCache.get(stockCode);
+      if (Number.isFinite(cached)) {
+        applyBadge(node, cached);
+        return;
+      }
+      try {
+        const response = await fetch(`${getApiBase()}/api/stock/${stockCode}`);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (data && data.success && data.quote) {
+          const changePercent = Number(data.quote.change_percent);
+          if (Number.isFinite(changePercent)) {
+            quoteCache.set(stockCode, changePercent);
+            applyBadge(node, changePercent);
           }
         }
       } catch (err) {
@@ -500,6 +514,7 @@
     const rangeButtons = [...backdrop.querySelectorAll('.detail-range-button')];
     const recordButtons = [...backdrop.querySelectorAll('.detail-record-tab')];
     const recordContent = backdrop.querySelector('.detail-record-content');
+    const recordRefreshBtn = backdrop.querySelector('[data-record-refresh]');
 
     const renderRange = button => {
       activateButton(rangeButtons, button);
@@ -535,6 +550,12 @@
       recordContent.classList.remove('content-enter');
       // P2：四 Tab 统一渲染（历史净值｜历史业绩｜前十大持仓｜交易记录）
       const record = button.dataset.record;
+      backdrop._activeRecord = record;
+      // P3.19：更新按钮仅在历史净值 / 前十大持仓 Tab 显示
+      if (recordRefreshBtn) {
+        recordRefreshBtn.hidden = !(record === 'nav' || record === 'holdings');
+        recordRefreshBtn.textContent = record === 'nav' ? '更新净值' : '更新持仓';
+      }
       let markup;
       if (record === 'nav') markup = navHistoryMarkup(history);
       else if (record === 'performance') markup = performanceMarkup(history);
@@ -542,10 +563,64 @@
       else markup = transactionsMarkup(fund);
       recordContent.innerHTML = markup;
       requestAnimationFrame(() => recordContent.classList.add('content-enter'));
+      // P3.19：持仓 Tab 每次渲染补实时涨跌幅（quoteCache 命中的代码不发请求）
+      if (record === 'holdings') loadStockRealtimeDetails(fund.holdings, backdrop);
     };
 
     rangeButtons.forEach(button => button.addEventListener('click', () => renderRange(button)));
     recordButtons.forEach(button => button.addEventListener('click', () => renderRecord(button)));
+
+    // P3.19：手动更新后用新历史原地刷新图表与当前 Tab（复用闭包内同一数组引用，
+    // navHistoryMarkup / historyForRange / chartMarkup 全部基于该数组，原地替换即全局生效）
+    backdrop._applyExplorerHistory = next => {
+      if (!Array.isArray(next) || !next.length) return;
+      history.length = 0;
+      next.forEach(item => history.push(item));
+      backdrop.fundHistory = history;
+      const activeRange = rangeButtons.find(b => b.classList.contains('active'));
+      if (activeRange) renderRange(activeRange);
+    };
+
+    // P3.19：手动更新按钮 —— 复用 /api/fund/:code?refresh=1（阻塞式 force 全量导入：
+    // 同时补齐历史净值 + 拉取最新季度持仓），随后原地重渲染当前 Tab 与实时涨跌幅。
+    if (recordRefreshBtn) {
+      recordRefreshBtn.addEventListener('click', async () => {
+        if (recordRefreshBtn.disabled) return;
+        const record = backdrop._activeRecord;
+        if (record !== 'nav' && record !== 'holdings') return;
+        recordRefreshBtn.disabled = true;
+        const previousText = recordRefreshBtn.textContent;
+        recordRefreshBtn.textContent = '更新中…';
+        try {
+          const response = await fetch(`${getApiBase()}/api/fund/${fund.code}?refresh=1`);
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const payload = await response.json();
+          if (!payload || !payload.success) throw new Error('数据源刷新失败');
+          if (Array.isArray(payload.history) && payload.history.length) {
+            backdrop._applyExplorerHistory(payload.history);
+          }
+          if (Array.isArray(payload.holdings)) {
+            fund.holdings = payload.holdings;
+          }
+          if (record === 'holdings') {
+            // 新报告期可能换股，行情缓存整体失效重取
+            backdrop._quoteCache = new Map();
+          }
+          if (typeof backdrop._renderActiveRecord === 'function') backdrop._renderActiveRecord();
+          if (typeof window.showToast === 'function') {
+            window.showToast(record === 'nav' ? '历史净值已更新' : '持仓数据已更新', 'success');
+          }
+        } catch (err) {
+          console.warn('[detail-refresh] failed:', err);
+          if (typeof window.showToast === 'function') {
+            window.showToast(`更新失败：${err.message}`, 'error');
+          }
+        } finally {
+          recordRefreshBtn.disabled = false;
+          recordRefreshBtn.textContent = previousText;
+        }
+      });
+    }
     // 供外部（startLoad 更新 holdings/transactions 后）重渲染当前激活 Tab
     backdrop._renderActiveRecord = () => {
       const active = recordButtons.find(button => button.classList.contains('active'));
@@ -1048,6 +1123,8 @@
                 aria-selected="false" data-record="holdings">前十大持仓</button>
               <button class="detail-record-tab" type="button" role="tab"
                 aria-selected="false" data-record="transactions">交易记录</button>
+              <!-- P3.19：手动更新按钮 —— 仅历史净值 / 前十大持仓 Tab 显示（renderRecord 控制） -->
+              <button type="button" class="detail-record-refresh" data-record-refresh hidden>更新</button>
             </div>
             <div class="detail-record-content">
               <div class="detail-loading detail-loading-short" aria-label="加载历史数据"></div>

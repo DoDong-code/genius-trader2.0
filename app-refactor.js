@@ -1115,6 +1115,24 @@
   }
 
   // ─────────────────────────────────────────────
+  // AI 分析授权三按钮（复制API / 测试API / 复制JSON）启用态集中控制：
+  // 「生成中」（Token + 数据预热，最长 ~90s）期间三个按钮必须保持可点击——
+  // 复制API/测试API 只依赖 Token；复制JSON 命中 120min 缓存秒回或复用进行中的预热 Promise。
+  // 2026-10-27 修复：此前启用/禁用散落在 applyExternalStatus 的异步回调里，
+  // 状态检查瞬时失败或竞态会把按钮打成禁用态，用户在「生成中…」期间全程点不了。
+  // ─────────────────────────────────────────────
+  function setExternalActionButtonsEnabled(enabled) {
+    ['external-copy-api-btn-ai', 'external-test-api-btn-ai', 'external-copy-json-btn'].forEach(id => {
+      const btn = document.querySelector('#' + id);
+      if (!btn) return;
+      btn.disabled = !enabled;
+      btn.style.opacity = enabled ? '1' : '0.4';
+      btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+      btn.style.pointerEvents = enabled ? 'auto' : 'none';
+    });
+  }
+
+  // ─────────────────────────────────────────────
   // 剪贴板健壮写入 + 分析导出缓存（120 分钟内复制即时完成）
   // ─────────────────────────────────────────────
   // writeText 要求页面处于前台焦点：等待服务端计算期间窗口失焦会抛 "Document is not focused"。
@@ -1488,10 +1506,8 @@
     const area = document.querySelector('#external-token-area');
     const apiArea = document.querySelector('#external-api-area');
     const apiUrlAiEl = document.querySelector('#external-api-url-ai');
-    
-    const copyApiAiBtn = document.querySelector('#external-copy-api-btn-ai');
-    const testApiAiBtn = document.querySelector('#external-test-api-btn-ai');
-    const copyJsonBtn = document.querySelector('#external-copy-json-btn');
+
+    // 三个操作按钮（复制API/测试API/复制JSON）的启用态统一走 setExternalActionButtonsEnabled()
     const testResultEl = document.querySelector('#external-test-result');
 
     if (apiArea) apiArea.style.display = 'block';
@@ -1525,14 +1541,7 @@
           if (revokeBtn) revokeBtn.style.display = '';
 
           // 启用三个按钮
-          [copyApiAiBtn, testApiAiBtn, copyJsonBtn].forEach(btn => {
-            if (btn) {
-              btn.disabled = false;
-              btn.style.opacity = '1';
-              btn.style.cursor = 'pointer';
-              btn.style.pointerEvents = 'auto';
-            }
-          });
+          setExternalActionButtonsEnabled(true);
         } else {
           statusText.textContent = '未生成或已过期';
           if (genBtn) genBtn.style.display = '';
@@ -1546,32 +1555,31 @@
           localStorage.removeItem('genius_external_token');
           localStorage.removeItem('genius_external_token_created_at');
 
-          // 禁用三个按钮
-          [copyApiAiBtn, testApiAiBtn, copyJsonBtn].forEach(btn => {
-            if (btn) {
-              btn.disabled = true;
-              btn.style.opacity = '0.4';
-              btn.style.cursor = 'not-allowed';
-              btn.style.pointerEvents = 'none';
-            }
-          });
+          // 禁用三个按钮（仅在确认无有效 Token 时；本地仍持有未过期 Token 时保持可用）
+          setExternalActionButtonsEnabled(false);
         }
         if (area) area.style.display = 'none';
       })
       .catch(() => {
-        statusText.textContent = '未登录或获取失败';
-        if (apiUrlAiEl) {
-          apiUrlAiEl.innerHTML = '<span style="color: #ff3b30;">无法连接到授权服务器，请确保已登录账户。</span>';
-        }
-        // 禁用三个按钮
-        [copyApiAiBtn, testApiAiBtn, copyJsonBtn].forEach(btn => {
-          if (btn) {
-            btn.disabled = true;
-            btn.style.opacity = '0.4';
-            btn.style.cursor = 'not-allowed';
-            btn.style.pointerEvents = 'none';
+        // 2026-10-27：状态检查失败 ≠ Token 失效。本地持有未过期 Token 时（典型场景：
+        // 「生成中」服务端正忙于 90s 数据预热，状态请求瞬时失败/超时）按钮保持可用，
+        // 不再打成禁用态导致用户在生成期间全程点不了复制API/测试API/复制JSON。
+        statusText.textContent = hasLocalToken ? '已生成（状态检查暂时失败，功能不受影响）' : '未登录或获取失败';
+        if (hasLocalToken) {
+          if (apiUrlAiEl) {
+            const apiBase = window.FUND_API_BASE || window.location.origin;
+            apiUrlAiEl.textContent = `${apiBase}/api/external/analysis/ai?token=${cachedToken}`;
           }
-        });
+          if (genBtn) genBtn.style.display = '';
+          if (revokeBtn) revokeBtn.style.display = '';
+          setExternalActionButtonsEnabled(true);
+        } else {
+          if (apiUrlAiEl) {
+            apiUrlAiEl.innerHTML = '<span style="color: #ff3b30;">无法连接到授权服务器，请确保已登录账户。</span>';
+          }
+          // 禁用三个按钮
+          setExternalActionButtonsEnabled(false);
+        }
       });
   }
 
@@ -2920,6 +2928,10 @@
           if (data && data.token) {
             localStorage.setItem('genius_external_token', data.token);
             localStorage.setItem('genius_external_token_created_at', String(Date.now()));
+            // 2026-10-27：Token 一到手就同步启用三个按钮，不等 applyExternalStatus 的异步
+            // 状态检查——整个「生成中…」（含最长 ~90s 数据预热）期间复制API/测试API/复制JSON
+            // 保持可点击（复制JSON 命中缓存秒回或复用进行中的预热 Promise，不会双重计算）。
+            setExternalActionButtonsEnabled(true);
             applyExternalStatus();
             showToast('只读 Token 已生成，正在准备分析数据…', 'warning');
             const st0 = window.portfolioState;

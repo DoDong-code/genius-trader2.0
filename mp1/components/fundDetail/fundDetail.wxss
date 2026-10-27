@@ -599,6 +599,23 @@
   border-radius: 2rpx;
 }
 
+/* P3.19：手动更新按钮 —— 仅历史净值/前十大持仓 Tab 显示，右对齐胶囊样式（与网页端一致） */
+.ledger-refresh {
+  margin-left: auto;
+  align-self: center;
+  font-size: 22rpx;
+  font-weight: 600;
+  color: var(--brand-blue, #0071e3);
+  border: 1rpx solid rgba(0, 113, 227, 0.35);
+  border-radius: 999rpx;
+  padding: 8rpx 22rpx;
+  white-space: nowrap;
+}
+
+.ledger-refresh.refreshing {
+  opacity: 0.5;
+}
+
 /* Ledger Content */
 .ledger-content {
   background-color: var(--card-dark);

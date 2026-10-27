@@ -87,6 +87,8 @@ Component({
     syncStatusText: '',
     // 前十大持仓独立状态：loading | syncing | success | none（与历史净值解耦）
     holdingsStatus: 'loading',
+    // P3.19：手动更新按钮状态（仅历史净值 / 前十大持仓 Tab 可见）
+    refreshing: false,
     todayChartFallback: false,
     dataStatusLabel: '',
 
@@ -578,6 +580,41 @@ Component({
 
     onTabSelect(e) {
       this.setData({ activeTab: e.currentTarget.dataset.tab });
+    },
+
+    // P3.19：手动更新 —— 历史净值 Tab 补全净值 / 前十大持仓 Tab 拉最新季度持仓。
+    // 与网页端一致复用 /api/fund/:code?refresh=1（阻塞式 force 全量导入，非 fast 后台增量），
+    // 完成后原地重渲染当前 Tab，并重取个股行情刷新「今日涨幅」。
+    onRefreshTab() {
+      if (this._manualRefreshing) return;
+      const tab = this.data.activeTab;
+      if (tab !== 'nav' && tab !== 'holdings') return;
+      const code = this.data.code;
+      if (!code) return;
+      this._manualRefreshing = true;
+      this.setData({ refreshing: true });
+      http.get(`/api/fund/${code}?refresh=1`, null, { silent: true, timeout: 90000 })
+        .then(payload => {
+          if (!payload || !payload.success) throw new Error('数据源刷新失败');
+          const history = Array.isArray(payload.history) ? payload.history : [];
+          if (history.length) {
+            // 重置行情标记：本次刷新后重新补全持仓今日涨跌幅（新报告期可能换股）
+            this._stockLoaded = false;
+            // 复用统一落库渲染链：更新 serverHistory/navRows/业绩/持仓 + 重绘走势图
+            this._applyServerData(code, payload, history, true);
+            this.setData({ chartStatus: 'success', isLoadingChart: false });
+            // 手动刷新后 5 分钟内不再重复触发后台 fast 同步
+            fundRefreshCache[code] = Date.now();
+          }
+          wx.showToast({ title: tab === 'nav' ? '历史净值已更新' : '持仓已更新', icon: 'success' });
+        })
+        .catch(err => {
+          wx.showToast({ title: (err && err.message) || '更新失败', icon: 'none' });
+        })
+        .then(() => {
+          this._manualRefreshing = false;
+          this.setData({ refreshing: false });
+        });
     },
 
     onRangeSelect(e) {
