@@ -2919,6 +2919,10 @@
       externalGenBtn.style.opacity = '0.6';
       externalGenBtn.style.pointerEvents = 'none';
       externalGenBtn.textContent = '生成中…';
+      // 2026-10-28：点「生成」的第一瞬间就启用三按钮（此前要等 token POST 返回才启用），
+      // 覆盖「页面加载时状态检查失败 → 按钮被禁用」的场景：用户点生成后立刻可点复制API/测试API/复制JSON。
+      // 三个按钮的 handler 自带守卫（无 Token 时各自提示），提前启用无副作用。
+      setExternalActionButtonsEnabled(true);
       // 2026-10-21（二次修正）：「生成」= Token 生成 + 分析数据预热**全部完成**才恢复按钮。
       // 上一版预热是后台 fire-and-forget，按钮提前恢复，用户点复制时缓存还没算好 → 仍走完整 90s 重算。
       // 现在按钮保持「生成中…」直到缓存就绪，之后 120 分钟内「复制JSON」即时完成。
