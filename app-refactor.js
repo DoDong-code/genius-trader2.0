@@ -1115,13 +1115,15 @@
   }
 
   // ─────────────────────────────────────────────
-  // AI 分析授权三按钮（复制API / 测试API / 复制JSON）启用态集中控制：
-  // 「生成中」（Token + 数据预热，最长 ~90s）期间三个按钮必须保持可点击——
-  // 复制API/测试API 只依赖 Token；复制JSON 命中 120min 缓存秒回或复用进行中的预热 Promise。
-  // 2026-10-27 修复：此前启用/禁用散落在 applyExternalStatus 的异步回调里，
-  // 状态检查瞬时失败或竞态会把按钮打成禁用态，用户在「生成中…」期间全程点不了。
+  // AI 分析授权三按钮（复制API / 测试API / 复制JSON）启用态集中控制。
+  // 2026-10-29 定版语义：「生成中」（Token + 数据预热，最长 ~90s）期间三按钮**禁用**，
+  // 生成结束（成功或失败）统一恢复——避免生成期间点复制拿到半成品/旧数据造成误解。
+  // externalGenInProgress 守卫：生成期间任何异步回调（含 applyExternalStatus 的状态检查）
+  // 试图启用都会被拦截，防止竞态把按钮提前解锁。
   // ─────────────────────────────────────────────
+  let externalGenInProgress = false;
   function setExternalActionButtonsEnabled(enabled) {
+    if (enabled && externalGenInProgress) return; // 生成中禁用不可被异步回调解除
     ['external-copy-api-btn-ai', 'external-test-api-btn-ai', 'external-copy-json-btn'].forEach(id => {
       const btn = document.querySelector('#' + id);
       if (!btn) return;
@@ -2919,10 +2921,10 @@
       externalGenBtn.style.opacity = '0.6';
       externalGenBtn.style.pointerEvents = 'none';
       externalGenBtn.textContent = '生成中…';
-      // 2026-10-28：点「生成」的第一瞬间就启用三按钮（此前要等 token POST 返回才启用），
-      // 覆盖「页面加载时状态检查失败 → 按钮被禁用」的场景：用户点生成后立刻可点复制API/测试API/复制JSON。
-      // 三个按钮的 handler 自带守卫（无 Token 时各自提示），提前启用无副作用。
-      setExternalActionButtonsEnabled(true);
+      // 2026-10-29 定版：「生成中」期间三按钮禁用（用户明确要求），点击瞬间即置禁用态，
+      // 直到 Token + 数据预热全部完成（或失败）才恢复——防止生成期间点复制拿到半成品/旧数据。
+      externalGenInProgress = true;
+      setExternalActionButtonsEnabled(false);
       // 2026-10-21（二次修正）：「生成」= Token 生成 + 分析数据预热**全部完成**才恢复按钮。
       // 上一版预热是后台 fire-and-forget，按钮提前恢复，用户点复制时缓存还没算好 → 仍走完整 90s 重算。
       // 现在按钮保持「生成中…」直到缓存就绪，之后 120 分钟内「复制JSON」即时完成。
@@ -2932,10 +2934,6 @@
           if (data && data.token) {
             localStorage.setItem('genius_external_token', data.token);
             localStorage.setItem('genius_external_token_created_at', String(Date.now()));
-            // 2026-10-27：Token 一到手就同步启用三个按钮，不等 applyExternalStatus 的异步
-            // 状态检查——整个「生成中…」（含最长 ~90s 数据预热）期间复制API/测试API/复制JSON
-            // 保持可点击（复制JSON 命中缓存秒回或复用进行中的预热 Promise，不会双重计算）。
-            setExternalActionButtonsEnabled(true);
             applyExternalStatus();
             showToast('只读 Token 已生成，正在准备分析数据…', 'warning');
             const st0 = window.portfolioState;
@@ -2957,6 +2955,9 @@
         } catch (genErr) {
           showToast('生成失败，请先登录账号', 'error');
         }
+        // 生成结束（成功或失败）统一出口：解除守卫 → 恢复三按钮 → 刷新状态展示
+        externalGenInProgress = false;
+        setExternalActionButtonsEnabled(true);
         externalGenBtn.disabled = false;
         externalGenBtn.style.opacity = '';
         externalGenBtn.style.pointerEvents = '';
