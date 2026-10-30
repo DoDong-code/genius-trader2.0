@@ -705,6 +705,11 @@
     drain();
   }
 
+  // 2026-10-30：暴露估值队列空闲状态 —— 打开网站时「更新估值」第一优先级，
+  // 净值补检（app-refactor checkTodayNavOnce）须等本队列清空后再启动，
+  // 避免两类请求同时并发抢占服务端/第三方数据源（用户口径：估值优先，净值补全可以慢）。
+  window.estimatesIdle = function () { return active === 0 && queue.length === 0; };
+
   function renderRowFromStore(row, code, fund) {
     if (!row || !row.isConnected) return;
 

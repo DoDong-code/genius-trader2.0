@@ -479,11 +479,24 @@
   // 每天只跑一次），以及「刷新净值」按钮。14:40 时官方净值尚未发布，flagKey 又被置上，
   // 于是晚上（20:00 后净值陆续发布）打开账户永远拿不到真实净值，只有点开详情抽屉
   // （fetchFundPayload(refresh=1) → mergeFundData → navUpdatedAt=今天）才会显示。
-  // 这里在净值发布时段（18:00 之后到次日 06:00 前）增量检查；refreshTodayNav 自带幂等：
+  // 2026-10-30 起：全天候增量检查（不再仅限净值发布时段，盘中也会补昨天漏掉的净值，
+  // 见 checkTodayNavOnce 内注释）；refreshTodayNav 自带幂等：
   // 今日已确认净值的基金会被 hasTodayConfirmedNav 跳过，全部确认后零请求、自动收敛。
   let todayNavTimer = null;
   let todayNavLastCheckAt = 0;
   let todayNavLastCheckAccount = null;
+  // 2026-10-30：打开网站「更新估值」第一优先级 —— 净值补检须等 live-estimates 估值队列清空后再启动
+  // （启动 scan + MutationObserver 会持续入队估值请求，并发 6；净值补检若同时启动会与之抢占
+  // 服务端/第三方数据源）。轮询 500ms；上限 120s 兜底防估值队列长期繁忙导致净值永远不补
+  // （用户口径：估值优先，净值补全 10 分钟内完成即可）。
+  async function waitForEstimatesIdle(maxWaitMs) {
+    const deadline = Date.now() + (maxWaitMs || 120000);
+    while (Date.now() < deadline) {
+      if (typeof window.estimatesIdle !== 'function' || window.estimatesIdle()) return true;
+      await new Promise(r => setTimeout(r, 500));
+    }
+    return false; // 超时放行：净值补全不能被无限阻塞
+  }
   async function checkTodayNavOnce(minIntervalMs) {
     try {
       if (!window.auth || !window.auth.state || !window.auth.state.token) return;
@@ -492,11 +505,16 @@
       const data = await res.json();
       if (!data || !data.success) return;
       const timeStr = data.time || '';
-      // 交易日：净值发布前（06:00–18:00）不打扰；
-      // 非交易日（周末/节假日）：最近交易日净值已定档，必须照常检查——否则周末展示的
-      // 一直是库里/缓存里的旧净值，从不校验最近交易日是否有更新的净值（2026-10-17 修复）。
-      // 幂等收敛：已确认 expected 净值的基金被 hasTodayConfirmedNav 跳过，全部确认后零请求。
-      if (data.trading_day && timeStr >= '06:00' && timeStr < '18:00') return;
+      // 2026-10-30：交易日盘中不再一刀切跳过补检。
+      // 背景：昨日仅上午打开过网站（Render 免费版晚间休眠、daily-nav 18:30–24:00 窗口没跑），
+      // 次日盘中打开时旧闸门（06:00–18:00 直接 return）把补检完全挡住 →
+      // 最近应披露日（如 10-29）的官方净值一小时都不更新，只能手动点「刷新净值」
+      // 走 deep 兜底全量快照才拿到 latest_nav。
+      // 现改为全天候补检，成本可控：
+      //   - 盘中 today-nav 对 expected=今天的基金会命中服务端 before-close 快速返回（不打第三方）；
+      //   - deep 兜底（全量快照取 latest_nav）每会话每基金仅一次（live-estimates navDeepDone 去重），
+      //     打开网站约 1 分钟内即可补上漏掉的最近披露日净值（需求：10 分钟内补全，可以慢）；
+      //   - 20 分钟周期 / 切账户 5 分钟节流保持不变，全部确认后零请求收敛。
       const now = Date.now();
       // 冷启动补检只覆盖当时的活跃账户；切换账户后新账户的持仓从未被检查过（2026-10-17 修复：
       // 周六切到「养基宝-债」净值一直停在 10-12）。活跃账户变化时绕过 minIntervalMs 节流，
@@ -507,6 +525,9 @@
       if (now - todayNavLastCheckAt < minIntervalMs && !accountChanged) return;
       todayNavLastCheckAt = now;
       todayNavLastCheckAccount = activeAccount;
+      // 估值优先：等 live-estimates 估值队列清空后再补净值（上限 120s，超时放行）。
+      // 先记账再等待：占住节流槽，避免等待期间 60s 定时器重入产生并发等待。
+      await waitForEstimatesIdle(120000);
       // deep=true：today-nav 取不到的基金兜底走「导入 + 全量快照」取 latest_nav。
       // 每只基金每个页面会话只兜底一次（live-estimates 内 navDeepDone 去重），不会反复打服务端。
       await window.refreshTodayNav({ navOnly: true, deep: true }); // 只拉净值，不回落去强拉估值
@@ -515,7 +536,7 @@
   }
   function scheduleTodayNavAutoCheck() {
     if (todayNavTimer) clearInterval(todayNavTimer);
-    checkTodayNavOnce(0); // 启动即查一次：解决「晚上打开账户没有真实净值」
+    checkTodayNavOnce(0); // 启动即查一次：解决「晚上打开账户没有真实净值」——内部先等估值队列清空（估值第一优先级）再补净值
     todayNavTimer = setInterval(() => checkTodayNavOnce(20 * 60 * 1000), 60000);
   }
 
