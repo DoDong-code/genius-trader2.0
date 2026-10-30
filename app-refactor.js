@@ -900,6 +900,7 @@
                 </button>
               </div>
             </div>
+            ${renderThinkingPanelHtml()}
             ${window.lastAIUserQuestion ? `
               <div style="background: rgba(0, 113, 227, 0.03); border: 1px dashed rgba(0, 113, 227, 0.25); padding: 10px 14px; border-radius: 8px; font-size: 12.5px; color: #0071e3; display: flex; justify-content: space-between; align-items: center;">
                 <div style="line-height: 1.4;">
@@ -1708,6 +1709,9 @@
     if (answerWrapper) answerWrapper.style.display = 'block';
     if (answerBox) answerBox.textContent = 'AI 正在思考，请稍候…';
 
+    // 开始新一轮思考过程记录
+    resetThinking();
+
     const holdings = effectiveFundsOf(a).map(f => ({
       name: f.name,
       code: f.code,
@@ -1717,6 +1721,16 @@
     }));
     const isReview = /复盘/.test(question);
     const isBrief = /简短|简答|精简|简略|一句话|不要太长|尽量短|少说|brief|concise/i.test(question || '');
+
+    // ── 思考过程：输入数据 ──
+    const __portfolioForSummary = { account: a.name || '默认账户', strategies: a.strategy || [], holdings };
+    pushThinking('收集输入数据',
+      buildHoldingsSummaryWeb(__portfolioForSummary)
+      + (isReview ? '\n模式：今日复盘分析' : `\n用户提问：${question}`)
+      + (isBrief ? '\n回答偏好：简短模式' : ''),
+      'done');
+
+    const __aiStartTime = Date.now();
 
     (async () => {
       try {
@@ -1731,6 +1745,11 @@
               : '今日尚未收盘（当前为盘中数据，以下为盘中复盘）';
           } catch (e) { /* 默认提示 */ }
         }
+        // ── 思考过程：组装请求 ──
+        pushThinking('组装请求',
+          `${isReview ? '复盘模式' : '问答模式'}：当前账户最小快照已发送，AI 上下文（最近 15 日历史 / 十大持仓）由服务端按需组装${reviewNote && isReview ? `\n盘面状态：${reviewNote}` : ''}`,
+          'done');
+
         const aiProvider = localStorage.getItem('AI_PROVIDER') || 'OpenAI';
         const aiBaseURL = localStorage.getItem('AI_BASE_URL') || '';
         const aiModelName = localStorage.getItem('AI_MODEL_NAME') || 'gpt-5-mini';
@@ -1739,6 +1758,15 @@
         let historyArr = [];
         try { historyArr = JSON.parse(localStorage.getItem('LAST_AI_HISTORY_' + historyKey) || '[]'); } catch (e) { historyArr = []; }
         if (!Array.isArray(historyArr)) historyArr = [];
+
+        // ── 思考过程：AI 配置（绝不显示密钥明文）──
+        pushThinking('AI 配置',
+          `提供商：${aiProvider}\n模型：${aiModelName}\n接口地址：${aiBaseURL || '（默认）'}\n密钥：${aiAPIKey ? '已配置' : '未配置（将无法调用 AI）'}\n请求端点：POST /api/ai/chat${historyArr.length ? `\n继承对话上下文：最近 ${historyArr.length} 轮` : ''}`,
+          'done');
+
+        // ── 思考过程：调用 ──
+        pushThinking('调用 AI 问答', '请求已发出，等待模型回答...', 'running');
+
         const data = await providerApi('/api/ai/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1752,6 +1780,7 @@
             config: { provider: aiProvider, baseURL: aiBaseURL, model: aiModelName, apiKey: aiAPIKey, maxTokens: isBrief ? 600 : 1500 }
           })
         });
+        finishThinking('回答完成', `AI 已生成回答（耗时 ${Math.round((Date.now() - __aiStartTime) / 1000)} 秒）`, 'done');
         // 诊断流程可能已重新渲染页面，写入时重新获取窗口元素
         saveAiChatState({ status: 'done', reply: data.reply || 'AI 未返回有效回答', question: question || '', time: nowStr });
         const newHistory = historyArr.concat([{ q: question, a: data.reply || '' }]).slice(-4);
@@ -1762,6 +1791,9 @@
         if (freshBox) freshBox.textContent = data.reply || 'AI 未返回有效回答';
         if (submitBtn) { submitBtn.disabled = false; submitBtn.style.opacity = ''; submitBtn.style.pointerEvents = ''; submitBtn.textContent = '提问'; }
       } catch (err) {
+        finishThinking('回答失败',
+          `请求异常（${Math.round((Date.now() - __aiStartTime) / 1000)} 秒后失败）：${err.message || '网络错误'}\n常见原因：网络不通 / 服务端超时 / 密钥无效`,
+          'failed');
         saveAiChatState({ status: 'error', reply: `回答生成失败：${err.message || '网络错误'}`, question: question || '', time: nowStr });
         const freshWrapper = document.querySelector('#ai-answer-window-wrapper');
         const freshBox = document.querySelector('#ai-answer-window');
@@ -2493,6 +2525,94 @@
     });
   }
 
+  // ─────────────────────────────────────────────
+  // 思考过程（深度思考样式，可展开折叠；与 mp1 分析页同构）
+  // 状态存 window.aiThinkingSteps，跨 render 保留；不含任何密钥明文
+  // ─────────────────────────────────────────────
+  function nowTimeStr() {
+    return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  }
+
+  function resetThinking() {
+    window.aiThinkingSteps = [];
+    window.aiThinkingExpanded = true;
+    renderThinkingPanelDom();
+  }
+
+  function pushThinking(title, detail, status) {
+    if (!Array.isArray(window.aiThinkingSteps)) window.aiThinkingSteps = [];
+    window.aiThinkingSteps.push({
+      title: title || '',
+      detail: detail || '',
+      status: status || 'done', // running | done | failed
+      time: nowTimeStr()
+    });
+    renderThinkingPanelDom();
+  }
+
+  // 结束最近一个 running 步骤（若最后一个不是 running 则视为新增）
+  function finishThinking(title, detail, status) {
+    if (!Array.isArray(window.aiThinkingSteps)) window.aiThinkingSteps = [];
+    const last = window.aiThinkingSteps[window.aiThinkingSteps.length - 1];
+    if (last && last.status === 'running') {
+      last.title = title || last.title;
+      last.detail = detail || last.detail;
+      last.status = status || 'done';
+      last.time = nowTimeStr();
+    } else {
+      window.aiThinkingSteps.push({ title: title || '', detail: detail || '', status: status || 'done', time: nowTimeStr() });
+    }
+    renderThinkingPanelDom();
+  }
+
+  // 持仓输入数据摘要（诊断 / 提问共用）
+  function buildHoldingsSummaryWeb(portfolio) {
+    const funds = (portfolio && portfolio.holdings) || [];
+    const total = funds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+    const lines = funds.map(f =>
+      `· ${f.name || f.code}(${f.code})：持仓 ¥${Number(f.amount || 0).toLocaleString('zh-CN')}，今日估算 ${f.today_change}`
+    );
+    const strategyCount = (portfolio && portfolio.strategies ? portfolio.strategies.length : 0) || 0;
+    let text = `账户：${(portfolio && portfolio.account) || '默认账户'}\n`
+      + `持仓 ${funds.length} 只，总市值 ¥${total.toLocaleString('zh-CN')}，策略 ${strategyCount} 条`;
+    if (lines.length) text += '\n' + lines.join('\n');
+    return text;
+  }
+
+  function renderThinkingPanelHtml() {
+    const steps = Array.isArray(window.aiThinkingSteps) ? window.aiThinkingSteps : [];
+    if (!steps.length) return '';
+    const items = steps.map(s => `
+      <div class="think-step">
+        <div class="think-step-head">
+          <span class="think-dot ${esc(s.status || 'done')}"></span>
+          <span class="think-step-title ${esc(s.status || 'done')}">${esc(s.title)}</span>
+          <span class="think-step-time">${esc(s.time || '')}</span>
+        </div>
+        ${s.detail ? `<div class="think-step-detail">${esc(s.detail)}</div>` : ''}
+      </div>`).join('');
+    return `
+      <div id="ai-thinking-panel" class="think-panel">
+        <div class="think-header" id="ai-thinking-toggle">
+          <span class="think-title">思考过程</span>
+          <span class="think-toggle">${window.aiThinkingExpanded ? '收起 ▾' : '展开 ▸'}</span>
+        </div>
+        ${window.aiThinkingExpanded ? `<div class="think-body">${items}</div>` : ''}
+      </div>`;
+  }
+
+  // 若面板已在 DOM 中则原地刷新（分析视图下实时可见；其他视图仅更新状态，切回时由 analysis() 渲染）
+  function renderThinkingPanelDom() {
+    const panel = document.querySelector('#ai-thinking-panel');
+    if (!panel) return;
+    const html = renderThinkingPanelHtml();
+    if (html) {
+      panel.outerHTML = html;
+    } else {
+      panel.remove();
+    }
+  }
+
   function runAiDiagnostics(userQuery) {
     const a = acct();
     if (!a) return;
@@ -2546,6 +2666,25 @@
       if (btnText) btnText.textContent = userQuery ? '正在调取 AI 问答及调仓建议...' : '正在调取今日最新估值与诊断...';
     }
 
+    // ── 思考过程：Fresh 入口已 reset 时沿用其步骤；直接调用（恢复默认诊断等）则自行开新一轮 ──
+    if (window.__thinkingFreshRun) {
+      window.__thinkingFreshRun = false;
+    } else {
+      resetThinking();
+    }
+    pushThinking('收集输入数据',
+      buildHoldingsSummaryWeb(portfolioData) + (userQuery ? `\n用户提问：${userQuery}` : '\n（本次为默认诊断，无用户提问）'),
+      'done');
+
+    // ── 思考过程：AI 配置（绝不显示密钥明文）──
+    pushThinking('AI 配置',
+      `提供商：${aiProvider}\n模型：${aiModelName}\n接口地址：${aiBaseURL || '（默认）'}\n密钥：${aiAPIKey ? '已配置' : '未配置（将无法调用 AI）'}\n请求端点：POST /api/ai/analyze（超时 120 秒）`,
+      'done');
+
+    // ── 思考过程：调用 ──
+    pushThinking('调用 AI 分析', '请求已发出，等待模型返回...', 'running');
+    const aiStartTime = Date.now();
+
     providerApi('/api/ai/analyze', {
       method: 'POST',
       timeout: 120000,
@@ -2564,6 +2703,9 @@
         localStorage.setItem('LAST_AI_ANALYSIS_' + activeAccountName, JSON.stringify(resData.analysis));
         localStorage.setItem('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
         localStorage.setItem('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
+        finishThinking('诊断完成',
+          `AI 已基于以上持仓数据生成今日操作建议（耗时 ${Math.round((Date.now() - aiStartTime) / 1000)} 秒），结果已更新到页面`,
+          'done');
       } else {
         throw new Error((resData && resData.error) || 'AI 返回数据格式不正确');
       }
@@ -2580,6 +2722,9 @@
         const raw = err && err.message ? err.message : '';
         errMsg = `${providerName} API 额度已用尽或触发限频。\n原始错误：${raw}\n\n建议解决方法：\n1. 稍等半分钟后再次重试该操作；\n2. 前往【设置】页面切换为其他 AI 服务商，或配置您自己高配额的 API Key；\n3. 如使用 Google AI Studio，可开启随现随付（Pay-as-you-go）方案。`;
       }
+      finishThinking('诊断失败',
+        `请求失败（${Math.round((Date.now() - aiStartTime) / 1000)} 秒后）：${errMsg}\n已回退为内置规则计算引擎提供基础版偏离度调仓建议`,
+        'failed');
       alert(`AI 诊断分析失败:\n${errMsg}\n\n系统将继续使用内置规则计算引擎提供基础版偏离度调仓操作建议。`);
     })
     .finally(() => {
@@ -2647,14 +2792,19 @@
       if (typeof analysis === 'function') analysis();
       return;
     }
+    // 开始新一轮思考过程记录
+    resetThinking();
+    window.__thinkingFreshRun = true;
     // 若该账户 5 分钟内已在持仓页刷新过估值数据，直接使用，不再重复强制刷新
     const lastRefresh = (window.lastEstimatesRefreshAtByAccount || {})[a.name] || 0;
     if (Date.now() - lastRefresh < 5 * 60 * 1000) {
+      pushThinking('刷新持仓估值', '持仓数据 5 分钟内已刷新过，直接使用本地缓存数据', 'done');
       runAiDiagnostics(userQuery);
       return;
     }
     // P3.18：非交易时段不刷新估值（直接使用最近净值）——复用 live-estimates 的交易日判断
     if (typeof window.__isTradingDay === 'function' && !window.__isTradingDay(new Date())) {
+      pushThinking('刷新持仓估值', '今日非交易日，跳过估值刷新，直接使用最近交易日净值', 'done');
       runAiDiagnostics(userQuery);
       return;
     }
@@ -2664,12 +2814,14 @@
       const text = runBtn.querySelector('.btn-text');
       if (text) text.textContent = '正在刷新最新数据…';
     }
+    pushThinking('刷新持仓估值', `持仓数据超过 5 分钟未更新且为交易日，正在向服务端刷新 ${effectiveFundsOf(a).length} 只基金的最新估值/净值...`, 'running');
     await refreshAccountDataBeforeAi().catch(() => {});
     // 确保云端 user_data 已包含刚刷新的数据，DeepSeek 与持仓页面使用同一数据源
     if (typeof window.backupToCloud === 'function') {
       try { await window.backupToCloud(); } catch (e) { /* 云端同步失败不阻塞诊断 */ }
     }
     if (typeof window.markEstimatesRefreshed === 'function') window.markEstimatesRefreshed();
+    finishThinking('刷新持仓估值', `估值刷新完成（${effectiveFundsOf(a).length} 只基金），云端数据已同步`, 'done');
     // return 而非裸调用：让调用方能 await 整条链；按钮复位交由 runAiDiagnostics 的 finally 完成
     return runAiDiagnostics(userQuery);
   }
@@ -2717,6 +2869,14 @@
         }
       };
       clickedDetails.addEventListener('toggle', positionBubble, { once: true });
+    }
+
+    // 思考过程面板：展开 / 折叠
+    const thinkToggle = e.target.closest('#ai-thinking-toggle');
+    if (thinkToggle) {
+      window.aiThinkingExpanded = !window.aiThinkingExpanded;
+      renderThinkingPanelDom();
+      return;
     }
 
     const runAnalysisBtn = e.target.closest('#run-ai-analysis-btn');

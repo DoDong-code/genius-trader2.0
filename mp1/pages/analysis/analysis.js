@@ -29,7 +29,11 @@ Page({
 
     // Decision report metrics
     report: null,
-    hasAi: false
+    hasAi: false,
+
+    // 思考过程（深度思考样式，可展开折叠）
+    thinkingSteps: [],
+    thinkingExpanded: false
   },
 
   onLoad() {
@@ -560,20 +564,31 @@ Page({
       loadingText: '正在刷新账户持仓估值数据...'
     });
 
+    // 开始新一轮思考过程记录
+    this.resetThinking();
+
     try {
       // P3.18：数据决策树 —— 持仓数据 ≤5min 直接使用；>5min 且交易日才刷新估值；
       // 非交易日 / 当天净值已存在 → 不刷新（refreshData 直接使用最近净值）
       let saved = null;
       try { saved = wx.getStorageSync('genius-trader-portfolio-v2'); } catch (e) { /* ignore */ }
       const lastSync = (saved && saved.updatedAt) ? Number(saved.updatedAt) : 0;
+      const syncAgeMin = lastSync > 0 ? Math.round((Date.now() - lastSync) / 60000) : -1;
       if (Date.now() - lastSync > 5 * 60 * 1000) {
         if (isTradingDay(new Date())) {
+          this.pushThinking('刷新持仓估值', `持仓数据已 ${syncAgeMin >= 0 ? syncAgeMin : '未知'} 分钟未更新，且为交易日，正在向服务端刷新最新估值...`, 'running');
           await this.refreshAccountDataBeforeAi();
+          this.finishThinking('刷新持仓估值', `估值刷新完成（${this.effectiveFundsOf(app.getActiveAccount()).length} 只基金）`, 'done');
+        } else {
+          this.pushThinking('刷新持仓估值', '今日非交易日，跳过估值刷新，直接使用最近交易日净值', 'done');
         }
         // 非交易时段：不刷新估值，直接使用最近一个交易日净值
+      } else {
+        this.pushThinking('刷新持仓估值', `持仓数据仅 ${syncAgeMin} 分钟前更新（≤5 分钟），直接使用本地缓存数据`, 'done');
       }
     } catch (e) {
       console.warn('Failed to refresh valuations:', e);
+      this.finishThinking('刷新持仓估值', `估值刷新失败：${(e && e.message) || e}（将继续使用本地数据诊断）`, 'failed');
     }
 
     const lastUserQuery = this.data.lastUserQuery || '';
@@ -593,6 +608,62 @@ Page({
     });
 
     this.refreshData();
+  },
+
+  // ─────────────────────────────────────────────
+  // 思考过程（深度思考样式，可展开折叠）
+  // ─────────────────────────────────────────────
+
+  nowTimeStr() {
+    return new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+  },
+
+  resetThinking() {
+    this.setData({ thinkingSteps: [], thinkingExpanded: true });
+  },
+
+  pushThinking(title, detail, status) {
+    const steps = this.data.thinkingSteps.slice();
+    steps.push({
+      title: title || '',
+      detail: detail || '',
+      status: status || 'done', // running | done | failed
+      time: this.nowTimeStr()
+    });
+    this.setData({ thinkingSteps: steps });
+  },
+
+  // 结束最近一个 running 步骤（若最后一个不是 running 则视为新增）
+  finishThinking(title, detail, status) {
+    const steps = this.data.thinkingSteps.slice();
+    const last = steps.length ? steps[steps.length - 1] : null;
+    if (last && last.status === 'running') {
+      last.title = title || last.title;
+      last.detail = detail || last.detail;
+      last.status = status || 'done';
+      last.time = this.nowTimeStr();
+      this.setData({ thinkingSteps: steps });
+    } else {
+      this.pushThinking(title, detail, status);
+    }
+  },
+
+  // 持仓输入数据摘要（诊断 / 提问共用；不含任何密钥）
+  buildHoldingsSummary(portfolio) {
+    const funds = (portfolio && portfolio.holdings) || [];
+    const total = funds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
+    const lines = funds.map(f =>
+      `· ${f.name || f.code}(${f.code})：持仓 ¥${Number(f.amount || 0).toLocaleString('zh-CN')}，今日估算 ${f.today_change}`
+    );
+    const strategyCount = (portfolio && portfolio.strategies ? portfolio.strategies.length : 0) || 0;
+    let text = `账户：${(portfolio && portfolio.account) || '默认账户'}\n`
+      + `持仓 ${funds.length} 只，总市值 ¥${total.toLocaleString('zh-CN')}，策略 ${strategyCount} 条`;
+    if (lines.length) text += '\n' + lines.join('\n');
+    return text;
+  },
+
+  onToggleThinking() {
+    this.setData({ thinkingExpanded: !this.data.thinkingExpanded });
   },
 
   async refreshAccountDataBeforeAi() {
@@ -678,21 +749,43 @@ Page({
       loadingText: userQuery ? '正在调取天才问答及调仓建议...' : '正在调取今日最新估值与诊断...'
     });
 
+    // ── 思考过程：输入数据 ──
+    this.pushThinking('收集输入数据',
+      this.buildHoldingsSummary(portfolioData) + (userQuery ? `\n用户提问：${userQuery}` : '\n（本次为默认诊断，无用户提问）'),
+      'done');
+
+    // ── 思考过程：AI 配置（绝不显示密钥明文）──
+    this.pushThinking('AI 配置',
+      `提供商：${aiProvider}\n模型：${aiModelName}\n接口地址：${aiBaseURL || '（默认）'}\n密钥：${aiAPIKey ? '已配置' : '未配置（将无法调用 AI）'}\n请求端点：POST /api/ai/analyze（超时 120 秒）`,
+      'done');
+
+    // ── 思考过程：调用 ──
+    this.pushThinking('调用 AI 分析', '请求已发出，等待模型返回...', 'running');
+    const aiStartTime = Date.now();
+
     try {
       const data = await http.post('/api/ai/analyze', requestBody, { silent: true, timeout: 120000 });
       if (data && data.success && data.analysis) {
         const analysis = data.analysis;
         const activeAccountName = a.name || '默认账户';
         const timeString = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const elapsedSec = Math.round((Date.now() - aiStartTime) / 1000);
 
         // 仅写账户隔离键，不再写全局键 LAST_AI_ANALYSIS —— 避免跨账户串显（对齐 MIG-002）
         wx.setStorageSync('LAST_AI_ANALYSIS_' + activeAccountName, analysis);
         wx.setStorageSync('LAST_AI_ANALYSIS_TIME_' + activeAccountName, timeString);
         wx.setStorageSync('LAST_AI_ANALYSIS_MODEL_' + activeAccountName, aiModelName);
 
+        this.finishThinking('诊断完成',
+          `AI 已基于以上持仓数据生成今日操作建议（耗时 ${elapsedSec} 秒），结果已更新到页面`,
+          'done');
+
         wx.showToast({ title: '天才诊断更新成功', icon: 'success' });
       } else {
         const errMsg = (data && data.error) || '分析返回异常';
+        this.finishThinking('诊断失败',
+          `服务端返回失败：${errMsg}\n已回退为内置规则计算引擎提供基础版配比建议`,
+          'failed');
         wx.showModal({
           title: '天才诊断失败',
           content: `${errMsg}\n\n系统将继续使用内置规则计算引擎提供基础版配比建议。`,
@@ -700,6 +793,10 @@ Page({
         });
       }
     } catch (err) {
+      const elapsedSec = Math.round((Date.now() - aiStartTime) / 1000);
+      this.finishThinking('诊断失败',
+        `请求异常（${elapsedSec} 秒后失败）：${err.message || '网络错误'}\n常见原因：网络不通 / 服务端超时 / 密钥无效`,
+        'failed');
       wx.showModal({
         title: 'AI 诊断异常',
         content: `${err.message || '网络错误'}\n\n系统将继续使用内置规则计算引擎提供基础版配比建议。`,
@@ -727,6 +824,9 @@ Page({
       loadingText: '天才正在思考，请稍候...'
     });
 
+    // 开始新一轮思考过程记录
+    this.resetThinking();
+
     const holdings = this.effectiveFundsOf(a).map(f => ({
       name: f.name,
       code: f.code,
@@ -737,6 +837,11 @@ Page({
 
     const portfolio = { account: a.name || '默认账户', strategies: a.strategy || [], holdings };
     const isReview = /复盘/.test(question);
+
+    // ── 思考过程：输入数据 ──
+    this.pushThinking('收集输入数据',
+      this.buildHoldingsSummary(portfolio) + (isReview ? '\n模式：今日复盘分析' : `\n用户提问：${question}`),
+      'done');
 
     let prompt = '';
     if (isReview) {
@@ -752,16 +857,35 @@ Page({
       prompt = `请基于以下基金组合数据回答用户问题，回答尽量具体、给出操作建议。\n组合数据：\n${JSON.stringify(portfolio, null, 2)}\n用户问题：${question}`;
     }
 
+    // ── 思考过程：构建提问 ──
+    this.pushThinking('构建提问',
+      `${isReview ? '复盘模式' : '问答模式'}：已将持仓数据与问题组装为完整提问（提示词 ${prompt.length} 字）`,
+      'done');
+
     const aiProvider = wx.getStorageSync('ai_provider') || 'OpenAI';
     const aiBaseURL = wx.getStorageSync('ai_base_url_config') || '';
     const aiModelName = wx.getStorageSync('ai_model_name') || 'gpt-5-mini';
     const aiAPIKey = wx.getStorageSync('ai_api_key') || '';
+
+    // ── 思考过程：AI 配置（绝不显示密钥明文）──
+    this.pushThinking('AI 配置',
+      `提供商：${aiProvider}\n模型：${aiModelName}\n接口地址：${aiBaseURL || '（默认）'}\n密钥：${aiAPIKey ? '已配置' : '未配置（将无法调用 AI）'}\n请求端点：POST /api/ai/chat`,
+      'done');
+
+    const aiStartTime = Date.now();
 
     try {
       const historyKey = a.name || '默认账户';
       let historyArr = [];
       try { historyArr = wx.getStorageSync('LAST_AI_HISTORY_' + historyKey) || []; } catch (e) { historyArr = []; }
       if (!Array.isArray(historyArr)) historyArr = [];
+
+      if (historyArr.length) {
+        this.pushThinking('继承对话上下文', `已带入最近 ${historyArr.length} 轮历史对话`, 'done');
+      }
+
+      // ── 思考过程：调用 ──
+      this.pushThinking('调用 AI 问答', '请求已发出，等待模型回答...', 'running');
 
       const data = await http.post('/api/ai/chat', {
         message: prompt,
@@ -771,6 +895,9 @@ Page({
       if (data && data.success) {
         const reply = data.reply || 'AI 未返回有效回答';
         const activeAccountName = a.name || '默认账户';
+        const elapsedSec = Math.round((Date.now() - aiStartTime) / 1000);
+
+        this.finishThinking('回答完成', `AI 已生成回答（耗时 ${elapsedSec} 秒）`, 'done');
 
         wx.setStorageSync('LAST_USER_QUERY_' + activeAccountName, question);
         wx.setStorageSync('LAST_AI_ANSWER_' + activeAccountName, reply);
@@ -787,6 +914,7 @@ Page({
         });
       } else {
         const errMsg = (data && data.error) || '回答返回异常';
+        this.finishThinking('回答失败', `服务端返回失败：${errMsg}`, 'failed');
         wx.showModal({
           title: '回答生成失败',
           content: errMsg,
@@ -794,6 +922,10 @@ Page({
         });
       }
     } catch (err) {
+      const elapsedSec = Math.round((Date.now() - aiStartTime) / 1000);
+      this.finishThinking('回答失败',
+        `请求异常（${elapsedSec} 秒后失败）：${err.message || '网络连接失败'}\n常见原因：网络不通 / 密钥无效`,
+        'failed');
       wx.showModal({
         title: '回答生成异常',
         content: err.message || '网络连接失败',

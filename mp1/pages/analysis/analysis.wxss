@@ -580,3 +580,111 @@
 .text-bold {
   font-weight: bold;
 }
+
+/* ── 思考过程面板（深度思考样式，可展开折叠） ── */
+.think-panel {
+  margin-top: 20rpx;
+  background-color: #f7f7f9;
+  border: 1px solid var(--border-color-faint);
+  border-radius: var(--border-radius);
+  padding: 20rpx 24rpx;
+}
+
+.think-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.think-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.think-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.think-toggle {
+  font-size: 22rpx;
+  color: var(--brand-blue);
+}
+
+.think-body {
+  margin-top: 16rpx;
+  padding-left: 16rpx;
+  border-left: 4rpx solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.think-step {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+}
+
+.think-step-head {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+}
+
+.think-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background-color: #c7c7cc;
+  flex-shrink: 0;
+}
+
+.think-dot.done {
+  background-color: var(--brand-green);
+}
+
+.think-dot.failed {
+  background-color: var(--brand-red);
+}
+
+.think-dot.running {
+  background-color: var(--brand-blue);
+  animation: thinkPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinkPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.think-step-title {
+  font-size: 24rpx;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.think-step-title.failed {
+  color: var(--brand-red);
+}
+
+.think-step-title.running {
+  color: var(--brand-blue);
+}
+
+.think-step-time {
+  font-size: 20rpx;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.think-step-detail {
+  font-size: 22rpx;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding-left: 22rpx;
+}

@@ -31,6 +31,26 @@
       </button>
     </view>
 
+    <!-- 思考过程（深度思考样式，可展开折叠） -->
+    <view class="think-panel" wx:if="{{thinkingSteps.length > 0}}">
+      <view class="think-header" bindtap="onToggleThinking">
+        <view class="think-header-left">
+          <text class="think-title">思考过程</text>
+        </view>
+        <text class="think-toggle">{{thinkingExpanded ? '收起 ▾' : '展开 ▸'}}</text>
+      </view>
+      <view class="think-body" wx:if="{{thinkingExpanded}}">
+        <view class="think-step" wx:for="{{thinkingSteps}}" wx:key="index">
+          <view class="think-step-head">
+            <text class="think-dot {{item.status}}"></text>
+            <text class="think-step-title {{item.status}}">{{item.title}}</text>
+            <text class="think-step-time">{{item.time}}</text>
+          </view>
+          <text class="think-step-detail" wx:if="{{item.detail}}">{{item.detail}}</text>
+        </view>
+      </view>
+    </view>
+
     <!-- Query restore/clear option -->
     <view class="ai-query-restore-row" wx:if="{{lastUserQuery}}">
       <text class="restore-text">当前提问：{{lastUserQuery}}</text>
