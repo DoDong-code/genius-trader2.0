@@ -246,7 +246,13 @@ function startMemoryDiagnostics() {
   let quarterlyRunning = false;
   let ticking = false;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-  const QUARTER_MS = 91 * 24 * 60 * 60 * 1000;
+  // 2026-11-03（D）：持仓检查间隔 91 天 → 24 小时。
+  // 背景：91 天墙钟间隔不看披露日历——季报在季末后 ~15 个工作日（约 10 月下旬）披露，
+  // 若上次运行在披露前，新报告期完全落在两次运行之间，Q3 持仓可能一个季度都进不来。
+  // 现配合 syncQuarterlyHoldings 的披露日历 skip 口径（expectedReportDate）：
+  // 已达应披露报告期的基金每次运行只花一条 SELECT MAX(report_date)（零上游调用），
+  // 未披露的每天重试一次直到 provider 披露——成本可控且 Q3 当天披露当天入库。
+  const HOLDINGS_CHECK_MS = 24 * 60 * 60 * 1000;
   // 存在已知缺口时的重跑间隔：远小于 7 天，让历史断层尽快自愈；
   // 无缺口时仍按周跑，绝不无谓打上游。
   const GAP_RETRY_MS = 6 * 60 * 60 * 1000;
@@ -365,7 +371,7 @@ function startMemoryDiagnostics() {
   async function maybeQuarterly() {
     await runGuarded(
       'quarterly-holdings', 'nav-sync:quarterly', quarterlyRef,
-      () => isDue('quarterly-holdings', QUARTER_MS),
+      () => isDue('quarterly-holdings', HOLDINGS_CHECK_MS),
       () => syncQuarterlyHoldings({ concurrency: 2 }),
       'quarterly-holdings'
     );
@@ -397,7 +403,7 @@ function startMemoryDiagnostics() {
   const tickTimer = setInterval(() => { tick().catch(e => console.error('[NAV-SYNC] tickTimer 失败（已隔离）:', e && e.message)); }, 30 * 60 * 1000);
   if (tickTimer.unref) tickTimer.unref();
 
-  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, quarterly holdings; boot catch-up at ~60s)');
+  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, holdings check 24h disclosure-calendar; boot catch-up at ~60s)');
 }
 
 async function startServer(port = 3000, host = '0.0.0.0') {

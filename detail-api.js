@@ -602,13 +602,23 @@
           if (Array.isArray(payload.holdings)) {
             fund.holdings = payload.holdings;
           }
+          // 2026-11-03（F）：记录本次刷新的持仓来源，持仓 Tab 顶部显示来源徽标；按来源区分提示
+          fund._holdingsSource = payload.holdings_source || null;
           if (record === 'holdings') {
             // 新报告期可能换股，行情缓存整体失效重取
             backdrop._quoteCache = new Map();
           }
           if (typeof backdrop._renderActiveRecord === 'function') backdrop._renderActiveRecord();
           if (typeof window.showToast === 'function') {
-            window.showToast(record === 'nav' ? '历史净值已更新' : '持仓数据已更新', 'success');
+            if (record === 'nav') {
+              window.showToast('历史净值已更新', 'success');
+            } else if (fund._holdingsSource === 'fetch-failed') {
+              window.showToast('持仓拉取失败（数据源不可达），仍显示库内数据', 'error');
+            } else if (fund._holdingsSource === 'empty-upstream') {
+              window.showToast('数据源未返回持仓（可能尚未披露新报告期）', 'warning');
+            } else {
+              window.showToast('持仓数据已更新（来源：数据源最新档案）', 'success');
+            }
           }
         } catch (err) {
           console.warn('[detail-refresh] failed:', err);
@@ -633,7 +643,17 @@
   function holdingsMarkup(fund) {
     const holdings = Array.isArray(fund.holdings) ? fund.holdings : [];
     if (!holdings.length) return '<div class="detail-empty">暂无公开持仓数据</div>';
-    return `<div class="holding-list">${holdings.map(item => `
+    // 2026-11-03（F）：来源徽标——区分库内缓存 / 上游拉取 / 空返回 / 失败回显，杜绝静默旧数据
+    const SRC_LABELS = {
+      'fund-archives': '来源：数据源最新档案',
+      'db-cache': '来源：库内缓存（点「更新持仓」强制拉取上游）',
+      'empty-upstream': '来源：数据源未返回（可能未披露新报告期）',
+      'fetch-failed': '⚠ 上次拉取失败，以下为库内数据'
+    };
+    const srcBadge = fund._holdingsSource && SRC_LABELS[fund._holdingsSource]
+      ? `<div style="font-size:10px;color:#86868b;margin:0 0 6px 2px;">${SRC_LABELS[fund._holdingsSource]}</div>`
+      : '';
+    return `<div class="holding-list">${srcBadge}${holdings.map(item => `
       <div>
         <span>${escapeHtml(item.stock_name ?? item[0])}</span>
         <b>${escapeHtml(

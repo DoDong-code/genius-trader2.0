@@ -152,13 +152,51 @@ function currentQuarterStart(now = new Date()) {
   return `${year}-${mm}-01`;
 }
 
+// 2026-11-03（D）：披露日历推算——按《公开募集证券投资基金信息披露管理办法》，
+// 季报须在季度结束后 15 个工作日内披露 ≈ 22 个日历日（取 22 天留法定假日余量；
+// 宁晚勿早：窗口未过时按上一报告期算，宁可多刷一次也不漏新数据）。
+const DISCLOSURE_LAG_DAYS = 22;
+
 /**
- * 每季度前十大持仓检查：最新 report_date 早于当前季度起始日的基金才强制刷新 holdings，
- * 历史 report_date 保留（fund_holdings 按 fund_code+stock_code+report_date 唯一，不会覆盖历史季度）。
+ * 当前「应已披露」的最新报告期（季末日 yyyy-mm-dd）。
+ * 例：今天 2026-11-03 → Q3(09-30) 披露窗口 10-22 已过 → 返回 '2026-09-30'；
+ *     今天 2026-10-05 → Q3 窗口未过 → 返回 '2026-06-30'（Q2）。
+ * 注意：报告期日期=季末日，永远早于季度起始日——旧 skip 条件（latestReport >= quarterStart）
+ * 因此永假，导致每次运行全量空刷上游；本函数修正了这一口径。
+ */
+function expectedReportDate(now = new Date()) {
+  const y = now.getFullYear();
+  const candidates = [];
+  for (const year of [y, y - 1]) {
+    for (let q = 3; q >= 0; q -= 1) {
+      // q: 0→3月末, 1→6月末, 2→9月末, 3→12月末（Date month 0-based）
+      candidates.push(new Date(Date.UTC(year, q * 3 + 3, 0)));
+    }
+  }
+  candidates.sort((a, b) => b - a); // 降序：从最近一个季末往前找
+  for (const end of candidates) {
+    const due = new Date(end);
+    due.setUTCDate(due.getUTCDate() + DISCLOSURE_LAG_DAYS);
+    if (now.getTime() >= due.getTime()) {
+      return `${end.getUTCFullYear()}-${String(end.getUTCMonth() + 1).padStart(2, '0')}-${String(end.getUTCDate()).padStart(2, '0')}`;
+    }
+  }
+  return null; // 理论不可达（最旧候选为去年 Q4，+22 天必早于今天）
+}
+
+/**
+ * 每季度前十大持仓检查（2026-11-03 D 方案重写 skip 口径）：
+ * - skip 条件 = 库内最新 report_date 已达到「当前应披露报告期」（expectedReportDate，披露日历驱动）。
+ *   已披露基金零上游调用；未披露/上游还没给的基金每次运行重试，provider 一披露当天即入库。
+ * - 调度间隔由 91 天墙钟改为 24h（index.js HOLDINGS_CHECK_MS）：skip 真正生效后，
+ *   每次运行成本 = 每基金一条 SELECT MAX(report_date)，绝不打爆上游。
+ * - 历史 report_date 保留（fund_holdings 按 fund_code+stock_code+report_date 唯一，不覆盖历史季度）。
+ * - 库内异常值 'unknown' 与任何 yyyy-mm-dd 比较恒小，自然归入需刷新，无需特判。
+ * - expected=null（理论不可达）时保持旧「全量刷新」兜底。
  */
 async function syncQuarterlyHoldings(options = {}) {
   const funds = await listFunds();
-  const quarterStart = currentQuarterStart();
+  const expected = expectedReportDate();
   const results = await mapLimit(funds, options.concurrency || 2, async (fund) => {
     const code = fund.fund_code;
     const latest = await dbAsync.get(
@@ -166,7 +204,7 @@ async function syncQuarterlyHoldings(options = {}) {
       [code]
     );
     const latestReport = latest && latest.max_report;
-    if (latestReport && String(latestReport).localeCompare(quarterStart) >= 0) {
+    if (expected && latestReport && String(latestReport).localeCompare(expected) >= 0) {
       return { fund_code: code, skipped: true, report_date: latestReport };
     }
     const result = await importFund(code, { forceHoldings: true });
@@ -234,5 +272,6 @@ module.exports = {
   backfillNavGaps,
   buildExpectedTradingWindow,
   syncQuarterlyHoldings,
-  currentQuarterStart
+  currentQuarterStart,
+  expectedReportDate
 };

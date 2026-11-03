@@ -908,6 +908,9 @@ async function handleFundApi(request, response, url) {
       sendJson(response, 404, { success: false, error: '基金尚未导入' });
       return true;
     }
+    // 2026-11-03（F）：refresh=1（非 fast）时捕获本次导入的持仓来源，随响应透出，
+    // 让前端能区分「真拉到上游数据」与「失败后回显库内旧数据」（原先静默吞错无法区分）。
+    let holdingsSource = null; // fast/普通路径后台导入无法捕获，保持 null
     if (url.searchParams.get('refresh') === '1') {
       // fast=1：立即返回缓存数据，后台异步增量刷新（持仓季度级、历史每日增量），抽屉秒开
       if (url.searchParams.get('fast') === '1') {
@@ -915,9 +918,12 @@ async function handleFundApi(request, response, url) {
           console.warn(`[fund-refresh-fast] ${match[0]}: ${error.message}`);
         });
       } else {
-        await importFund(match[0], { force: true }).catch(error => {
-          console.warn(`[fund-refresh] ${match[0]}: ${error.message}`);
-        });
+        try {
+          const refreshResult = await importFund(match[0], { force: true });
+          holdingsSource = (refreshResult && refreshResult.holdings_source) || null;
+        } catch (refreshErr) {
+          console.warn(`[fund-refresh] ${match[0]}: ${refreshErr.message}`);
+        }
       }
       fund = (await getFund(match[0])) || fund;
     }
@@ -933,6 +939,7 @@ async function handleFundApi(request, response, url) {
         label: history.length ? '数据正常' : '等待数据源'
       },
       holdings: await getFundHoldings(match[0]),
+      holdings_source: holdingsSource,
       estimate: !isFast && url.searchParams.get('refresh') === '1'
         ? await getRealtimeFundEstimate(match[0])
         : null

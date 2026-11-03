@@ -281,14 +281,21 @@ async function collectFund(code, options = {}) {
       : { history: [], source: null };
   }
 
+  // 2026-11-03（F）：持仓拉取不再静默吞错——失败 / 空返回 / 库内缓存严格区分，
+  // 源状态随 data.source.holdings 上抛（db-cache / fund-archives / empty-upstream / fetch-failed），
+  // refresh=1 响应带 holdings_source、前端持仓 Tab 显示来源，杜绝「点了更新没报错但仍是旧数据」的误导。
   let holdings = [];
+  let holdingsSource = 'db-cache';
   if (useStoredHoldings) {
     holdings = await getFundHoldings(fundCode);
   } else {
     try {
       holdings = await fetchHoldings(fundCode);
+      holdingsSource = holdings.length ? 'fund-archives' : 'empty-upstream';
     } catch (e) {
       holdings = [];
+      holdingsSource = 'fetch-failed';
+      console.warn(`[collectFund] ${fundCode} 持仓拉取失败（保留库内数据，本次不写库）:`, e && e.message);
     }
   }
 
@@ -336,7 +343,7 @@ async function collectFund(code, options = {}) {
     source: {
       detail: parsed ? 'pingzhongdata' : (useStoredHistory ? 'cache' : 'fund-page'),
       history: apiHistory.length ? (historyFetch.source || 'eastmoney-lsjz') : (useStoredHistory ? 'db-cache' : 'pingzhongdata'),
-      holdings: useStoredHoldings ? 'db-cache' : (holdings.length ? 'fund-archives' : null)
+      holdings: holdingsSource
     }
   };
   await writeDailyCache(fundCode, data);
@@ -424,7 +431,9 @@ async function importFund(code, options = {}) {
     inserted: safeHistory.filter(item => !existingDates.has(item.date)).length,
     skipped_rows: skippedRows,
     cached: data.fromCache,
-    history_source: data.source.history
+    history_source: data.source.history,
+    holdings_source: data.source.holdings,
+    refreshed_holdings: data.refreshedHoldings
   };
 }
 
