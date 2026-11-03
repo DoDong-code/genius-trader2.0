@@ -636,6 +636,23 @@ async function listAnalysisAccounts(userId) {
   }));
 }
 
+// 并发限流 map（2026-11-03，B 方案）：保持输入顺序；任一 worker 抛错整体 reject（与串行 await 语义一致）。
+// 与 navSyncService.mapLimit 的差异：不吞错误——那边用于后台同步（错误降级为 {error}），
+// 分析构建需要错误上抛以触发软超时 / 整体失败路径。
+async function mapLimitAsync(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let next = 0;
+  async function run() {
+    while (next < items.length) {
+      const current = next++;
+      results[current] = await worker(items[current], current);
+    }
+  }
+  const n = Math.max(1, Math.min(Number(concurrency) || 1, items.length || 1));
+  await Promise.all(Array.from({ length: n }, () => run()));
+  return results;
+}
+
 /**
  * 构建统一分析组合
  *
@@ -683,10 +700,17 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
   const totalValue = accountFunds.reduce((s, f) => s + (Number(f.amount) || 0), 0);
   // 真实持仓重合判定（每账户一次，循环内复用；同时产出重合明细与前十大摘要）
   const { overlapMap, detailMap, topHoldingsMap } = await computeAccountOverlap(accountFunds);
-  const holdings = [];
-
-  for (const fund of accountFunds) {
-    if (!fund || !fund.code) continue;
+  // 2026-11-03（B 方案）：逐基金循环由纯串行改为分批并发——
+  // 每只基金需 3~4 次 Neon 远程往返 + 估值链，串行累加导致重账户 analysis-export 90s 级
+  // （见 server/api/fund.js 90s 护栏注释同根因）。仅改执行顺序，不改输出契约：
+  //   - 结果按 accountFunds 原顺序返回（mapLimitAsync 按下标回填）；
+  //   - requestMemo（AsyncLocalStorage 请求级去重）在并发下同键共享同一 Promise，行为不变；
+  //   - 错误语义不变：任一基金未捕获异常（如 getFund 抛错）仍整体 reject；
+  //   - 估值链 provider 调用另有全局并发闸（concurrencyLimit.js），此处不会绕过。
+  // 并发数可用 FUND_ANALYSIS_CONCURRENCY 调整（默认 6，与外部估值并发闸一致）。
+  const FUND_ANALYSIS_CONCURRENCY = Math.max(1, Number(process.env.FUND_ANALYSIS_CONCURRENCY) || 6);
+  const fundsToProcess = accountFunds.filter(fund => fund && fund.code);
+  const holdings = await mapLimitAsync(fundsToProcess, FUND_ANALYSIS_CONCURRENCY, async (fund) => {
     const base = enrichFund(fund, accountFunds, strategy, userId);
     // P0-2：同一次分析内，同一基金只解析一次「今日估值 / history / metadata」。
     const code = String(fund.code);
@@ -746,8 +770,8 @@ async function _buildAnalysisPortfolio(userId, options = {}) {
     const fundMeta = await requestMemo(`fund:${code}`, () => getFund(code)) || {};
     if (!base.name || base.name === String(fund.code)) base.name = fundMeta.fund_name || base.name;
     if (!base.type || base.type === '基金') base.type = fundMeta.fund_type || base.type;
-    holdings.push(base);
-  }
+    return base;
+  });
 
   return {
     account: {
