@@ -640,6 +640,24 @@
     renderRecord(recordButtons.find(button => button.dataset.record === 'nav') || recordButtons[0]);
   }
 
+  // 与服务端 navSyncService.expectedReportDate 同口径：最近一个「已过 22 天披露窗口」的季末。
+  // 用于判断持仓报告期是否为最新——客户端本地计算，缓存/新鲜两条路径都可用。
+  function expectedHoldingsReportDate(now) {
+    const shifted = new Date(now.getTime() - 22 * 86400000);
+    const pad = n => String(n).padStart(2, '0');
+    const qEndIso = (y, q) => `${y}-${pad(q * 3)}-${pad(new Date(y, q * 3, 0).getDate())}`;
+    const shiftedIso = `${shifted.getFullYear()}-${pad(shifted.getMonth() + 1)}-${pad(shifted.getDate())}`;
+    let y = shifted.getFullYear();
+    let q = Math.floor(shifted.getMonth() / 3) + 1; // 1-based 季度
+    let iso = qEndIso(y, q);
+    if (shiftedIso < iso) {
+      q -= 1;
+      if (q === 0) { q = 4; y -= 1; }
+      iso = qEndIso(y, q);
+    }
+    return iso;
+  }
+
   function holdingsMarkup(fund) {
     const holdings = Array.isArray(fund.holdings) ? fund.holdings : [];
     if (!holdings.length) return '<div class="detail-empty">暂无公开持仓数据</div>';
@@ -653,7 +671,16 @@
     const srcBadge = fund._holdingsSource && SRC_LABELS[fund._holdingsSource]
       ? `<div style="font-size:10px;color:#86868b;margin:0 0 6px 2px;">${SRC_LABELS[fund._holdingsSource]}</div>`
       : '';
-    return `<div class="holding-list">${srcBadge}${holdings.map(item => `
+    // 2026-11-03：持仓报告期标注——达到最新披露期显示日期（最新），过期按数据日期标注（非最新）
+    const dataDate = String((holdings[0] || {}).report_date || '');
+    let dateBadge = '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataDate)) {
+      const expected = expectedHoldingsReportDate(new Date());
+      dateBadge = dataDate >= expected
+        ? `<div style="font-size:11px;color:#34c759;margin:0 0 6px 2px;">持仓报告期：${escapeHtml(dataDate)}（最新）</div>`
+        : `<div style="font-size:11px;color:#b58105;margin:0 0 6px 2px;">持仓报告期：${escapeHtml(dataDate)}（非最新，数据源尚未披露更新报告期）</div>`;
+    }
+    return `<div class="holding-list">${dateBadge}${srcBadge}${holdings.map(item => `
       <div>
         <span>${escapeHtml(item.stock_name ?? item[0])}</span>
         <b>${escapeHtml(
@@ -1508,11 +1535,26 @@
           const payload = await fetchFundPayload(fund.code, true);
           if (ctl.stopped || !backdrop.isConnected) return;
           detailApiFundCache[String(fund.code)] = Date.now();
-          
+
           if (window.mergeFundData) {
             window.mergeFundData(fund.code, payload);
           }
-          
+
+          // mergeFundData 只认 snapshot.holdings（persistence.js:321），抽屉 payload 的顶层
+          // holdings 会被静默丢弃——导致服务端已入库的新报告期（如 Q3）在缓存路径永不显示。
+          // 这里直接合并进 fund 与 fundStore，报告期变化时重渲染当前 Tab。
+          if (Array.isArray(payload.holdings) && payload.holdings.length > 0) {
+            const prev = Array.isArray(fund.holdings) ? fund.holdings : [];
+            const changed = payload.holdings.length !== prev.length
+              || String((payload.holdings[0] || {}).report_date) !== String((prev[0] || {}).report_date);
+            fund.holdings = payload.holdings;
+            if (payload.holdings_source) fund._holdingsSource = payload.holdings_source;
+            if (window.fundStore && typeof window.fundStore.update === 'function') {
+              window.fundStore.update(fund.code, { holdings: payload.holdings });
+            }
+            if (changed && typeof backdrop._renderActiveRecord === 'function') backdrop._renderActiveRecord();
+          }
+
           if (state) state.textContent = dataSourceStatusText(fund, payload);
           applyMetaSideEffects(fund, backdrop, payload);
           setupHistoryExplorer(backdrop, payload.history || [], fund);
