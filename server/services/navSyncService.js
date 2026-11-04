@@ -205,7 +205,16 @@ async function syncQuarterlyHoldings(options = {}) {
     );
     const latestReport = latest && latest.max_report;
     if (expected && latestReport && String(latestReport).localeCompare(expected) >= 0) {
-      return { fund_code: code, skipped: true, report_date: latestReport };
+      // 2026-11-04 错标污染检测：parseHoldings 旧 bug 曾把多季度行盖同一个日期，
+      // 特征 = 最新报告期行数 > 10（正常季报 top10 每期恰好 10 行）。命中则强制重拉
+      // 自愈（配合 collectFund 的按期清理），否则满足「已最新」条件会被永远跳过。
+      const countRow = await dbAsync.get(
+        'SELECT COUNT(*) AS n FROM fund_holdings WHERE fund_code = ? AND report_date = ?',
+        [code, latestReport]
+      );
+      if (Number(countRow && countRow.n) <= 10) {
+        return { fund_code: code, skipped: true, report_date: latestReport };
+      }
     }
     const result = await importFund(code, { forceHoldings: true });
     return { fund_code: code, refreshed: true };

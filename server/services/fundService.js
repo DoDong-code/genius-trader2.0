@@ -399,6 +399,24 @@ async function importFund(code, options = {}) {
     }
 
     if (safeHoldings.length) {
+      // 2026-11-04 污染清理：parseHoldings 旧 bug 曾把 Q2/Q1 行错标成最新报告期入库。
+      // 新鲜拉取成功时，按「报告期 + 股票代码」删除该期中不在本次结果里的旧行——
+      // 错标行（股票不在真实该期名单中）被清除，真实行由下方 upsert 覆盖修正。
+      // 库内缓存路径（db-cache）不进入此分支，不会误删。
+      if (data.source && data.source.holdings === 'fund-archives') {
+        const byDate = new Map();
+        safeHoldings.forEach(item => {
+          if (!item.report_date) return;
+          if (!byDate.has(item.report_date)) byDate.set(item.report_date, new Set());
+          byDate.get(item.report_date).add(String(item.stock_code).trim().toUpperCase());
+        });
+        for (const [reportDate, codes] of byDate) {
+          await database.run(
+            `DELETE FROM fund_holdings WHERE fund_code = ? AND report_date = ? AND UPPER(TRIM(stock_code)) NOT IN (${[...codes].map(() => '?').join(',')})`,
+            [data.fundCode, reportDate, ...codes]
+          );
+        }
+      }
       const upsertHoldingSql = `
         INSERT INTO fund_holdings (fund_code, stock_code, stock_name, weight, report_date)
         VALUES (?, ?, ?, ?, ?)

@@ -352,24 +352,41 @@ function parseHoldings(source) {
   const contentMatch = String(source || '').match(/content\s*:\s*"([\s\S]*?)"\s*,\s*arryear/);
   if (!contentMatch || !contentMatch[1]) return [];
   const html = decodeJavaScriptString(contentMatch[1]);
-  const reportDate = html.match(/截止至：[\s\S]*?(\d{4}-\d{2}-\d{2})/)?.[1]
-    || html.match(/(\d{4})年(\d)季度/)?.slice(1).join('-Q')
-    || null;
-  const rows = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)];
-  return rows.map(match => {
-    const cells = [...match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)]
-      .map(cell => decodeHtml(cell[1]));
-    if (cells.length < 7 || !/^\d+$/.test(cells[0])) return null;
-    const percentageCells = cells.slice(3)
-      .filter(cell => /^[-+]?\d+(?:\.\d+)?%$/.test(String(cell).trim()));
-    const weight = Number(String(percentageCells.at(-1) || '').replace('%', ''));
-    return {
-      stock_code: cells[1],
-      stock_name: cells[2],
-      weight: Number.isFinite(weight) ? weight / 100 : null,
-      report_date: reportDate
-    };
-  }).filter(item => item?.stock_code && item.stock_name && Number.isFinite(item.weight));
+  // 2026-11-04 修复：F10 jjcc 返回多个季度表（各自带「截止至：<日期>」）。旧逻辑只取
+  // 第一个日期盖到全部行，导致 Q2/Q1 行被错标成最新报告期入库（前十大混入旧季度持仓、
+  // 估值权重也被污染）。现按「截止至：」分段，每段用自己段的日期；无该标记时回退旧行为。
+  const sections = html.split(/截止至：/);
+  const rows = [];
+  const collectRows = (segment, reportDate) => {
+    for (const match of segment.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+      const cells = [...match[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)]
+        .map(cell => decodeHtml(cell[1]));
+      if (cells.length < 7 || !/^\d+$/.test(cells[0])) continue;
+      const percentageCells = cells.slice(3)
+        .filter(cell => /^[-+]?\d+(?:\.\d+)?%$/.test(String(cell).trim()));
+      const weight = Number(String(percentageCells.at(-1) || '').replace('%', ''));
+      rows.push({
+        stock_code: cells[1],
+        stock_name: cells[2],
+        weight: Number.isFinite(weight) ? weight / 100 : null,
+        report_date: reportDate
+      });
+    }
+  };
+  if (sections.length > 1) {
+    for (let s = 1; s < sections.length; s++) {
+      const segment = sections[s];
+      const reportDate = (segment.match(/^\s*(\d{4}-\d{2}-\d{2})/) || segment.match(/(\d{4}-\d{2}-\d{2})/) || [])[1] || null;
+      collectRows(segment, reportDate);
+    }
+  } else {
+    // 回退：响应无「截止至：」标记（罕见），保持旧的整页单日期解析
+    const reportDate = html.match(/截止至[\s\S]*?(\d{4}-\d{2}-\d{2})/)?.[1]
+      || html.match(/(\d{4})年(\d)季度/)?.slice(1).join('-Q')
+      || null;
+    collectRows(html, reportDate);
+  }
+  return rows.filter(item => item?.stock_code && item.stock_name && Number.isFinite(item.weight));
 }
 
 async function fetchHoldings(code) {

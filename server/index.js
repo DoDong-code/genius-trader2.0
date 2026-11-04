@@ -400,10 +400,24 @@ function startMemoryDiagnostics() {
   const initialMaintenance = setTimeout(() => { tick().catch(e => console.error('[NAV-SYNC] initialMaintenance 失败（已隔离）:', e && e.message)); }, 60 * 1000);
   if (initialMaintenance.unref) initialMaintenance.unref();
 
+  // 2026-11-04：启动即跑一次持仓检查（绕过 24h 间隔标记）——持仓错标修复/新季度披露需要
+  // 立即生效，不等下一个调度窗口。skip 口径本身廉价（已到位基金仅 1-2 条 DB 查询、零上游），
+  // 只有污染（最新期行数>10）/未披露的基金才强拉上游（并发 2）；与周期 tick 共用
+  // quarterlyRef + 同一把建议锁，互斥不重复。
+  const initialHoldings = setTimeout(() => {
+    runGuarded(
+      'quarterly-holdings-boot', 'nav-sync:quarterly', quarterlyRef,
+      null,
+      () => syncQuarterlyHoldings({ concurrency: 2 }),
+      null
+    ).catch(e => console.error('[NAV-SYNC] initialHoldings 失败（已隔离）:', e && e.message));
+  }, 90 * 1000);
+  if (initialHoldings.unref) initialHoldings.unref();
+
   const tickTimer = setInterval(() => { tick().catch(e => console.error('[NAV-SYNC] tickTimer 失败（已隔离）:', e && e.message)); }, 30 * 60 * 1000);
   if (tickTimer.unref) tickTimer.unref();
 
-  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, holdings check 24h disclosure-calendar; boot catch-up at ~60s)');
+  console.log('[NAV-SYNC] scheduler started (daily 18:30-23:59 every 30m, weekly history, holdings check 24h + unconditional at boot ~90s)');
 }
 
 async function startServer(port = 3000, host = '0.0.0.0') {
