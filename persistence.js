@@ -320,9 +320,11 @@
       
       if (Array.isArray(snap.holdings) && snap.holdings.length > 0) {
         fund.holdings = snap.holdings;
+        anyMerged = true;
       }
       if (snap.calibration) {
         fund.calibration = snap.calibration;
+        anyMerged = true;
       }
     }
     
@@ -419,11 +421,15 @@
     // Propagate changes to accounts
     window.fundStore.propagate(code);
     
-    if (typeof window.savePortfolioState === 'function') {
+    // 2026-11-17：无实际合并（纯 PRESERVE/状态复位）时跳过保存与事件广播，
+    // 消除无效响应触发的整包落盘与下游 DOM 重算（点持仓卡顿放大因素）。
+    if (anyMerged && typeof window.savePortfolioState === 'function') {
       window.savePortfolioState({ system: true });
     }
-    
-    window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
+
+    if (anyMerged) {
+      window.dispatchEvent(new CustomEvent('fund-store-updated', { detail: { code: code } }));
+    }
     return fund;
   }
   window.mergeFundData = mergeFundData;
@@ -953,30 +959,59 @@
     }catch(e){/* best-effort */}
   }
   if(typeof document!=='undefined'){
-    document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden')flushCloudSaveNow(); });
+    document.addEventListener('visibilitychange',function(){ if(document.visibilityState==='hidden'){ flushLocalSaveNow(); flushCloudSaveNow(); } });
   }
   if(typeof window!=='undefined'){
-    window.addEventListener('pagehide',flushCloudSaveUnload);
-    window.addEventListener('beforeunload',flushCloudSaveUnload);
+    window.addEventListener('pagehide',function(){ flushLocalSaveNow(); flushCloudSaveUnload(); });
+    window.addEventListener('beforeunload',function(){ flushLocalSaveNow(); flushCloudSaveUnload(); });
   }
 
+  // 2026-11-17：本地落盘防抖（仅 system 级保存）。
+  // 一次进入持仓页/页面加载会触发几十次 mergeFundData / fundStore.update，各自 save() 时
+  // 都同步 JSON.stringify 整个 payload（fundStore + accounts 均含 history/holdings，MB 级）
+  // 并 localStorage.setItem —— 主线程被连续长任务阻塞，表现为「点持仓卡一下」。
+  // 防抖合并为尾随 600ms 一次写入；页面隐藏/关闭时强制 flush，不丢数据。
+  // 用户编辑类保存（非 system）仍立即落盘，语义不变。
+  let localSaveTimer = null;
+  let localSavePending = false;
+  function writeLocalStorageNow(){
+    const payload=buildPersisted();
+    // 2026-11-17：localStorage 也必须存合并后的 syncMeta（syncMetaStore 兜底）。
+    // 此前云端 PUT（buildCloudState）有兜底而本地落盘没有 —— 退出登录后（内存
+    // syncMetaStore 不随刷新存活）刷新页面，syncMetaStore 从 localStorage 重 hydrated
+    // 为 built 空 meta，投资策略在本地也丢失。
+    const mergedSyncMeta=mergeSyncMeta(payload.syncMeta);
+    payload.syncMeta=mergedSyncMeta;
+    localStorage.setItem(storageKey,JSON.stringify(payload));
+    // 同步账户元数据合并：走 mergeSyncMeta 唯一出口（与云端 PUT buildCloudState 同一语义）
+    syncMetaStore=mergedSyncMeta;
+  }
+  function flushLocalSaveNow(){
+    if(!localSavePending)return;
+    localSavePending=false;
+    if(localSaveTimer!==null){clearTimeout(localSaveTimer);localSaveTimer=null;}
+    try{ writeLocalStorageNow(); }catch(error){ console.warn('Portfolio data could not be saved.',error); }
+  }
   function save(opts){
     try{
-      const payload=buildPersisted();
-      // 2026-11-17：localStorage 也必须存合并后的 syncMeta（syncMetaStore 兜底）。
-      // 此前云端 PUT（buildCloudState）有兜底而本地落盘没有 —— 退出登录后（内存
-      // syncMetaStore 不随刷新存活）刷新页面，syncMetaStore 从 localStorage 重 hydrated
-      // 为 built 空 meta，投资策略在本地也丢失。
-      const mergedSyncMeta=mergeSyncMeta(payload.syncMeta);
-      payload.syncMeta=mergedSyncMeta;
-      localStorage.setItem(storageKey,JSON.stringify(payload));
-      // 同步账户元数据合并：走 mergeSyncMeta 唯一出口（与云端 PUT buildCloudState 同一语义）
-      syncMetaStore=mergedSyncMeta;
+      if (opts && opts.system) {
+        // 系统/行情刷新/水合更新：防抖合并落本地，且不触发云端 PUT（防被当成用户修改）
+        localSavePending=true;
+        if(localSaveTimer!==null)clearTimeout(localSaveTimer);
+        localSaveTimer=setTimeout(function(){
+          localSaveTimer=null;
+          if(!localSavePending)return;
+          localSavePending=false;
+          try{ writeLocalStorageNow(); }catch(error){ console.warn('Portfolio data could not be saved.',error); }
+        },600);
+        return;
+      }
+      // 用户编辑：取消挂起的 system 写入，立即合并落盘（最新状态一次写全）
+      localSavePending=false;
+      if(localSaveTimer!==null){clearTimeout(localSaveTimer);localSaveTimer=null;}
+      writeLocalStorageNow();
       if (window.auth && window.auth.state && window.auth.state.token) {
-        if (opts && opts.system) {
-          // 系统/行情刷新/水合更新：只落本地，不触发云端 PUT（防被当成用户修改）
-          console.log('[SYNC] SAVE_LOCAL_ONLY reason=system-update (no cloud PUT)');
-        } else if (window.cloudSyncReady === true) {
+        if (window.cloudSyncReady === true) {
           console.log('[SYNC] SAVE_ALLOWED');
           scheduleCloudSave();
         } else if (window.accountRestoreStatus === 'blocked') {
