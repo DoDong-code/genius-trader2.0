@@ -963,9 +963,15 @@
   function save(opts){
     try{
       const payload=buildPersisted();
+      // 2026-11-17：localStorage 也必须存合并后的 syncMeta（syncMetaStore 兜底）。
+      // 此前云端 PUT（buildCloudState）有兜底而本地落盘没有 —— 退出登录后（内存
+      // syncMetaStore 不随刷新存活）刷新页面，syncMetaStore 从 localStorage 重 hydrated
+      // 为 built 空 meta，投资策略在本地也丢失。
+      const mergedSyncMeta=mergeSyncMeta(payload.syncMeta);
+      payload.syncMeta=mergedSyncMeta;
       localStorage.setItem(storageKey,JSON.stringify(payload));
       // 同步账户元数据合并：走 mergeSyncMeta 唯一出口（与云端 PUT buildCloudState 同一语义）
-      syncMetaStore=mergeSyncMeta(payload.syncMeta);
+      syncMetaStore=mergedSyncMeta;
       if (window.auth && window.auth.state && window.auth.state.token) {
         if (opts && opts.system) {
           // 系统/行情刷新/水合更新：只落本地，不触发云端 PUT（防被当成用户修改）
@@ -1183,6 +1189,13 @@
     return changed;
   }
 
+  // 2026-11-17：已登录但本地无有效账户（localStorage 缺失/损坏/退出后清空）时，
+  // app.js 的演示「主账户」会残留在内存并被下方 correction/migration 的 save() 固化进
+  // localStorage，用户刷新后「多出一个主账户」。在 correction 之前按指纹清除。
+  if (window.auth && window.auth.state && window.auth.state.token) {
+    stripStarterDemoAccounts();
+  }
+
   var corrected=typeof window.applyAccount2PortfolioCorrection==='function'&&window.applyAccount2PortfolioCorrection(state.accounts);
   var migrated=migrateTransactions(state.accounts);
   if(corrected||migrated){
@@ -1291,16 +1304,15 @@
           window.cloudSyncReady = true;
           console.log('[SYNC] SYNC_READY');
           save(); // 此刻才允许写（SAVE_ALLOWED）
-          if (typeof window.refreshSyncedAccounts === 'function') {
-            window.refreshSyncedAccounts().then(rerender).catch(rerender);
-          } else {
-            rerender();
-          }
+          // 同步账户重建纳入 restorePromise：waitForAccountRestore 等「完整恢复」而非只等主 state
+          const rebuildP = (typeof window.refreshSyncedAccounts === 'function')
+            ? window.refreshSyncedAccounts().then(rerender).catch(rerender)
+            : Promise.resolve(rerender());
           // P3.19：登录恢复后立即强制刷新持仓估值，消除原本需等待约 1 分钟的扫描延迟
           if (typeof window.refreshFundEstimates === 'function') {
             try { window.refreshFundEstimates(); } catch (e) {}
           }
-          return;
+          return rebuildP;
         }
         if (rawAccounts && Array.isArray(rawAccounts)) {
           // 非法格式（数组等）：不能识别为有效账户，禁止上传
@@ -1315,12 +1327,29 @@
         window.accountRestoreStatus = 'ready';
         window.cloudSyncReady = true;
         console.log('[SYNC] SYNC_READY');
+        // 2026-11-17：user_data.accounts 为空 ≠ 用户没数据 —— 同步账户（持仓服务端权威，
+        // buildPersisted 不入 user_data）必须在此重建，否则登录后持仓 0、策略无处挂靠、
+        // 估值不刷新（旧代码只在此分支跳过一切刷新，网页为主用户登录必空）。
+        stripStarterDemoAccounts();
         if (Object.keys(state.accounts).length > 0) {
-          save(); // 首次迁移：仅当本地确有账户才上传
+          save(); // 恢复完成即落盘/上传（本地已有账户：本地账户或此前会话状态）
         } else {
           console.log('[SYNC] SAVE_SKIPPED local-empty cloud-empty');
         }
+        if (typeof window.refreshSyncedAccounts === 'function') {
+          return window.refreshSyncedAccounts()
+            .then(() => {
+              if (Object.keys(state.accounts).length > 0) save(); // 同步账户重建后（active 等就位）再落盘
+              console.log('[SYNC] cloud-empty synced-accounts rebuilt count=' + Object.keys(state.accounts).length);
+              return Object.keys(state.accounts).length > 0 && typeof window.refreshFundEstimates === 'function'
+                ? Promise.resolve(window.refreshFundEstimates())
+                : null;
+            })
+            .catch(() => {})
+            .finally(rerender);
+        }
         rerender();
+        return;
       })
       .catch(err => {
         // 拉取云端失败：绝不当作「云端为空」上传本地，禁止云端写入
@@ -1330,6 +1359,24 @@
         rerender();
       });
   }
+
+  // 2026-11-17：清除 app.js 注入的演示「主账户」（国泰半导体 019633 + 华夏黄金 008702 指纹）。
+  // 已登录用户空状态下演示账户会残留在内存/账户列表（刷新后「多出一个主账户」），
+  // 仅按指纹精确清除，绝不误删用户自己创建的同名主账户。
+  function stripStarterDemoAccounts(){
+    const acc=state.accounts['主账户'];
+    if(!acc||!Array.isArray(acc.funds))return;
+    const codes=acc.funds.map(f=>String(f&&f.code)||'').sort();
+    if(codes.join(',')==='008702,019633'){
+      delete state.accounts['主账户'];
+      if(state.getActive()==='主账户'){
+        const first=Object.keys(state.accounts)[0];
+        if(typeof state.setActive==='function')state.setActive(first||'');
+      }
+      console.log('[SYNC] starter demo account stripped');
+    }
+  }
+  window.stripStarterDemoAccounts=stripStarterDemoAccounts;
 
   // 退出登录：清空本地账户数据（云端数据已备份，登录后再恢复）。
   // 清空期间禁止云端 PUT（cloudSyncReady=false），防止空 state 写回云端。
@@ -1361,6 +1408,20 @@
 
   // 捕获恢复 Promise，供手动「立即同步」等待恢复完成，消除刷新瞬间 restoring 窗口竞态
   let restorePromise = Promise.resolve();
+  // 2026-11-17 二轮审查（项1）：统一恢复等待出口。
+  // auth.js 登录成功后必须 await 此函数再进入正常页面；恢复期间用户的编辑会被
+  // applyAccounts 用云端数据覆盖（先建账户 → 恢复覆盖 → 「多出主账户/持仓为空」竞态根因）。
+  // 返回终态：'ready' / 'blocked' / 'timeout'（超时兜底，不阻塞登录 UX）。
+  function waitForAccountRestore(timeoutMs){
+    const timeout=Number(timeoutMs)>0?Number(timeoutMs):10000;
+    if(window.accountRestoreStatus!=='restoring')return Promise.resolve(window.accountRestoreStatus||'ready');
+    return new Promise(resolve=>{
+      const timer=setTimeout(function(){resolve('timeout');},timeout);
+      const settle=function(){clearTimeout(timer);resolve(window.accountRestoreStatus||'ready');};
+      Promise.resolve(restorePromise).then(settle,settle);
+    });
+  }
+  window.waitForAccountRestore=waitForAccountRestore;
   window.addEventListener('auth-changed',()=>{
     if(window.auth&&window.auth.state&&window.auth.state.token){
       restorePromise = restoreCloud();
@@ -1383,6 +1444,58 @@
   // 供 app-refactor 在刷新同步账户时合并其本地策略元数据
   window.getSyncAccountMeta=function(name){return syncMetaStore[name]||null;};
   // 手动操作：备份云端 / 恢复本地
+  // 2026-11-17 二轮审查（项2）：备份快照此前只有 buildCloudState（本地账户 + syncMeta 策略），
+  // 同步账户持仓不入快照 —— 「恢复备份」实为「历史策略 + 当前 portfolio 持仓重建」。
+  // captureSyncAccounts 把同步账户的用户持仓事实（金额/交易/策略/已平仓等）随快照备份；
+  // 行情缓存类字段（history/estimate/latest_nav/holdings 等）可重新拉取，剔除以控制体积。
+  const FUND_TRANSIENT_FIELDS=['history','_history','detail','_detail','holdings','calibration',
+    'latest_nav','estimate','navUpdatedAt','today','todayEstimate','todayProfitPercent',
+    'todayProfitValue','estimateConfidence','estimateSource'];
+  function captureSyncAccounts(){
+    const out={};
+    Object.keys(state.accounts).forEach(name=>{
+      const acc=state.accounts[name];
+      if(!acc||!(acc.accountType==='sync'||(!acc.accountType&&acc.__source)))return;
+      const funds=(Array.isArray(acc.funds)?acc.funds:[]).map(f=>{
+        if(!f||typeof f!=='object')return f;
+        const copy=Object.assign({},f);
+        FUND_TRANSIENT_FIELDS.forEach(k=>{delete copy[k];});
+        return copy;
+      });
+      out[name]={
+        name:acc.name,
+        funds:funds,
+        strategy:Array.isArray(acc.strategy)?acc.strategy.slice():[],
+        closedPositions:acc.closedPositions!==undefined?acc.closedPositions:[],
+        targetRecovery:acc.targetRecovery!==undefined?acc.targetRecovery:null,
+        maxFunds:acc.maxFunds!==undefined?acc.maxFunds:null,
+        parent:acc.parent||null,
+        children:Array.isArray(acc.children)?acc.children.slice():[]
+      };
+    });
+    return out;
+  }
+  // 回填历史快照中的同步账户持仓。只作用于「服务端仍存在的同步账户」
+  // （refreshSyncedAccounts 已按服务端权威重建/删除账户壳），
+  // 服务端已删除的同步账户不复活 —— 服务端权威边界不破坏。
+  function applySyncAccountsSnapshot(snapSync){
+    if(!snapSync||typeof snapSync!=='object')return 0;
+    let applied=0;
+    Object.keys(snapSync).forEach(name=>{
+      const snapAcc=snapSync[name];
+      const acc=state.accounts[name];
+      if(!acc||!snapAcc||typeof snapAcc!=='object')return;
+      if(!(acc.accountType==='sync'||(!acc.accountType&&acc.__source)))return;
+      if(Array.isArray(snapAcc.funds))acc.funds=snapAcc.funds.map(f=>Object.assign({},f));
+      if(Array.isArray(snapAcc.strategy)&&snapAcc.strategy.length)acc.strategy=snapAcc.strategy.slice();
+      if(snapAcc.closedPositions!==undefined)acc.closedPositions=snapAcc.closedPositions;
+      if(snapAcc.targetRecovery!==undefined)acc.targetRecovery=snapAcc.targetRecovery;
+      if(snapAcc.maxFunds!==undefined)acc.maxFunds=snapAcc.maxFunds;
+      applied++;
+    });
+    return applied;
+  }
+
   async function backupToCloud(){
     if(cloudSaveInFlight)return false; // 已有在途保存，避免叠加大 JSON
     if(!window.auth||!window.auth.state||!window.auth.state.token)return false;
@@ -1395,6 +1508,8 @@
     const controller=(typeof AbortController==='function')?new AbortController():null;
     const timer=controller?setTimeout(function(){controller.abort();},20000):null;
     try{
+      // user_data PUT 保持原形态（不夹带 syncAccounts —— 双端兼容边界不动，
+      // 完整历史快照只在 createCloudBackup 的 account_backups 里）。
       const body=JSON.stringify({state:buildCloudState()});
       logPersistSize('backupToCloud',body.length);
       const response=await fetch('/api/account/state',{
@@ -1423,6 +1538,11 @@
     if(applied){
       window.accountRestoreStatus='ready';
       window.cloudSyncReady=true;
+      // 2026-11-17：备份快照不含同步账户持仓（服务端权威），恢复后必须重建，
+      // 否则「恢复本地」后持仓/策略依旧为空（快照里只有 syncMeta 策略）。
+      if (typeof window.refreshSyncedAccounts === 'function') {
+        try { await window.refreshSyncedAccounts(); } catch (e) { /* 重建失败不阻塞恢复 */ }
+      }
       save();
       rerender();
       if (typeof window.refreshFundEstimates === 'function') { try { window.refreshFundEstimates(); } catch (e) {} }
@@ -1447,7 +1567,9 @@
     const response=await fetch('/api/account/backups',{
       method:'POST',
       headers:Object.assign({'Content-Type':'application/json'},window.auth.authHeaders()),
-      body:JSON.stringify({state:buildCloudState(),reason:reason||'manual'})
+      // backupVersion=2：快照带 syncAccounts（同步账户持仓事实），支持真正的历史恢复；
+      // 旧快照（无 syncAccounts）恢复时自动回退「历史策略 + 当前持仓重建」，完全兼容。
+      body:JSON.stringify({state:(function(){const s=buildCloudState();s.syncAccounts=captureSyncAccounts();s.backupVersion=2;return s;})(),reason:reason||'manual'})
     });
     if(!response.ok)throw new Error('HTTP '+response.status);
     return true;
@@ -1463,6 +1585,15 @@
     const data=await response.json();
     const applied=applyAccounts(data&&data.state);
     if(applied){
+      // 2026-11-17：备份快照（buildPersisted 形态）不含同步账户持仓，恢复后重建，
+      // 并把 syncMeta 策略挂到重建出的同步账户上（否则恢复 16:31:09 备份后持仓/策略仍为空）。
+      if (typeof window.refreshSyncedAccounts === 'function') {
+        try { await window.refreshSyncedAccounts(); } catch (e) { /* 重建失败不阻塞恢复 */ }
+      }
+      // 2026-11-17 二轮审查（项2）：backupVersion=2 快照带 syncAccounts 历史持仓事实 ——
+      // 在服务端权威重建之后回填，实现「真正的历史恢复」；旧快照无该字段 → 保持原语义
+      // （历史策略 + 当前持仓重建）。服务端已删除的同步账户不复活。
+      applySyncAccountsSnapshot(data && data.state && data.state.syncAccounts);
       save();
       rerender();
       if (typeof window.refreshFundEstimates === 'function') { try { window.refreshFundEstimates(); } catch (e) {} }

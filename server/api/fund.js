@@ -193,7 +193,7 @@ async function handleFundApi(request, response, url) {
 
   if (url.pathname === '/api/account/state' && request.method === 'PUT') {
     const { userFromRequest } = require('../services/authService');
-    const { getUserState, saveUserState, isEmptyStateOverwrite } = require('../services/accountStateService');
+    const { getUserState, saveUserState, isEmptyStateOverwrite, mergeSlimState } = require('../services/accountStateService');
     const user = await userFromRequest(request);
     const userId = user ? Number(user.id) : 0; // 匿名小程序用户用 userId=0
     let body;
@@ -206,6 +206,18 @@ async function handleFundApi(request, response, url) {
     // 防误覆盖保护（2026-08-26）：云端已有账户数据时，拒绝空 state 覆盖。
     const existing = await getUserState(userId);
     if (isEmptyStateOverwrite(existing, body.state)) {
+      // 二轮审查（项5）：Web 精简形态（accounts 空 + syncMeta 非空）→ 字段增量合并，
+      // 保留云端 accounts（mp1 整包形态），只合并策略/活跃账户等字段，不再 409。
+      const merged = mergeSlimState(existing, body.state);
+      if (merged) {
+        try {
+          await saveUserState(userId, merged);
+          sendJson(response, 200, { success: true, merged: true });
+        } catch (e) {
+          sendJson(response, e.statusCode || 500, { success: false, error: e.message, code: e.code });
+        }
+        return true;
+      }
       sendJson(response, 409, {
         success: false,
         error: '拒绝覆盖：云端已有账户数据，拒绝写入空/缺失账户状态',

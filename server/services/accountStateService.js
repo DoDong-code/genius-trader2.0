@@ -134,10 +134,42 @@ function isEmptyStateOverwrite(existing, incoming) {
   return false;
 }
 
+/**
+ * Web 精简形态字段增量合并（2026-11-17 二轮审查，项5）：
+ * Web buildCloudState 不含同步账户（持仓服务端权威），同步账户-only 用户的 PUT
+ * accounts 恒为 {}；云端 user_data 若含 mp1 整包写入的 accounts（带持仓），该 PUT
+ * 被 isEmptyStateOverwrite 判 409 —— Web 的 syncMeta（投资策略）永远写不上去，
+ * 且 Web 端策略修改全部静默丢失（cloudDirty=false 停止重试）。
+ * 合并规则（按字段增量，不做账户级覆盖）：
+ *   仅当「云端 accounts 非空 + incoming accounts 为空/缺失 + incoming.syncMeta 非空」
+ *   → 保留云端 accounts，用 incoming 的 syncMeta / providerStatus 覆盖对应字段，
+ *     active 仅在云端账户中存在时采纳。返回 null 表示不满足条件（调用方维持 409）。
+ * 已知边界：账户删除在此路径下本就被 409 拦截，合并语义不改变删除行为。
+ */
+function mergeSlimState(existing, incoming) {
+  const existingAccounts = accountShape(existing && existing.accounts);
+  if (!existingAccounts || Object.keys(existingAccounts).length === 0) return null;
+  // accounts 字段存在但非法形状（数组等）→ 不合并，维持 409 防误覆盖
+  const incomingRaw = incoming && incoming.accounts;
+  if (incomingRaw !== undefined && incomingRaw !== null && !accountShape(incomingRaw)) return null;
+  const incomingAccounts = accountShape(incomingRaw);
+  if (incomingAccounts && Object.keys(incomingAccounts).length > 0) return null;
+  const incomingSyncMeta = incoming && incoming.syncMeta;
+  if (!incomingSyncMeta || typeof incomingSyncMeta !== 'object' ||
+      Array.isArray(incomingSyncMeta) || Object.keys(incomingSyncMeta).length === 0) return null;
+  const merged = Object.assign({}, existing, incoming);
+  merged.accounts = existingAccounts;
+  const incomingActive = incoming && typeof incoming.active === 'string' ? incoming.active : '';
+  merged.active = (incomingActive && existingAccounts[incomingActive]) ? incomingActive : (existing.active || '');
+  merged.updatedAt = Date.now();
+  return merged;
+}
+
 module.exports = {
   getUserState,
   saveUserState,
   getRevision,
   isEmptyStateOverwrite,
+  mergeSlimState,
   MAX_BODY_BYTES
 };

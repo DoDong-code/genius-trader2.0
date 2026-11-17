@@ -185,6 +185,14 @@
         if (mode === 'login') await login(email, password);
         else await register(email, password);
         console.log('[AUTH] login success user=' + (state.user ? state.user.email : 'unknown'));
+        // 2026-11-17 二轮审查（项1）：等待云端账户恢复（restoreCloud + 同步账户重建）完成后再进入页面。
+        // 此前登录成功立即 activeTab.click()，用户在恢复窗口内的操作（建账户/编辑）会被
+        // applyAccounts 用云端数据覆盖（「多出主账户/持仓为空」竞态根因之一）。
+        // 8s 上限兜底：恢复失败/超时不阻塞登录 UX（恢复闸门本身仍保证期间不写云端）。
+        if (typeof window.waitForAccountRestore === 'function') {
+          const restoreOutcome = await window.waitForAccountRestore(8000);
+          console.log('[AUTH] account restore settled: ' + restoreOutcome);
+        }
         close();
         const activeTab = document.querySelector('.nav-tab.active');
         if (activeTab) activeTab.click();
