@@ -1236,12 +1236,13 @@
   }
   window.ensureParentChildHierarchy = ensureParentChildHierarchy;
 
-  function applyAccounts(saved){
-    if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
-    // 2026-11-17：云端 syncMeta 权威，但缺条目/空策略时用本地 syncMetaStore 兜底合并
-    // （对齐 mp1 loadStateFromCloud 本地兜底语义）。此前整体替换 —— 云端 syncMeta 一旦被
-    // 历史空写抹掉，登录恢复即把本地策略也清掉，且随后的 PUT 继续把空值写回云端形成循环。
-    if(saved.syncMeta&&typeof saved.syncMeta==='object'){
+  // 云端 syncMeta 合并（策略权威判定唯一出口）：云端非空条目权威，
+  // 缺失/空策略条目用本地 syncMetaStore 兜底（对齐 mp1 loadStateFromCloud 本地兜底语义）。
+  // 2026-11-17 追修：restoreCloud 的 cloud-empty 分支（user_data.accounts 为空，Web 主用户
+  // 常态）此前从不走 applyAccounts —— 云端 syncMeta 在登录时被整段跳过，登录后同步账户
+  // 策略恒为空（「投资策略方针没有随登录同步」根因）。
+  function mergeCloudSyncMeta(saved){
+    if(saved&&saved.syncMeta&&typeof saved.syncMeta==='object'){
       const fallback=Object.assign({},syncMetaStore);
       Object.keys(saved.syncMeta).forEach(name=>{
         const meta=saved.syncMeta[name];
@@ -1249,6 +1250,24 @@
       });
       syncMetaStore=fallback;
     }
+    // 云端权威同步进内存同步账户：登录恢复语义 = 云端为准。若不同步，紧随其后的
+    // save() 会用陈旧的内存策略经 mergeSyncMeta(builtMeta) 反向覆盖刚合并的云端策略
+    // （Object.assign 后写胜出）—— 「云端策略更新后 Web 重新登录仍显示旧策略」根因。
+    Object.keys(syncMetaStore).forEach(name=>{
+      const account=state.accounts[name];
+      const meta=syncMetaStore[name];
+      if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))&&meta&&Array.isArray(meta.strategy)&&meta.strategy.length){
+        account.strategy=meta.strategy.slice();
+      }
+    });
+  }
+
+  function applyAccounts(saved){
+    if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
+    // 2026-11-17：云端 syncMeta 权威，但缺条目/空策略时用本地 syncMetaStore 兜底合并
+    // （对齐 mp1 loadStateFromCloud 本地兜底语义）。此前整体替换 —— 云端 syncMeta 一旦被
+    // 历史空写抹掉，登录恢复即把本地策略也清掉，且随后的 PUT 继续把空值写回云端形成循环。
+    mergeCloudSyncMeta(saved);
     // 保留当前同步账户（服务端权威），仅用云端数据覆盖本地账户
     const syncAccounts=Object.entries(state.accounts).filter(([,a])=>a&&(a.accountType==='sync'||(!a.accountType&&a.__source)));
     const valid=Object.entries(saved.accounts).filter(([,account])=>
@@ -1324,6 +1343,9 @@
         // 云端确实为空（GET 成功且无有效账户对象）：以云端为准保持现状。
         // 不自动创建「空主账户」，更不创建后再覆盖云端。
         console.log('[SYNC] RESTORE_SUCCESS cloud-empty local=' + Object.keys(state.accounts).length);
+        // 2026-11-17 追修：accounts 为空 ≠ 无策略 —— 云端 syncMeta（同步账户投资策略）
+        // 必须在此合并，否则登录后 refreshSyncedAccounts 重建的同步账户策略恒为空。
+        mergeCloudSyncMeta(data && data.state);
         window.accountRestoreStatus = 'ready';
         window.cloudSyncReady = true;
         console.log('[SYNC] SYNC_READY');
