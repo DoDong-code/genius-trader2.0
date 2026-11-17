@@ -817,11 +817,28 @@
     });
     return { accounts:persisted, active:state.getActive(), syncMeta, fundStore: window.fundStore };
   }
+  // syncMeta 合并（策略仓库唯一出口）：内存同步账户策略优先覆盖，
+  // syncMetaStore 兜底补缺（登录恢复过程中内存同步账户尚未重建时，避免空 syncMeta 上云抹掉云端策略）；
+  // 仅当内存中该同步账户存在但没有策略时才删除条目（用户真的清空了策略）。
+  function mergeSyncMeta(builtMeta){
+    const merged=Object.assign({},syncMetaStore,builtMeta||{});
+    Object.keys(merged).forEach(name=>{
+      const account=state.accounts[name];
+      if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))&&!(name in (builtMeta||{}))){
+        delete merged[name];
+      }
+    });
+    return merged;
+  }
   // 云端快照/PUT 用精简 state：剔除 fundStore 行情缓存（本地可重新拉取），
   // 避免 3MB 级 payload 拖垮上传（删除账户后无法及时 PUT → 刷新复现）。
+  // syncMeta 必须经 mergeSyncMeta 合入 syncMetaStore 兜底（2026-11-17 修复：
+  // 此前云端 PUT 只带内存同步账户的 syncMeta，登录恢复的 400ms 窗口内内存还是空的，
+  // 会把云端 syncMeta 抹成 {} —— 策略登录即丢、换设备必丢，而手动恢复备份正常）。
   function buildCloudState(){
     const p=buildPersisted();
     delete p.fundStore;
+    p.syncMeta=mergeSyncMeta(p.syncMeta);
     return p;
   }
 
@@ -947,17 +964,8 @@
     try{
       const payload=buildPersisted();
       localStorage.setItem(storageKey,JSON.stringify(payload));
-      // 同步账户元数据合并：仅当该同步账户当前存在且策略为空时才清除，
-      // 避免云端恢复/重新加载同步账户过程中被空元数据误清
-      const newMeta=payload.syncMeta||{};
-      const merged=Object.assign({},syncMetaStore,newMeta);
-      Object.keys(merged).forEach(name=>{
-        const account=state.accounts[name];
-        if(account&&(account.accountType==='sync'||(!account.accountType&&account.__source))&&!(name in newMeta)){
-          delete merged[name];
-        }
-      });
-      syncMetaStore=merged;
+      // 同步账户元数据合并：走 mergeSyncMeta 唯一出口（与云端 PUT buildCloudState 同一语义）
+      syncMetaStore=mergeSyncMeta(payload.syncMeta);
       if (window.auth && window.auth.state && window.auth.state.token) {
         if (opts && opts.system) {
           // 系统/行情刷新/水合更新：只落本地，不触发云端 PUT（防被当成用户修改）
@@ -1217,7 +1225,17 @@
 
   function applyAccounts(saved){
     if(!saved||!saved.accounts||typeof saved.accounts!=='object')return false;
-    if(saved.syncMeta&&typeof saved.syncMeta==='object')syncMetaStore=saved.syncMeta;
+    // 2026-11-17：云端 syncMeta 权威，但缺条目/空策略时用本地 syncMetaStore 兜底合并
+    // （对齐 mp1 loadStateFromCloud 本地兜底语义）。此前整体替换 —— 云端 syncMeta 一旦被
+    // 历史空写抹掉，登录恢复即把本地策略也清掉，且随后的 PUT 继续把空值写回云端形成循环。
+    if(saved.syncMeta&&typeof saved.syncMeta==='object'){
+      const fallback=Object.assign({},syncMetaStore);
+      Object.keys(saved.syncMeta).forEach(name=>{
+        const meta=saved.syncMeta[name];
+        if(meta&&Array.isArray(meta.strategy)&&meta.strategy.length)fallback[name]=meta;
+      });
+      syncMetaStore=fallback;
+    }
     // 保留当前同步账户（服务端权威），仅用云端数据覆盖本地账户
     const syncAccounts=Object.entries(state.accounts).filter(([,a])=>a&&(a.accountType==='sync'||(!a.accountType&&a.__source)));
     const valid=Object.entries(saved.accounts).filter(([,account])=>

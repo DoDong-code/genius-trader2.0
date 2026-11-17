@@ -38,16 +38,21 @@ async function loadUserAccounts(userId) {
   const synced = await listSyncedAccounts(userId);
   const savedAccounts = (state && state.accounts) || {};
   synced.forEach(acc => {
-    // 策略/目标类配置以 user_data（前端保存）为准：sync 账户的 portfolio 表不存策略
-    // （portfolioService 硬编码 strategy: []），此前导致 AI 与导出 JSON 的 strategies
-    // 恒为空数组。仅合并策略类字段，不合并 funds（服务端权威）；
-    // user_data 无该账户时保持 []（如实缺失，不伪造策略）。
     const saved = savedAccounts[acc.name] || null;
+    // 2026-11-17：策略三级兜底 —— user_data.accounts[该账户].strategy（mp1 写入形态，同步账户连
+    // 持仓一起入 accounts）→ user_data.syncMeta[该账户].strategy（网页端 buildPersisted 形态：
+    // 同步账户不入 accounts，策略只存 syncMeta）→ 服务端 acc.strategy（恒 []，如实缺失不伪造）。
+    // 此前只读 accounts 形态，网页为主用户的 AI 分析 / 导出 JSON 策略恒为空数组。
+    const metaStrategy = (state && state.syncMeta && state.syncMeta[acc.name]
+      && Array.isArray(state.syncMeta[acc.name].strategy) && state.syncMeta[acc.name].strategy.length)
+      ? state.syncMeta[acc.name].strategy
+      : null;
     const merged = {
       ...acc,
       strategy: Array.isArray(saved && saved.strategy)
         ? saved.strategy.slice()
-        : (Array.isArray(acc.strategy) ? acc.strategy : []),
+        : (metaStrategy ? metaStrategy.slice()
+          : (Array.isArray(acc.strategy) ? acc.strategy : [])),
       closedPositions: Array.isArray(saved && saved.closedPositions)
         ? saved.closedPositions.slice()
         : (Array.isArray(acc.closedPositions) ? acc.closedPositions : [])

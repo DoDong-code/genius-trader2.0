@@ -978,3 +978,30 @@ button::after {
 .negative {
   color: var(--brand-green) !important;
 }
+
+/* 2026-11-05（与 Web detail-api 同步）：持仓报告期标注 + 来源徽标 */
+.holdings-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  padding: 8rpx 4rpx 12rpx;
+}
+
+.holdings-date {
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.holdings-date.latest {
+  color: #34c759;
+}
+
+.holdings-date.stale {
+  color: #b58105;
+}
+
+.holdings-source {
+  font-size: 20rpx;
+  line-height: 1.4;
+  color: #86868b;
+}

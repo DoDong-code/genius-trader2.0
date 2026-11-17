@@ -180,6 +180,10 @@
   <!-- Tab Content: 前十大持仓 -->
   <view class="ledger-content" wx:if="{{activeTab === 'holdings'}}">
     <view class="holdings-list-view" wx:if="{{holdingsStatus === 'success'}}">
+      <view class="holdings-meta" wx:if="{{holdingsDateText || holdingsSourceText}}">
+        <text class="holdings-date {{holdingsDateLatest ? 'latest' : 'stale'}}" wx:if="{{holdingsDateText}}">{{holdingsDateText}}</text>
+        <text class="holdings-source" wx:if="{{holdingsSourceText}}">{{holdingsSourceText}}</text>
+      </view>
       <view class="list-item-header">
         <text>主要成份(股/债/黄金)</text>
         <text class="center">权重</text>

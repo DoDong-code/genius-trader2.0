@@ -279,11 +279,32 @@ Component({
       if (majorHoldings.length > 0) holdingsStatus = 'success';
       else if (terminal) holdingsStatus = 'none';
       else holdingsStatus = 'syncing';
+      // 2026-11-05（与 Web detail-api 同步）：持仓报告期标注 + 来源徽标——
+      // 数据是哪个日期的就显示哪个日期，最新披露期标绿，过期按数据日期标琥珀，杜绝胡编乱造。
+      const firstRow = majorHoldings[0] || {};
+      const dataDate = String(firstRow.report_date || '');
+      let holdingsDateText = '';
+      let holdingsDateLatest = false;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(dataDate)) {
+        const expected = this._expectedHoldingsReportDate(new Date());
+        holdingsDateLatest = dataDate >= expected;
+        holdingsDateText = `持仓报告期：${dataDate}${holdingsDateLatest ? '（最新）' : '（非最新，数据源尚未披露更新报告期）'}`;
+      }
+      const HOLDINGS_SRC_LABELS = {
+        'fund-archives': '来源：数据源最新档案',
+        'db-cache': '来源：库内缓存（点「更新持仓」强制拉取上游）',
+        'empty-upstream': '来源：数据源未返回（可能未披露新报告期）',
+        'fetch-failed': '⚠ 上次拉取失败，以下为库内数据'
+      };
+      const holdingsSourceText = payload.holdings_source ? (HOLDINGS_SRC_LABELS[payload.holdings_source] || '') : '';
       this.setData({
         serverHistory: history,
         majorHoldings,
         dataStatusLabel,
-        holdingsStatus
+        holdingsStatus,
+        holdingsDateText,
+        holdingsDateLatest,
+        holdingsSourceText
       }, () => {
         this.calculatePerformanceMetrics(history);
         this.computeNavRows(history);
@@ -306,6 +327,24 @@ Component({
         changePctStr: '--',
         changeDate: ''
       }));
+    },
+
+    // 与服务端 navSyncService.expectedReportDate / Web detail-api 同口径：
+    // 最近一个「已过 22 天披露窗口」的季末（宁晚勿早）。
+    _expectedHoldingsReportDate(now) {
+      const shifted = new Date(now.getTime() - 22 * 86400000);
+      const pad = n => String(n).padStart(2, '0');
+      const qEndIso = (y, q) => `${y}-${pad(q * 3)}-${pad(new Date(y, q * 3, 0).getDate())}`;
+      const shiftedIso = `${shifted.getFullYear()}-${pad(shifted.getMonth() + 1)}-${pad(shifted.getDate())}`;
+      let y = shifted.getFullYear();
+      let q = Math.floor(shifted.getMonth() / 3) + 1; // 1-based 季度
+      let iso = qEndIso(y, q);
+      if (shiftedIso < iso) {
+        q -= 1;
+        if (q === 0) { q = 4; y -= 1; }
+        iso = qEndIso(y, q);
+      }
+      return iso;
     },
 
     _enterSyncing(code, payload) {
@@ -606,7 +645,21 @@ Component({
             // 手动刷新后 5 分钟内不再重复触发后台 fast 同步
             fundRefreshCache[code] = Date.now();
           }
-          wx.showToast({ title: tab === 'nav' ? '历史净值已更新' : '持仓已更新', icon: 'success' });
+          // 2026-11-05（与 Web 同步）：按拉取来源区分提示——失败/未披露不再伪装成功
+          if (tab === 'holdings') {
+            const src = payload.holdings_source;
+            if (src === 'fetch-failed') {
+              wx.showToast({ title: '持仓拉取失败，仍显示库内数据', icon: 'none' });
+            } else if (src === 'empty-upstream') {
+              wx.showToast({ title: '数据源未返回持仓（可能尚未披露新报告期）', icon: 'none' });
+            } else if (src === 'fund-archives') {
+              wx.showToast({ title: '持仓已更新（数据源最新档案）', icon: 'success' });
+            } else {
+              wx.showToast({ title: '持仓已更新', icon: 'success' });
+            }
+          } else {
+            wx.showToast({ title: '历史净值已更新', icon: 'success' });
+          }
         })
         .catch(err => {
           wx.showToast({ title: (err && err.message) || '更新失败', icon: 'none' });

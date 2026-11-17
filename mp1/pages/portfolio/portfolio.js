@@ -187,6 +187,10 @@ Page({
     if (this.clockInterval) {
       clearInterval(this.clockInterval);
     }
+    if (this._navIdleTimer) {
+      clearTimeout(this._navIdleTimer);
+      this._navIdleTimer = null;
+    }
   },
 
   onShow() {
@@ -219,6 +223,9 @@ Page({
         .catch(() => { /* 网络异常/超时：不标记成功，下次 onShow 重试 */ })
         .finally(() => { this._nonTradingNavSyncing = false; });
     }
+    // 交易日盘中净值补检（2026-11-05，与 Web 2026-10-30 修复同步）：
+    // 昨晚服务端漏跑每日净值同步时，盘中打开小程序也能补齐漏掉的最近披露日净值
+    this._maybeTradingNavCheck();
     this.updateClock();
   },
 
@@ -341,7 +348,8 @@ Page({
   },
 
   // P3.18-NET：批量同步当天净值（后端 today-nav 幂等：命中 fund_nav 缓存直接返回，不重复请求 provider）。
-  // 只在显式刷新（下拉刷新/刷新按钮）调用；切 Tab/切数据源/onShow 不调用（读本地缓存，不发起净值请求）。
+  // 调用入口：显式刷新（下拉刷新/刷新按钮）+ 交易日盘中补检 _maybeTradingNavCheck（2026-11-05，
+  // 20 分钟节流 + 估值优先等待）；切 Tab/切数据源不调用（读本地缓存，不发起净值请求）。
   // 返回 Promise：供下拉刷新/手动刷新串行等待净值同步完成后再刷估值（不改变原有幂等语义）
   // 返回 Promise<{total, updated}>：updated = 真正取到今日官方净值的基金数。
   // 供刷新按钮按真实结果提示（单只失败被静默 catch，旧代码因此永远弹「净值已更新」）。
@@ -381,6 +389,38 @@ Page({
         return { total: codes.length, updated: arr.reduce((sum, n) => sum + (n || 0), 0) + fixed };
       })
     );
+  },
+
+  // 交易日盘中净值补检（2026-11-05，与 Web checkTodayNavOnce 去盘中闸门修复同步）：
+  // 场景 = 昨晚服务端每日净值同步漏跑（Render 休眠），当天盘中打开小程序永远显示旧净值。
+  // 成本可控：today-nav 幂等且服务端缓存优先（已确认基金零第三方请求）；deep 兜底每会话
+  // 每基金仅一次（_navDeepDone）；同账户 20 分钟节流、切账户立即放行（与 Web 同口径）。
+  // 估值优先：先等当前估值刷新结束再发起（轮询 _estimatesRefreshing，120s 超时兜底放行，
+  // 对齐 Web waitForEstimatesIdle）——净值补全排在估值之后，绝不抢首屏估值带宽。
+  _maybeTradingNavCheck() {
+    if (!isTradingDay(new Date())) return; // 非交易日由既有守卫（shouldStartNonTradingSync）负责
+    const accountName = app.globalData.activeAccountName || '';
+    const now = Date.now();
+    const accountChanged = this._tradingNavCheckAccount !== accountName;
+    if (!accountChanged && now - (this._tradingNavCheckAt || 0) < 20 * 60 * 1000) return;
+    if (this._tradingNavSyncing) return;
+    // 先记账占住节流槽：等待期间 onShow 重入不会重复排队
+    this._tradingNavCheckAt = now;
+    this._tradingNavCheckAccount = accountName;
+    const startedAt = now;
+    const waitIdle = () => {
+      if (this._tradingNavSyncing) return;
+      if (!this._estimatesRefreshing || Date.now() - startedAt > 120 * 1000) {
+        this._tradingNavSyncing = true;
+        Promise.resolve(this.syncTodayNav())
+          .then(() => this.refreshData())
+          .catch(() => { /* 静默：失败不标记，下次 onShow 重试 */ })
+          .then(() => { this._tradingNavSyncing = false; });
+        return;
+      }
+      this._navIdleTimer = setTimeout(waitIdle, 500);
+    };
+    waitIdle();
   },
 
   // 写入单只基金的净值日期徽章（navDateMap），并同步回账户基金对象，供 refreshData 预填充

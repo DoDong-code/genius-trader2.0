@@ -333,6 +333,12 @@ App({
       if (saved && saved.accounts && typeof saved.accounts === 'object') {
         this.globalData.accounts = saved.accounts;
         this.globalData.activeAccountName = saved.active || Object.keys(saved.accounts)[0] || '主账户';
+        // P3.19-STRATEGY（2026-11-17）：冷启动水合本地 syncMeta —— 此前只在云端加载成功时赋值，
+        // 一旦冷启动被时间戳保护跳过云端，globalData.syncMeta 恒为 {}，refreshSyncedAccounts
+        // 回填策略失去权威来源，且随后的整体覆盖写会把云端 syncMeta 抹空。
+        if (saved.syncMeta && typeof saved.syncMeta === 'object') {
+          this.globalData.syncMeta = saved.syncMeta;
+        }
         // 基金实体一致性校验（仅上报，不删除用户数据）
         let localOrphans = 0;
         Object.values(this.globalData.accounts).forEach(acc => { localOrphans += this.normalizeAccountFunds(acc); });
@@ -554,10 +560,12 @@ App({
           this.globalData.providerStatus = { ...this.globalData.providerStatus, ...doc.providerStatus };
         }
         // Mirror cloud -> local so offline still works（updatedAt 使用云端值）
+        // 2026-11-17：本地镜像补带 syncMeta —— 否则下次冷启动的本地兜底（策略找回）读不到策略仓库
         try {
           wx.setStorageSync(STORAGE_KEY, {
             accounts: this.globalData.accounts,
             active: this.globalData.activeAccountName,
+            syncMeta: this.globalData.syncMeta || {},
             updatedAt: Number(doc.updatedAt) || Date.now()
           });
         } catch (e) { /* ignore */ }
@@ -635,11 +643,14 @@ App({
       });
       
       // Mirror cloud -> local so offline still works
+      // 2026-11-17：原写 'genius_portfolio_state' 是孤儿键（读取方 STORAGE_KEY='genius-trader-portfolio-v2'
+      // 永远读不到），策略兜底链因此断一环；改写 STORAGE_KEY 并带上 syncMeta（对齐网页 buildPersisted 语义）
       try {
-        const saved = wx.getStorageSync('genius_portfolio_state') || {};
-        wx.setStorageSync('genius_portfolio_state', {
+        const saved = wx.getStorageSync(STORAGE_KEY) || {};
+        wx.setStorageSync(STORAGE_KEY, {
           accounts: this.globalData.accounts,
           active: this.globalData.activeAccountName || saved.active || '主账户',
+          syncMeta: this.globalData.syncMeta || {},
           updatedAt: Date.now()
         });
       } catch (e) { /* ignore */ }
