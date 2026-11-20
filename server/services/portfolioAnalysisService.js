@@ -39,19 +39,22 @@ async function loadUserAccounts(userId) {
   const savedAccounts = (state && state.accounts) || {};
   synced.forEach(acc => {
     const saved = savedAccounts[acc.name] || null;
-    // 2026-11-17：策略三级兜底 —— user_data.accounts[该账户].strategy（mp1 写入形态，同步账户连
-    // 持仓一起入 accounts）→ user_data.syncMeta[该账户].strategy（网页端 buildPersisted 形态：
-    // 同步账户不入 accounts，策略只存 syncMeta）→ 服务端 acc.strategy（恒 []，如实缺失不伪造）。
-    // 此前只读 accounts 形态，网页为主用户的 AI 分析 / 导出 JSON 策略恒为空数组。
+    // 2026-11-20：策略优先级对调（B 场景根因修复）—— syncMeta（Web 与 mp1 双端约定的
+    // 「策略仓库唯一出口」）优先于 user_data.accounts[该账户].strategy（legacy mp1 整包形态）。
+    // 此前 accounts.strategy 优先：mp1 整包 PUT 留在云端 accounts 里的旧策略会永久压制
+    // Web 修改后写入 syncMeta 的新策略（mergeSlimState 按设计保留云端 accounts 只更新
+    // syncMeta）→ AI 分析 / 导出 JSON / 复制 JSON 恒为旧策略，点「生成」也无效。
+    // 两端写入形态一致性：mp1 写 accounts.strategy 与 syncMeta.strategy 同源同值，
+    // mp1 侧语义不受影响；legacy 数据（syncMeta 无条目）仍回退 accounts.strategy 兜底。
     const metaStrategy = (state && state.syncMeta && state.syncMeta[acc.name]
       && Array.isArray(state.syncMeta[acc.name].strategy) && state.syncMeta[acc.name].strategy.length)
       ? state.syncMeta[acc.name].strategy
       : null;
     const merged = {
       ...acc,
-      strategy: Array.isArray(saved && saved.strategy)
-        ? saved.strategy.slice()
-        : (metaStrategy ? metaStrategy.slice()
+      strategy: metaStrategy
+        ? metaStrategy.slice()
+        : (Array.isArray(saved && saved.strategy) ? saved.strategy.slice()
           : (Array.isArray(acc.strategy) ? acc.strategy : [])),
       closedPositions: Array.isArray(saved && saved.closedPositions)
         ? saved.closedPositions.slice()

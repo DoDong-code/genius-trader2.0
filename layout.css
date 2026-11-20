@@ -2168,3 +2168,78 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   color: #1d1d1f;
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
 }
+
+/* ───────────── 盈亏分析抽屉（2026-11-20 新增，参考养基宝） ───────────── */
+.portfolio-summary-today{cursor:pointer}
+.pnl-drawer-backdrop .detail-drawer{width:min(520px,100%)}
+.pnl-head-row{display:flex;align-items:center;justify-content:space-between;margin:6px 0 14px}
+.pnl-title{font-size:24px;letter-spacing:-.04em;margin:0}
+.pnl-refresh{border:0;background:#f0f0f2;color:#0071e3;border-radius:999px;padding:6px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.pnl-period-tabs{display:flex;gap:4px;background:#f0f0f2;border-radius:11px;padding:4px;margin:12px 0 14px}
+.pnl-period-tab{flex:1;border:0;background:transparent;color:#6e6e73;font:inherit;font-size:13px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer}
+.pnl-period-tab.active{background:#fff;color:#1d1d1f;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.pnl-summary{display:flex;align-items:center;justify-content:space-between;background:linear-gradient(135deg,#4f7df9,#6a5cf0);border-radius:18px;padding:20px 22px;color:#fff;margin-bottom:6px}
+.pnl-summary-label{display:block;font-size:12px;opacity:.85;margin-bottom:8px}
+.pnl-summary-value{font-size:32px;font-weight:650;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.pnl-summary-value.positive{color:#ffd7d3!important}
+.pnl-summary-value.negative{color:#c9f7dd!important}
+.pnl-summary-rate{display:block;font-size:13px;opacity:.9;margin-top:6px;font-variant-numeric:tabular-nums}
+.pnl-summary-asof{display:block;font-size:11px;opacity:.75;margin-top:8px}
+.pnl-mode-toggle{border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.14);color:#fff;border-radius:999px;padding:7px 13px;font:inherit;font-size:12px;cursor:pointer}
+.pnl-mode-toggle:hover{background:rgba(255,255,255,.24)}
+.pnl-divider{height:1px;background:rgba(0,0,0,.08);margin:26px 0}
+.pnl-section-head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px}
+.pnl-section-title{font-size:16px;font-weight:650;color:#1d1d1f;border-left:4px solid #4f7df9;padding-left:9px}
+.pnl-section-sub{font-size:11px;color:#86868b}
+.pnl-trend-chart svg{width:100%;height:190px;display:block}
+.pnl-trend-labels{display:flex;justify-content:space-between;color:#86868b;font-size:11px;margin-top:6px}
+.pnl-trend-empty{background:#f5f5f7;border-radius:12px;padding:22px 14px;color:#86868b;font-size:12px;text-align:center;line-height:1.6}
+.pnl-cal-toolbar{display:flex;align-items:center;gap:8px;margin-bottom:12px}
+.pnl-cal-views{display:flex;background:#f0f0f2;border-radius:999px;padding:3px;margin-right:auto}
+.pnl-cal-view{border:0;background:transparent;color:#6e6e73;font:inherit;font-size:12px;font-weight:600;padding:5px 14px;border-radius:999px;cursor:pointer}
+.pnl-cal-view.active{background:#fff;color:#1d1d1f;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.pnl-cal-nav{border:0;background:#f0f0f2;color:#1d1d1f;width:28px;height:28px;border-radius:50%;font-size:16px;line-height:1;cursor:pointer}
+.pnl-cal-label{font-size:13px;font-weight:600;color:#1d1d1f;min-width:86px;text-align:center}
+.pnl-cal-label-wide{margin-left:auto}
+.pnl-cal-week{display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-bottom:4px}
+.pnl-cal-week span{text-align:center;font-size:11px;color:#86868b;padding:4px 0}
+.pnl-cal-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}
+.pnl-cal-grid-months{grid-template-columns:repeat(4,1fr)}
+.pnl-cal-cell{border-radius:10px;padding:7px 6px;min-height:52px;display:flex;flex-direction:column;gap:3px}
+.pnl-cal-cell.blank{background:transparent;min-height:52px}
+.pnl-cal-cell.gain{background:#ffdedb}
+.pnl-cal-cell.loss{background:#d9f3e5}
+.pnl-cal-cell.flat{background:#f0f0f2}
+.pnl-cal-cell.empty{background:transparent}
+.pnl-cal-cell.today{outline:2px solid #1d1d1f;outline-offset:1px}
+.pnl-cal-day{font-size:11px;color:#3a3a3c;font-weight:600}
+.pnl-cal-val{font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pnl-cal-cell.gain .pnl-cal-val{color:#c03526;font-weight:600}
+.pnl-cal-cell.loss .pnl-cal-val{color:#0e8345;font-weight:600}
+.pnl-cal-footer{margin-top:12px;font-size:13px;color:#6e6e73}
+.pnl-cal-footer b{font-variant-numeric:tabular-nums}
+.pnl-cal-footer i{font-style:normal;color:#86868b;font-size:12px}
+.pnl-top-tabs{display:flex;background:#f0f0f2;border-radius:11px;padding:4px;margin-bottom:12px}
+.pnl-top-tab{flex:1;border:0;background:transparent;color:#6e6e73;font:inherit;font-size:13px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer}
+.pnl-top-tab.active{background:#4f7df9;color:#fff;box-shadow:0 1px 4px rgba(79,125,249,.35)}
+.pnl-top-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.06)}
+.pnl-top-rank{width:24px;height:24px;border-radius:50%;background:#e5e5ea;color:#6e6e73;font-size:12px;font-weight:700;display:grid;place-items:center}
+.pnl-top-rank.r1{background:#ff9f0a;color:#fff}
+.pnl-top-rank.r2{background:#b8b8bf;color:#fff}
+.pnl-top-rank.r3{background:#e8a06b;color:#fff}
+.pnl-top-info{min-width:0}
+.pnl-top-info b{display:block;font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pnl-top-bar{height:5px;background:#ececed;border-radius:999px;margin-top:6px;overflow:hidden}
+.pnl-top-bar i{display:block;height:100%;border-radius:999px}
+.pnl-top-bar i.positive{background:#ff3b30}
+.pnl-top-bar i.negative{background:#34a853}
+.pnl-top-val{font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pnl-loading,.pnl-error{background:#f5f5f7;border-radius:12px;padding:34px 14px;color:#86868b;font-size:13px;text-align:center}
+.pnl-error{color:#c03526}
+.pnl-footnote{margin-top:22px}
+.pnl-footnote p{font-size:11px;color:#a1a1a6;line-height:1.6;margin:4px 0}
+@media(max-width:760px){
+  .pnl-drawer-backdrop .detail-drawer{width:100%}
+  .pnl-summary-value{font-size:26px}
+  .pnl-cal-cell{min-height:44px;padding:5px 4px}
+}

@@ -353,6 +353,35 @@ async function handleFundApi(request, response, url) {
   // 与 AI 分析（/api/ai/analyze）同源：buildAnalysisPortfolio 生成 performance / benchmark /
   // allocation / portfolioSummary，并保留原有导出字段（amount/cost/profit/todayChange/.../
   // navHistory/topHoldings）。navHistory 保持近 15 个交易日的精简字符串，不扩大体积。
+  // 账户级历史盈亏序列（2026-11-20 盈亏分析抽屉）：官方净值还原日收益/累计收益，
+  // 只读不写、不触外部行情；口径与近似限制见 pnlHistoryService 文件头注释。
+  if (url.pathname === '/api/portfolio/pnl-history' && request.method === 'GET') {
+    const { userFromRequest } = require('../services/authService');
+    const user = await userFromRequest(request);
+    const userId = user ? Number(user.id) : 0;
+    if (!userId) {
+      sendJson(response, 401, { success: false, error: '请先登录' });
+      return true;
+    }
+    const accountName = url.searchParams.get('account') || '';
+    if (!accountName) {
+      sendJson(response, 400, { success: false, error: '缺少 account 参数' });
+      return true;
+    }
+    try {
+      const { buildPnlHistory } = require('../services/pnlHistoryService');
+      const result = await buildPnlHistory(userId, accountName, url.searchParams.get('days'));
+      if (!result) {
+        sendJson(response, 404, { success: false, error: `未找到账户「${accountName}」` });
+        return true;
+      }
+      sendJson(response, 200, Object.assign({ success: true }, result));
+    } catch (e) {
+      sendJson(response, 500, { success: false, error: e && e.message ? e.message : '盈亏历史构建失败' });
+    }
+    return true;
+  }
+
   if (url.pathname === '/api/portfolio/analysis-export' && request.method === 'GET') {
     const { userFromRequest } = require('../services/authService');
     const user = await userFromRequest(request);

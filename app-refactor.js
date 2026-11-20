@@ -1220,6 +1220,11 @@
       console.warn('[analysis-export] 缓存写入失败（不影响本次复制）:', cacheErr && cacheErr.message);
     }
   }
+  // 2026-11-20：策略/账户配置变更即失效导出缓存。缓存键只绑定账户名（不含策略指纹），
+  // 改策略后直接点「复制JSON」会命中改策略前的旧缓存（服务端已重算，仅本地缓存过期）。
+  function clearAnalysisExportCache() {
+    try { localStorage.removeItem(ANALYSIS_EXPORT_CACHE_KEY); } catch (e) { /* 忽略 */ }
+  }
   // 预热：触发一次完整导出并写入缓存，返回 Promise<boolean>（true=缓存已就绪）。
   // 「生成」按钮会 await 它——按钮保持「生成中…」直到数据真正算好，之后 120 分钟内复制即时完成。
   // 进行中的预热 Promise 会被复制入口复用（用户在预热期间点复制不会触发双重计算）。
@@ -3077,6 +3082,7 @@
         const a = acct();
         if (!a.strategy) a.strategy = [];
         a.strategy.push(val);
+        clearAnalysisExportCache();
         window.savePortfolioState?.();
         setting();
       }
@@ -3089,6 +3095,7 @@
       const a = acct();
       if (a.strategy && a.strategy[idx] !== undefined) {
         a.strategy.splice(idx, 1);
+        clearAnalysisExportCache();
         window.savePortfolioState?.();
         setting();
       }
