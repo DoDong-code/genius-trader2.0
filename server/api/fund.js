@@ -369,7 +369,32 @@ async function handleFundApi(request, response, url) {
       return true;
     }
     try {
-      const { buildPnlHistory } = require('../services/pnlHistoryService');
+      const { buildPnlHistory, buildPnlDetail } = require('../services/pnlHistoryService');
+      // 2026-11-20 二轮：from+to → 区间盈亏明细（日历点击某日/某月/某年 → 每只基金拆分）
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+      if (from || to) {
+        if (!from || !to) {
+          sendJson(response, 400, { success: false, error: '区间明细需同时提供 from 与 to' });
+          return true;
+        }
+        let detail;
+        try {
+          detail = await buildPnlDetail(userId, accountName, from, to);
+        } catch (de) {
+          if (de && (de.code === 'BAD_DATE' || de.code === 'BAD_RANGE')) {
+            sendJson(response, 400, { success: false, error: de.message });
+            return true;
+          }
+          throw de;
+        }
+        if (!detail) {
+          sendJson(response, 404, { success: false, error: `未找到账户「${accountName}」` });
+          return true;
+        }
+        sendJson(response, 200, Object.assign({ success: true }, detail));
+        return true;
+      }
       const result = await buildPnlHistory(userId, accountName, url.searchParams.get('days'));
       if (!result) {
         sendJson(response, 404, { success: false, error: `未找到账户「${accountName}」` });

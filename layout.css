@@ -2243,3 +2243,21 @@ body.drawer-open{overflow:hidden}.drawer-backdrop{overscroll-behavior:contain}.d
   .pnl-summary-value{font-size:26px}
   .pnl-cal-cell{min-height:44px;padding:5px 4px}
 }
+
+/* ───────────── 盈亏分析抽屉 二轮增强（2026-11-20）：走势tab/Y轴/悬浮、日历点击、区间明细 ───────────── */
+.pnl-trend-tabs{display:flex;gap:4px;background:#f0f0f2;border-radius:11px;padding:4px;margin-bottom:12px}
+.pnl-trend-tab{flex:1;border:0;background:transparent;color:#6e6e73;font:inherit;font-size:13px;font-weight:600;padding:7px 0;border-radius:8px;cursor:pointer}
+.pnl-trend-tab.active{background:#fff;color:#1d1d1f;box-shadow:0 1px 4px rgba(0,0,0,.1)}
+.pnl-trend-chart{position:relative}
+.pnl-trend-plot{position:relative;height:210px}
+.pnl-trend-plot svg{width:100%;height:100%;display:block;cursor:crosshair}
+.pnl-trend-yaxis{position:absolute;inset:0;pointer-events:none}
+.pnl-trend-ylabel{position:absolute;left:0;width:54px;transform:translateY(-50%);font-size:10px;color:#86868b;text-align:right;font-variant-numeric:tabular-nums}
+.pnl-trend-tip{position:absolute;display:none;pointer-events:none;background:rgba(29,29,31,.92);color:#fff;border-radius:8px;padding:7px 10px;font-size:11px;line-height:1.7;white-space:nowrap;z-index:3;box-shadow:0 4px 14px rgba(0,0,0,.25);font-variant-numeric:tabular-nums}
+.pnl-hover-line{stroke:rgba(29,29,31,.35);stroke-width:1}
+.pnl-hover-dot{fill:#1d1d1f;stroke:#fff;stroke-width:1.5}
+.pnl-cal-cell.clickable{cursor:pointer}
+.pnl-cal-cell.clickable:hover{outline:2px solid rgba(79,125,249,.55);outline-offset:1px}
+.pnl-cal-est-tag{font-style:normal;font-size:9px;color:#86868b;border:1px solid #c7c7cc;border-radius:4px;padding:0 3px;margin-left:3px;vertical-align:1px}
+.pnl-detail-clear{border:0;background:#f0f0f2;color:#0071e3;border-radius:999px;padding:5px 12px;font:inherit;font-size:12px;font-weight:600;cursor:pointer}
+.pnl-detail-sub{font-size:11px;color:#a1a1a6;margin:-8px 0 10px}

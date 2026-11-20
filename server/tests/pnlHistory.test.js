@@ -19,7 +19,7 @@ const origGetHistory = navService.getHistory;
 navService.getHistory = (code, opts) => (getHistoryImpl ? getHistoryImpl(code, opts) : origGetHistory(code, opts));
 
 const pas = require('../services/portfolioAnalysisService');
-const { buildPnlHistory } = require('../services/pnlHistoryService');
+const { buildPnlHistory, buildPnlDetail } = require('../services/pnlHistoryService');
 
 // 份额还原基准：全部以「最新官方净值」为锚 —— 桩内每个基金的最后一行即最新净值
 const NAV_A = [['2026-01-02', 1.0], ['2026-01-05', 1.1]];                        // 最新 1.1
@@ -84,4 +84,34 @@ test('账户不存在 → null；无有效持仓 → 空 series + warnings', asy
   const r = await buildPnlHistory(9, '其它账户', 400);
   assert.ok(r && Array.isArray(r.series) && r.series.length === 0);
   assert.ok(r.warnings.length >= 1);
+});
+
+test('区间明细：逐日累加口径与序列一致 + 排序 + 参数校验', async () => {
+  stubFunds([
+    { code: '000001', name: '基金A', amount: 1100 }, // shares = 1000
+    { code: '000002', name: '基金B', amount: 2000 }  // shares = 1000
+  ]);
+  // 全区间：明细合计 == 序列累计（0 + 100 = 100）；A=+100、B=0 → B 排在 A 前（100 > 0? A=100 排第一）
+  const d = await buildPnlDetail(9, '测试账户', '2026-01-01', '2026-01-31');
+  assert.ok(d && d.items.length === 2);
+  assert.strictEqual(d.total, 100);            // 与 series 累计一致
+  assert.strictEqual(d.items[0].name, '基金A'); // A +100 排首
+  assert.strictEqual(d.items[0].profit, 100);
+  assert.strictEqual(d.items[0].rate, 0.1);    // 100 / (1000×1.0) = 0.1
+  assert.strictEqual(d.items[1].name, '基金B'); // B 区间 01-05 −100 与 01-06 +100 相抵 → 0
+  assert.strictEqual(d.items[1].profit, 0);
+  // 单日：01-05 合计 == series[0].profit == 0
+  const d5 = await buildPnlDetail(9, '测试账户', '2026-01-05', '2026-01-05');
+  assert.strictEqual(d5.total, 0);
+  // 账户不存在 → null
+  assert.strictEqual(await buildPnlDetail(9, '不存在的账户', '2026-01-01', '2026-01-31'), null);
+  // 参数校验：日期格式 / 起止颠倒 → 抛 BAD_DATE / BAD_RANGE
+  await assert.rejects(
+    () => buildPnlDetail(9, '测试账户', '2026-1-1', '2026-01-31'),
+    e => e.code === 'BAD_DATE'
+  );
+  await assert.rejects(
+    () => buildPnlDetail(9, '测试账户', '2026-01-31', '2026-01-01'),
+    e => e.code === 'BAD_RANGE'
+  );
 });
